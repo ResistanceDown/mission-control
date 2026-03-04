@@ -21,6 +21,7 @@ const DEFAULT_GATEWAY_CLIENT_ID = process.env.NEXT_PUBLIC_GATEWAY_CLIENT_ID || '
 // Heartbeat configuration
 const PING_INTERVAL_MS = 30_000
 const MAX_MISSED_PONGS = 3
+const HEARTBEAT_STALE_MS = 120_000
 
 // Gateway message types
 interface GatewayFrame {
@@ -59,6 +60,8 @@ export function useWebSocket() {
   const pingCounterRef = useRef<number>(0)
   const pingSentTimestamps = useRef<Map<string, number>>(new Map())
   const missedPongsRef = useRef<number>(0)
+  const lastFrameAtRef = useRef<number>(Date.now())
+  const gatewaySupportsPingRef = useRef<boolean>(true)
 
   const {
     connection,
@@ -116,6 +119,22 @@ export function useWebSocket() {
 
     pingIntervalRef.current = setInterval(() => {
       if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || !handshakeCompleteRef.current) return
+
+      if (!gatewaySupportsPingRef.current) return
+
+      const staleForMs = Date.now() - lastFrameAtRef.current
+      if (staleForMs >= HEARTBEAT_STALE_MS) {
+        log.warn(`No gateway frames for ${staleForMs}ms, triggering reconnect`)
+        addLog({
+          id: `heartbeat-stale-${Date.now()}`,
+          timestamp: Date.now(),
+          level: 'warn',
+          source: 'websocket',
+          message: `No gateway traffic for ${Math.round(staleForMs / 1000)}s, reconnecting...`
+        })
+        wsRef.current?.close(4000, 'Heartbeat stale')
+        return
+      }
 
       // Check missed pongs
       if (missedPongsRef.current >= MAX_MISSED_PONGS) {
@@ -358,6 +377,19 @@ export function useWebSocket() {
 
     // Handle pong responses (any response to a ping ID counts — even errors prove the connection is alive)
     if (frame.type === 'res' && frame.id?.startsWith('ping-')) {
+      const rawPingError = frame.error?.message || JSON.stringify(frame.error || '')
+      if (!frame.ok && /unknown method:\s*ping/i.test(rawPingError)) {
+        gatewaySupportsPingRef.current = false
+        missedPongsRef.current = 0
+        pingSentTimestamps.current.clear()
+        addLog({
+          id: `ping-disabled-${Date.now()}`,
+          timestamp: Date.now(),
+          level: 'info',
+          source: 'websocket',
+          message: 'Gateway does not support ping RPC; switched to passive heartbeat mode.'
+        })
+      }
       handlePong(frame.id)
       return
     }
@@ -507,6 +539,8 @@ export function useWebSocket() {
     handshakeCompleteRef.current = false
     manualDisconnectRef.current = false
     nonRetryableErrorRef.current = null
+    lastFrameAtRef.current = Date.now()
+    gatewaySupportsPingRef.current = true
 
     try {
       const ws = new WebSocket(url.split('?')[0]) // Connect without query params
@@ -525,6 +559,7 @@ export function useWebSocket() {
 
       ws.onmessage = (event) => {
         try {
+          lastFrameAtRef.current = Date.now()
           const frame = JSON.parse(event.data) as GatewayFrame
           handleGatewayFrame(frame, ws)
         } catch (error) {

@@ -18,6 +18,25 @@ interface LogEntry {
   data?: any
 }
 
+function normalizeLogLevel(level: unknown): LogEntry['level'] {
+  if (typeof level === 'number') {
+    if (level >= 50) return 'error'
+    if (level >= 40) return 'warn'
+    if (level >= 30) return 'info'
+    return 'debug'
+  }
+
+  if (typeof level === 'string') {
+    const normalized = level.trim().toLowerCase()
+    if (normalized === 'error' || normalized === 'err' || normalized === 'fatal') return 'error'
+    if (normalized === 'warn' || normalized === 'warning') return 'warn'
+    if (normalized === 'debug' || normalized === 'trace') return 'debug'
+    if (normalized === 'info' || normalized === 'notice' || normalized === 'ok' || normalized === 'monitor') return 'info'
+  }
+
+  return 'info'
+}
+
 /**
  * Parse a log line from various OpenClaw log formats:
  * - Pipe-delimited: "2026-02-09T17:00:01+01:00|MONITOR|Consistency check completed"
@@ -32,13 +51,26 @@ function parseLogLine(line: string, source: string): LogEntry | null {
     // Try JSON first
     if (line.startsWith('{')) {
       const parsed = JSON.parse(line)
+      const rawTimestamp = parsed.timestamp ?? parsed.time ?? parsed.ts ?? parsed.createdAt
+      const parsedTimestamp =
+        typeof rawTimestamp === 'string' || typeof rawTimestamp === 'number'
+          ? new Date(rawTimestamp).getTime()
+          : Number(rawTimestamp)
+      const timestamp = Number.isFinite(parsedTimestamp) ? parsedTimestamp : Date.now()
+      const message =
+        typeof parsed.message === 'string'
+          ? parsed.message
+          : typeof parsed.msg === 'string'
+            ? parsed.msg
+            : line
+
       return {
-        id: `${source}-${parsed.timestamp || Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        timestamp: parsed.timestamp || Date.now(),
-        level: parsed.level || 'info',
-        source: parsed.source || source,
+        id: `${source}-${timestamp}-${Math.random().toString(36).slice(2, 8)}`,
+        timestamp,
+        level: normalizeLogLevel(parsed.level),
+        source: parsed.source || parsed.logger || parsed.name || source,
         session: parsed.session,
-        message: parsed.message || line,
+        message,
         data: parsed.data,
       }
     }
@@ -57,7 +89,7 @@ function parseLogLine(line: string, source: string): LogEntry | null {
       return {
         id: `${source}-${ts}-${Math.random().toString(36).slice(2, 8)}`,
         timestamp: isNaN(ts) ? Date.now() : ts,
-        level,
+        level: normalizeLogLevel(level),
         source,
         message: pipeMatch[3].trim(),
       }
@@ -76,7 +108,7 @@ function parseLogLine(line: string, source: string): LogEntry | null {
       return {
         id: `${source}-${ts}-${Math.random().toString(36).slice(2, 8)}`,
         timestamp: isNaN(ts) ? Date.now() : ts,
-        level,
+        level: normalizeLogLevel(level),
         source,
         message: msg,
       }
@@ -104,7 +136,7 @@ function parseLogLine(line: string, source: string): LogEntry | null {
     return {
       id: `${source}-${timestamp}-${Math.random().toString(36).slice(2, 8)}`,
       timestamp,
-      level,
+      level: normalizeLogLevel(level),
       source,
       message: line.trim(),
     }
