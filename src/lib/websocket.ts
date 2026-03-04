@@ -382,13 +382,7 @@ export function useWebSocket() {
         gatewaySupportsPingRef.current = false
         missedPongsRef.current = 0
         pingSentTimestamps.current.clear()
-        addLog({
-          id: `ping-disabled-${Date.now()}`,
-          timestamp: Date.now(),
-          level: 'info',
-          source: 'websocket',
-          message: 'Gateway does not support ping RPC; switched to passive heartbeat mode.'
-        })
+        log.info('Gateway ping RPC unavailable; using passive heartbeat mode')
       }
       handlePong(frame.id)
       return
