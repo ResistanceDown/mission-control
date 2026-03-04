@@ -259,6 +259,13 @@ export interface ConnectionStatus {
   sseConnected?: boolean
 }
 
+interface UpdateInfo {
+  currentVersion?: string
+  latestVersion: string
+  releaseUrl?: string
+  releaseNotes?: string
+}
+
 interface MissionControlStore {
   // Dashboard Mode (local vs full gateway)
   dashboardMode: 'full' | 'local'
@@ -271,10 +278,14 @@ interface MissionControlStore {
   setSubscription: (sub: { type: string; rateLimitTier?: string } | null) => void
 
   // Update availability
-  updateAvailable: { latestVersion: string; releaseUrl: string; releaseNotes: string } | null
+  updateAvailable: UpdateInfo | null
   updateDismissedVersion: string | null
-  setUpdateAvailable: (info: { latestVersion: string; releaseUrl: string; releaseNotes: string } | null) => void
+  setUpdateAvailable: (info: UpdateInfo | null) => void
   dismissUpdate: (version: string) => void
+  openclawUpdateAvailable: UpdateInfo | null
+  openclawUpdateDismissedVersion: string | null
+  setOpenclawUpdateAvailable: (info: UpdateInfo | null) => void
+  dismissOpenclawUpdate: (version: string) => void
 
   // WebSocket & Connection
   connection: ConnectionStatus
@@ -433,6 +444,16 @@ export const useMissionControl = create<MissionControlStore>()(
     dismissUpdate: (version) => {
       try { localStorage.setItem('mc-update-dismissed-version', version) } catch {}
       set({ updateDismissedVersion: version })
+    },
+    openclawUpdateAvailable: null,
+    openclawUpdateDismissedVersion: (() => {
+      if (typeof window === 'undefined') return null
+      try { return localStorage.getItem('mc-openclaw-update-dismissed-version') } catch { return null }
+    })(),
+    setOpenclawUpdateAvailable: (info) => set({ openclawUpdateAvailable: info }),
+    dismissOpenclawUpdate: (version) => {
+      try { localStorage.setItem('mc-openclaw-update-dismissed-version', version) } catch {}
+      set({ openclawUpdateDismissedVersion: version })
     },
 
     // Connection state

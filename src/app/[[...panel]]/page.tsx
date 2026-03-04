@@ -43,7 +43,7 @@ import { useMissionControl } from '@/store'
 
 export default function Home() {
   const { connect } = useWebSocket()
-  const { activeTab, setActiveTab, setCurrentUser, setDashboardMode, setGatewayAvailable, setSubscription, setUpdateAvailable, liveFeedOpen, toggleLiveFeed } = useMissionControl()
+  const { activeTab, setActiveTab, setCurrentUser, setDashboardMode, setGatewayAvailable, setSubscription, setUpdateAvailable, setOpenclawUpdateAvailable, liveFeedOpen, toggleLiveFeed } = useMissionControl()
 
   // Sync URL → Zustand activeTab
   const pathname = usePathname()
@@ -75,6 +75,19 @@ export default function Home() {
             latestVersion: data.latestVersion,
             releaseUrl: data.releaseUrl,
             releaseNotes: data.releaseNotes,
+          })
+        }
+      })
+      .catch(() => {})
+
+    // Check for available OpenClaw core updates
+    fetch('/api/releases/openclaw-check')
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        if (data?.updateAvailable) {
+          setOpenclawUpdateAvailable({
+            currentVersion: data.currentVersion,
+            latestVersion: data.latestVersion,
           })
         }
       })
@@ -120,7 +133,7 @@ export default function Home() {
         const wsUrl = explicitWsUrl || `${gatewayProto}://${gatewayHost}:${gatewayPort}`
         connect(wsUrl, wsToken)
       })
-  }, [connect, setCurrentUser, setDashboardMode, setGatewayAvailable, setSubscription, setUpdateAvailable])
+  }, [connect, setCurrentUser, setDashboardMode, setGatewayAvailable, setSubscription, setUpdateAvailable, setOpenclawUpdateAvailable])
 
   if (!isClient) {
     return (
