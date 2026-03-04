@@ -118,7 +118,14 @@ export default function Home() {
         const gatewayProto =
           process.env.NEXT_PUBLIC_GATEWAY_PROTOCOL ||
           (window.location.protocol === 'https:' ? 'wss' : 'ws')
-        const wsUrl = explicitWsUrl || `${gatewayProto}://${gatewayHost}:${gatewayPort}`
+        const useProxyPath =
+          window.location.protocol === 'https:' ||
+          window.location.hostname.endsWith('.ts.net')
+        const proxyPath = process.env.NEXT_PUBLIC_GATEWAY_PROXY_PATH || '/gateway'
+        const wsUrl = explicitWsUrl ||
+          (useProxyPath
+            ? `${gatewayProto}://${window.location.host}${proxyPath}`
+            : `${gatewayProto}://${gatewayHost}:${gatewayPort}`)
         connect(wsUrl, wsToken)
       })
       .catch(() => {
@@ -130,7 +137,14 @@ export default function Home() {
         const gatewayProto =
           process.env.NEXT_PUBLIC_GATEWAY_PROTOCOL ||
           (window.location.protocol === 'https:' ? 'wss' : 'ws')
-        const wsUrl = explicitWsUrl || `${gatewayProto}://${gatewayHost}:${gatewayPort}`
+        const useProxyPath =
+          window.location.protocol === 'https:' ||
+          window.location.hostname.endsWith('.ts.net')
+        const proxyPath = process.env.NEXT_PUBLIC_GATEWAY_PROXY_PATH || '/gateway'
+        const wsUrl = explicitWsUrl ||
+          (useProxyPath
+            ? `${gatewayProto}://${window.location.host}${proxyPath}`
+            : `${gatewayProto}://${gatewayHost}:${gatewayPort}`)
         connect(wsUrl, wsToken)
       })
   }, [connect, setCurrentUser, setDashboardMode, setGatewayAvailable, setSubscription, setUpdateAvailable, setOpenclawUpdateAvailable])
