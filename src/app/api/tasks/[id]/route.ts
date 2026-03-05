@@ -7,6 +7,7 @@ import { logger } from '@/lib/logger';
 import { validateBody, updateTaskSchema } from '@/lib/validation';
 import { resolveMentionRecipients } from '@/lib/mentions';
 import { dispatchTaskAssignment } from '@/lib/task-assignment-dispatch';
+import { habiTaskContractErrorMessage, isHabiTask, validateHabiTaskContract } from '@/lib/habi-task-contract';
 
 function formatTicketRef(prefix?: string | null, num?: number | null): string | undefined {
   if (!prefix || typeof num !== 'number' || !Number.isFinite(num) || num <= 0) return undefined
@@ -139,6 +140,23 @@ export async function PUT(
     }
 
     const previousDescriptionMentionRecipients = resolveMentionRecipients(currentTask.description || '', db, workspaceId).recipients;
+    const effectiveAssignedTo = assigned_to !== undefined ? assigned_to : currentTask.assigned_to;
+    const effectiveMetadata = metadata !== undefined ? metadata : (currentTask as any).metadata;
+    const shouldValidateHabiContract =
+      isHabiTask({ assigned_to: effectiveAssignedTo }) &&
+      (status === 'done' || assigned_to !== undefined || metadata !== undefined);
+    if (shouldValidateHabiContract) {
+      const contract = validateHabiTaskContract({
+        assigned_to: effectiveAssignedTo,
+        metadata: effectiveMetadata as any,
+      });
+      if (!contract.ok) {
+        return NextResponse.json(
+          { error: habiTaskContractErrorMessage(contract.missing, contract.invalidGate) },
+          { status: 400 }
+        );
+      }
+    }
     
     // Build dynamic update query
     const fieldsToUpdate = [];
