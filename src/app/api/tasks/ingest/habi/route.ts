@@ -233,19 +233,22 @@ export async function POST(request: NextRequest) {
           status: targetStatus.status,
         })
         if (!dispatch.delivered) {
-          addTaskComment(
-            db,
-            workspaceId,
-            createdTask.id,
-            `Dispatch warning: assignment delivery failed (assignee=${assignee}, reason=${dispatch.reason || 'unknown'}).`
-          )
+          const reason = dispatch.reason || 'unknown'
+          if (reason === 'no_active_session' || reason === 'no_session_key') {
+            addTaskComment(
+              db,
+              workspaceId,
+              createdTask.id,
+              `Assignee ${assignee} is currently offline. Task is queued and will proceed when session is active.`
+            )
+          }
           db_helpers.logActivity(
             'task_dispatch_failed',
             'task',
             createdTask.id,
             source || actor,
             `Habi ingest dispatch failed for ${assignee}`,
-            { assignee, reason: dispatch.reason || 'unknown' },
+            { assignee, reason },
             workspaceId
           )
         }
