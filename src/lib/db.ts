@@ -19,6 +19,7 @@ let db: Database.Database | null = null;
 export function getDatabase(): Database.Database {
   if (!db) {
     ensureDirExists(dirname(DB_PATH));
+    logger.info({ dbPath: DB_PATH }, 'Mission Control database path resolved')
     db = new Database(DB_PATH);
     
     // Enable WAL mode for better concurrent access

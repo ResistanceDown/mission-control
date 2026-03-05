@@ -8,6 +8,7 @@ import { validateBody, createTaskSchema, bulkUpdateTaskStatusSchema } from '@/li
 import { resolveMentionRecipients } from '@/lib/mentions';
 import { dispatchTaskAssignment } from '@/lib/task-assignment-dispatch';
 import { habiTaskContractErrorMessage, isHabiTask, validateHabiTaskContract } from '@/lib/habi-task-contract';
+import { ensureHabiTaskSubscriptions } from '@/lib/habi-task-ops';
 
 function formatTicketRef(prefix?: string | null, num?: number | null): string | undefined {
   if (!prefix || typeof num !== 'number' || !Number.isFinite(num) || num <= 0) return undefined
@@ -297,6 +298,10 @@ export async function POST(request: NextRequest) {
           'Task created but assignment dispatch was not delivered'
         )
       }
+    }
+
+    if (isHabiTask({ assigned_to })) {
+      ensureHabiTaskSubscriptions(taskId, workspaceId, assigned_to, created_by)
     }
     
     // Fetch the created task

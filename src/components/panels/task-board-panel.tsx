@@ -780,6 +780,7 @@ function TaskDetailModal({
   const [commentError, setCommentError] = useState<string | null>(null)
   const [broadcastMessage, setBroadcastMessage] = useState('')
   const [broadcastStatus, setBroadcastStatus] = useState<string | null>(null)
+  const [pingStatus, setPingStatus] = useState<string | null>(null)
   const [reviews, setReviews] = useState<any[]>([])
   const [reviewStatus, setReviewStatus] = useState<'approved' | 'rejected'>('approved')
   const [reviewNotes, setReviewNotes] = useState('')
@@ -892,6 +893,29 @@ function TaskDetailModal({
     }
   }
 
+  const handlePingAssignee = async () => {
+    if (!task.assigned_to) return
+    try {
+      setPingStatus('Pinging assignee...')
+      const response = await fetch(`/api/tasks/${task.id}/ping-assignee`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: 'Please post your latest progress/evidence update on this task card.',
+        }),
+      })
+      const data = await response.json()
+      if (!response.ok) {
+        throw new Error(data.error || data.reason || 'Ping failed')
+      }
+      setPingStatus(`Ping delivered to ${data.assignee || task.assigned_to}`)
+      await fetchComments()
+      onUpdate()
+    } catch (error) {
+      setPingStatus(error instanceof Error ? error.message : 'Ping failed')
+    }
+  }
+
   const renderComment = (comment: Comment, depth: number = 0) => (
     <div key={comment.id} className={`border-l-2 border-border pl-3 ${depth > 0 ? 'ml-4' : ''}`}>
       <div className="flex items-center justify-between text-xs text-muted-foreground">
@@ -989,6 +1013,19 @@ function TaskDetailModal({
                     <span>Unassigned</span>
                   )}
                 </span>
+                <div className="mt-2">
+                  <button
+                    type="button"
+                    onClick={handlePingAssignee}
+                    disabled={!task.assigned_to}
+                    className="px-2 py-1 text-xs rounded border border-primary/30 text-primary hover:bg-primary/10 disabled:opacity-50 disabled:cursor-not-allowed transition-smooth"
+                  >
+                    Ping Assignee
+                  </button>
+                  {pingStatus && (
+                    <div className="text-xs text-muted-foreground mt-1">{pingStatus}</div>
+                  )}
+                </div>
               </div>
               <div>
                 <span className="text-muted-foreground">Created:</span>

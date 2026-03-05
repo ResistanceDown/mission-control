@@ -146,6 +146,29 @@ export const spawnAgentSchema = z.object({
   timeoutSeconds: z.number().min(10).max(3600).default(300),
 })
 
+export const habiTaskIngestSchema = z.object({
+  dry_run: z.boolean().default(false),
+  source: z.string().max(200).optional(),
+  items: z.array(
+    z.object({
+      lane: z.enum(['control', 'readiness', 'growth']),
+      source_report: z.string().min(1).max(2000),
+      title: z.string().min(1).max(500),
+      severity: z.enum(['P0', 'P1', 'P2', 'P3']).default('P2'),
+      objective: z.string().min(1).max(2000),
+      scope: z.string().min(1).max(4000),
+      acceptance: z.string().min(1).max(4000),
+      evidence_path: z.string().min(1).max(2000),
+      gate_required: z.enum(['G1', 'G2', 'G3', 'G4']),
+      rollback: z.string().min(1).max(4000),
+      fingerprint: z.string().max(128).optional(),
+      assignee: z.string().max(100).optional(),
+      status_hint: z.enum(['blocked', 'active', 'review_ready', 'quality_ready', 'resolved']).optional(),
+      notes: z.string().max(2000).optional(),
+    })
+  ).max(500),
+})
+
 export const createUserSchema = z.object({
   username: z.string().min(1, 'Username is required'),
   password: z.string().min(12, 'Password must be at least 12 characters'),

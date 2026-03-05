@@ -3,10 +3,10 @@ type TaskLike = {
   metadata?: string | Record<string, unknown> | null
 }
 
-const REQUIRED_FIELDS = ['objective', 'scope', 'acceptance', 'evidence_path', 'gate_required', 'rollback'] as const
-const ALLOWED_GATES = new Set(['G1', 'G2', 'G3', 'G4'])
+export const REQUIRED_HABI_TASK_FIELDS = ['objective', 'scope', 'acceptance', 'evidence_path', 'gate_required', 'rollback'] as const
+export const ALLOWED_HABI_GATES = new Set(['G1', 'G2', 'G3', 'G4'])
 
-function parseMetadata(metadata: TaskLike['metadata']): Record<string, unknown> {
+export function parseHabiTaskMetadata(metadata: TaskLike['metadata']): Record<string, unknown> {
   if (!metadata) return {}
   if (typeof metadata === 'string') {
     try {
@@ -24,16 +24,16 @@ export function isHabiTask(task: TaskLike): boolean {
 }
 
 export function validateHabiTaskContract(task: TaskLike): { ok: boolean; missing: string[]; invalidGate?: string } {
-  const metadata = parseMetadata(task.metadata)
+  const metadata = parseHabiTaskMetadata(task.metadata)
   const missing: string[] = []
-  for (const key of REQUIRED_FIELDS) {
+  for (const key of REQUIRED_HABI_TASK_FIELDS) {
     const value = metadata[key]
     if (!String(value ?? '').trim()) {
       missing.push(key)
     }
   }
   const gate = String(metadata.gate_required || '').trim()
-  const invalidGate = gate && !ALLOWED_GATES.has(gate) ? gate : undefined
+  const invalidGate = gate && !ALLOWED_HABI_GATES.has(gate) ? gate : undefined
   return {
     ok: missing.length === 0 && !invalidGate,
     missing,

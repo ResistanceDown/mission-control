@@ -13,12 +13,47 @@ interface AssignmentDispatchInput {
   status: string
 }
 
+interface TaskMessageDispatchInput {
+  workspaceId: number
+  actor: string
+  assignee: string
+  taskId: number
+  title: string
+  message: string
+}
+
 export async function dispatchTaskAssignment(input: AssignmentDispatchInput): Promise<{
   attempted: boolean
   delivered: boolean
+  sessionKey?: string
   reason?: string
 }> {
   const { workspaceId, actor, assignee, taskId, title, priority, status } = input
+  const message = [
+    'Mission Control assignment',
+    `Task: #${taskId} ${title}`,
+    `Assignee: ${assignee}`,
+    `Priority: ${priority}`,
+    `Status: ${status}`,
+    `Assigned by: ${actor}`,
+  ].join('\n')
+  return dispatchTaskMessage({
+    workspaceId,
+    actor,
+    assignee,
+    taskId,
+    title,
+    message,
+  })
+}
+
+export async function dispatchTaskMessage(input: TaskMessageDispatchInput): Promise<{
+  attempted: boolean
+  delivered: boolean
+  sessionKey?: string
+  reason?: string
+}> {
+  const { workspaceId, assignee, taskId, message } = input
   const db = getDatabase()
   const agent = db
     .prepare('SELECT id, session_key FROM agents WHERE lower(name) = lower(?) AND workspace_id = ?')
@@ -35,21 +70,12 @@ export async function dispatchTaskAssignment(input: AssignmentDispatchInput): Pr
       .run(sessionKey, now, now, agent.id, workspaceId)
   }
 
-  const message = [
-    'Mission Control assignment',
-    `Task: #${taskId} ${title}`,
-    `Assignee: ${assignee}`,
-    `Priority: ${priority}`,
-    `Status: ${status}`,
-    `Assigned by: ${actor}`,
-  ].join('\n')
-
   try {
     await runOpenClaw(
       ['gateway', 'sessions_send', '--session', sessionKey, '--message', message],
       { timeoutMs: 12000 }
     )
-    return { attempted: true, delivered: true }
+    return { attempted: true, delivered: true, sessionKey }
   } catch (err) {
     logger.warn(
       {
@@ -60,6 +86,6 @@ export async function dispatchTaskAssignment(input: AssignmentDispatchInput): Pr
       },
       'Failed to dispatch task assignment to session'
     )
-    return { attempted: true, delivered: false, reason: 'gateway_send_failed' }
+    return { attempted: true, delivered: false, sessionKey, reason: 'gateway_send_failed' }
   }
 }

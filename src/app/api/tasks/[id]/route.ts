@@ -8,6 +8,7 @@ import { validateBody, updateTaskSchema } from '@/lib/validation';
 import { resolveMentionRecipients } from '@/lib/mentions';
 import { dispatchTaskAssignment } from '@/lib/task-assignment-dispatch';
 import { habiTaskContractErrorMessage, isHabiTask, validateHabiTaskContract } from '@/lib/habi-task-contract';
+import { ensureHabiTaskSubscriptions } from '@/lib/habi-task-ops';
 
 function formatTicketRef(prefix?: string | null, num?: number | null): string | undefined {
   if (!prefix || typeof num !== 'number' || !Number.isFinite(num) || num <= 0) return undefined
@@ -308,6 +309,10 @@ export async function PUT(
           )
         }
       }
+    }
+
+    if (isHabiTask({ assigned_to: effectiveAssignedTo })) {
+      ensureHabiTaskSubscriptions(taskId, workspaceId, effectiveAssignedTo, auth.user.username)
     }
     
     if (title && title !== currentTask.title) {
