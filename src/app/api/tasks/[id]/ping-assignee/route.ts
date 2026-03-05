@@ -59,12 +59,11 @@ export async function POST(
     })
 
     if (!dispatch.delivered) {
-      const warning = [
-        'Dispatch warning: assignee ping failed.',
-        `assignee=${task.assigned_to}`,
-        `reason=${dispatch.reason || 'unknown'}`,
-        'Action: relink session key in Office/Agents and retry ping.',
-      ].join(' ')
+      const reason = dispatch.reason || 'unknown'
+      const warning =
+        reason === 'no_active_session' || reason === 'no_session_key'
+          ? `Assignee ${task.assigned_to} is currently offline; ping is queued context only. Action: relink/check session in Office/Agents and retry.`
+          : `Assignee ${task.assigned_to} could not be reached right now (reason=${reason}). Action: retry ping; if it repeats, relink/check session in Office/Agents.`
 
       const now = Math.floor(Date.now() / 1000)
       db.prepare(`
@@ -76,7 +75,7 @@ export async function POST(
         auth.user.username,
         'status_change',
         'Task dispatch failed',
-        `Task "${task.title}" ping to ${task.assigned_to} failed (${dispatch.reason || 'unknown'}).`,
+        `Task "${task.title}" ping to ${task.assigned_to} failed (${reason}).`,
         'task',
         task.id,
         workspaceId
@@ -87,11 +86,11 @@ export async function POST(
         task.id,
         auth.user.username,
         `Task assignee ping failed for ${task.assigned_to}`,
-        { assignee: task.assigned_to, reason: dispatch.reason || 'unknown' },
+        { assignee: task.assigned_to, reason },
         workspaceId
       )
       return NextResponse.json(
-        { delivered: false, warning_posted: true, reason: dispatch.reason || 'unknown' },
+        { delivered: false, warning_posted: true, reason },
         { status: 409 }
       )
     }
