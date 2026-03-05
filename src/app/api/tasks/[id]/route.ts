@@ -6,6 +6,7 @@ import { mutationLimiter } from '@/lib/rate-limit';
 import { logger } from '@/lib/logger';
 import { validateBody, updateTaskSchema } from '@/lib/validation';
 import { resolveMentionRecipients } from '@/lib/mentions';
+import { dispatchTaskAssignment } from '@/lib/task-assignment-dispatch';
 
 function formatTicketRef(prefix?: string | null, num?: number | null): string | undefined {
   if (!prefix || typeof num !== 'number' || !Number.isFinite(num) || num <= 0) return undefined
@@ -272,6 +273,22 @@ export async function PUT(
           taskId,
           workspaceId
         );
+
+        const dispatch = await dispatchTaskAssignment({
+          workspaceId,
+          actor: auth.user.username,
+          assignee: assigned_to,
+          taskId,
+          title: title || currentTask.title,
+          priority: String(priority || currentTask.priority),
+          status: String(status || currentTask.status),
+        })
+        if (!dispatch.delivered) {
+          logger.warn(
+            { taskId, assignee: assigned_to, reason: dispatch.reason || 'unknown' },
+            'Task updated but assignment dispatch was not delivered'
+          )
+        }
       }
     }
     

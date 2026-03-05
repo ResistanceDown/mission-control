@@ -6,6 +6,7 @@ import { mutationLimiter } from '@/lib/rate-limit';
 import { logger } from '@/lib/logger';
 import { validateBody, createTaskSchema, bulkUpdateTaskStatusSchema } from '@/lib/validation';
 import { resolveMentionRecipients } from '@/lib/mentions';
+import { dispatchTaskAssignment } from '@/lib/task-assignment-dispatch';
 
 function formatTicketRef(prefix?: string | null, num?: number | null): string | undefined {
   if (!prefix || typeof num !== 'number' || !Number.isFinite(num) || num <= 0) return undefined
@@ -269,6 +270,22 @@ export async function POST(request: NextRequest) {
         taskId,
         workspaceId
       );
+
+      const dispatch = await dispatchTaskAssignment({
+        workspaceId: workspaceId ?? 1,
+        actor: created_by,
+        assignee: assigned_to,
+        taskId,
+        title,
+        priority,
+        status,
+      })
+      if (!dispatch.delivered) {
+        logger.warn(
+          { taskId, assignee: assigned_to, reason: dispatch.reason || 'unknown' },
+          'Task created but assignment dispatch was not delivered'
+        )
+      }
     }
     
     // Fetch the created task

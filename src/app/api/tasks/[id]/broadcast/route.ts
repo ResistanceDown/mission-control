@@ -3,6 +3,7 @@ import { getDatabase, db_helpers } from '@/lib/db'
 import { runOpenClaw } from '@/lib/command'
 import { requireRole } from '@/lib/auth'
 import { logger } from '@/lib/logger'
+import { resolveSessionKeyForAgent } from '@/lib/agent-session-link'
 
 export async function POST(
   request: NextRequest,
@@ -47,13 +48,19 @@ export async function POST(
 
     const results = await Promise.allSettled(
       agents.map(async (agent) => {
-        if (!agent.session_key) return 'skipped'
+        const sessionKey = agent.session_key || resolveSessionKeyForAgent(agent.name)
+        if (!sessionKey) return 'skipped'
+        if (!agent.session_key) {
+          const now = Math.floor(Date.now() / 1000)
+          db.prepare('UPDATE agents SET session_key = ?, last_seen = ?, updated_at = ? WHERE name = ? AND workspace_id = ?')
+            .run(sessionKey, now, now, agent.name, workspaceId)
+        }
         await runOpenClaw(
           [
             'gateway',
             'sessions_send',
             '--session',
-            agent.session_key,
+            sessionKey,
             '--message',
             `[Task ${task.id}] ${task.title}\nFrom ${author}: ${message}`
           ],

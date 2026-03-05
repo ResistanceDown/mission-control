@@ -2,6 +2,17 @@
 
 All notable changes to Mission Control are documented in this file.
 
+## [1.3.1] - 2026-03-04
+
+### Added
+- Automatic agent-to-session linking helper that resolves live OpenClaw session keys from gateway session stores and backfills `agents.session_key`.
+- Task assignment dispatch helper that sends immediate session messages to assignees when tasks are created or reassigned.
+
+### Fixed
+- Task board assignment actions that appeared to do nothing when assignee `session_key` values were empty.
+- Agent message and task broadcast APIs now resolve live session keys on demand instead of hard-failing when DB linkage is missing.
+- Agent/session linkage drift by syncing session keys from live gateway data during agents/status API reads.
+
 ## [1.3.0] - 2026-03-02
 
 ### Added

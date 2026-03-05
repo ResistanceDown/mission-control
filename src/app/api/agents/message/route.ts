@@ -5,6 +5,7 @@ import { requireRole } from '@/lib/auth'
 import { validateBody, createMessageSchema } from '@/lib/validation'
 import { mutationLimiter } from '@/lib/rate-limit'
 import { logger } from '@/lib/logger'
+import { resolveSessionKeyForAgent } from '@/lib/agent-session-link'
 
 export async function POST(request: NextRequest) {
   const auth = requireRole(request, 'operator')
@@ -26,11 +27,18 @@ export async function POST(request: NextRequest) {
     if (!agent) {
       return NextResponse.json({ error: 'Recipient agent not found' }, { status: 404 })
     }
-    if (!agent.session_key) {
+    const resolvedSessionKey = agent.session_key || resolveSessionKeyForAgent(to)
+    if (!resolvedSessionKey) {
       return NextResponse.json(
         { error: 'Recipient agent has no session key configured' },
         { status: 400 }
       )
+    }
+
+    if (!agent.session_key) {
+      const now = Math.floor(Date.now() / 1000)
+      db.prepare('UPDATE agents SET session_key = ?, last_seen = ?, updated_at = ? WHERE id = ? AND workspace_id = ?')
+        .run(resolvedSessionKey, now, now, agent.id, workspaceId)
     }
 
     await runOpenClaw(
@@ -38,7 +46,7 @@ export async function POST(request: NextRequest) {
         'gateway',
         'sessions_send',
         '--session',
-        agent.session_key,
+        resolvedSessionKey,
         '--message',
         `Message from ${from}: ${message}`
       ],
