@@ -23,6 +23,21 @@ interface TaskMessageDispatchInput {
   message: string
 }
 
+function buildDispatchParams(sessionKey: string, message: string, idempotencyKey: string) {
+  return JSON.stringify({
+    sessionKey,
+    message,
+    idempotencyKey,
+  })
+}
+
+async function sendViaGatewayChat(sessionKey: string, message: string, idempotencyKey: string) {
+  await runOpenClaw(
+    ['gateway', 'call', 'chat.send', '--params', buildDispatchParams(sessionKey, message, idempotencyKey)],
+    { timeoutMs: 12000 }
+  )
+}
+
 export async function dispatchTaskAssignment(input: AssignmentDispatchInput): Promise<{
   attempted: boolean
   delivered: boolean
@@ -76,10 +91,8 @@ export async function dispatchTaskMessage(input: TaskMessageDispatchInput): Prom
   }
 
   try {
-    await runOpenClaw(
-      ['gateway', 'sessions_send', '--session', sessionKey, '--message', message],
-      { timeoutMs: 12000 }
-    )
+    const idempotencyKey = `task-${taskId}-dispatch-${assignee.toLowerCase()}-${Date.now()}`
+    await sendViaGatewayChat(sessionKey, message, idempotencyKey)
     return { attempted: true, delivered: true, sessionKey }
   } catch (err) {
     // Retry once after relinking session keys to reduce false negatives from stale links.
@@ -87,10 +100,8 @@ export async function dispatchTaskMessage(input: TaskMessageDispatchInput): Prom
     const relinked = resolveSessionKeyForAgent(assignee)
     if (relinked && relinked !== sessionKey) {
       try {
-        await runOpenClaw(
-          ['gateway', 'sessions_send', '--session', relinked, '--message', message],
-          { timeoutMs: 12000 }
-        )
+        const retryKey = `task-${taskId}-dispatch-retry-${assignee.toLowerCase()}-${Date.now()}`
+        await sendViaGatewayChat(relinked, message, retryKey)
         return { attempted: true, delivered: true, sessionKey: relinked }
       } catch {
         // fallthrough to classified failure response below
