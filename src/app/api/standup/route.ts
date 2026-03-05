@@ -78,7 +78,7 @@ export async function POST(request: NextRequest) {
       WHERE assigned_to = ?
       AND workspace_id = ?
       AND (priority = 'urgent' OR metadata LIKE '%blocked%')
-      AND status NOT IN ('done')
+      AND status NOT IN ('done', 'cancelled')
       ORDER BY priority DESC, created_at ASC
     `);
     const activityCountStmt = db.prepare(`
@@ -156,7 +156,7 @@ export async function POST(request: NextRequest) {
       AND a.workspace_id = t.workspace_id
       WHERE t.due_date < ? 
       AND t.workspace_id = ?
-      AND t.status NOT IN ('done')
+      AND t.status NOT IN ('done', 'cancelled')
       ORDER BY t.due_date ASC
     `).all(now, workspaceId);
     

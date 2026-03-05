@@ -130,11 +130,11 @@ export async function POST(request: NextRequest) {
         FROM tasks
         WHERE workspace_id = ?
           AND json_extract(metadata, '$.fingerprint') = ?
-        ORDER BY CASE WHEN status = 'done' THEN 1 ELSE 0 END, updated_at DESC
+        ORDER BY CASE WHEN status IN ('done', 'cancelled') THEN 1 ELSE 0 END, updated_at DESC
         LIMIT 1
       `).get(workspaceId, fingerprint) as any
 
-      const shouldCreate = !existingTask || existingTask.status === 'done'
+      const shouldCreate = !existingTask || existingTask.status === 'done' || existingTask.status === 'cancelled'
       if (shouldCreate) {
         const metadata = metadataPatch
         const contract = validateHabiTaskContract({ assigned_to: assignee, metadata })

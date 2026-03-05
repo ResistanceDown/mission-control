@@ -18,7 +18,7 @@ interface Task {
   id: number
   title: string
   description?: string
-  status: 'inbox' | 'assigned' | 'in_progress' | 'review' | 'quality_review' | 'done'
+  status: 'inbox' | 'assigned' | 'in_progress' | 'review' | 'quality_review' | 'done' | 'cancelled'
   priority: 'low' | 'medium' | 'high' | 'critical' | 'urgent'
   assigned_to?: string
   created_by: string
@@ -84,6 +84,7 @@ const statusColumns = [
   { key: 'review', title: 'Review', color: 'bg-purple-500/20 text-purple-400' },
   { key: 'quality_review', title: 'Quality Review', color: 'bg-indigo-500/20 text-indigo-400' },
   { key: 'done', title: 'Done', color: 'bg-green-500/20 text-green-400' },
+  { key: 'cancelled', title: 'Cancelled', color: 'bg-zinc-500/20 text-zinc-300' },
 ]
 
 const priorityColors: Record<string, string> = {
@@ -1453,6 +1454,7 @@ function EditTaskModal({
                   <option value="review">Review</option>
                   <option value="quality_review">Quality Review</option>
                   <option value="done">Done</option>
+                  <option value="cancelled">Cancelled</option>
                 </select>
               </div>
 
