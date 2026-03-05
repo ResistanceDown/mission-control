@@ -11,6 +11,7 @@ import { requireRole } from '@/lib/auth'
 import { MODEL_CATALOG } from '@/lib/models'
 import { logger } from '@/lib/logger'
 import { detectProviderSubscriptions, getPrimarySubscription } from '@/lib/provider-subscriptions'
+import { syncAgentSessionLinks } from '@/lib/agent-session-link'
 
 export async function GET(request: NextRequest) {
   const auth = requireRole(request, 'viewer')
@@ -315,6 +316,7 @@ async function getSystemStatus(workspaceId: number) {
           agentName
         )
       }
+      syncAgentSessionLinks(workspaceId)
     } catch (dbErr) {
       logger.error({ err: dbErr }, 'Error syncing agent statuses')
     }

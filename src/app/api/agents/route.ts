@@ -8,6 +8,7 @@ import { requireRole } from '@/lib/auth';
 import { mutationLimiter } from '@/lib/rate-limit';
 import { logger } from '@/lib/logger';
 import { validateBody, createAgentSchema } from '@/lib/validation';
+import { syncAgentSessionLinks } from '@/lib/agent-session-link';
 
 /**
  * GET /api/agents - List all agents with optional filtering
@@ -21,6 +22,7 @@ export async function GET(request: NextRequest) {
     const db = getDatabase();
     const { searchParams } = new URL(request.url);
     const workspaceId = auth.user.workspace_id ?? 1;
+    syncAgentSessionLinks(workspaceId)
     
     // Parse query parameters
     const status = searchParams.get('status');
