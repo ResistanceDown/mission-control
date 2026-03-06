@@ -51,6 +51,7 @@ interface FounderApiResponse {
       priority: string
       updated_at: number
       aegisApproved: boolean
+      waitingOnQc: boolean
       disposition: string
       executionMode: string
     }>
@@ -62,6 +63,7 @@ interface FounderApiResponse {
       priority: string
       updated_at: number
       aegisApproved: boolean
+      waitingOnQc: boolean
       disposition: string
       executionMode: string
     }>
@@ -107,6 +109,12 @@ function hasFounderApproval(task: { metadata?: Record<string, any> | null } | nu
   const metadata = task?.metadata
   if (!metadata || typeof metadata !== 'object') return false
   return Boolean(metadata.founder_approved_at || metadata.founder_approved_for_execution)
+}
+
+function isWaitingOnQc(task: { metadata?: Record<string, any> | null } | null | undefined) {
+  const metadata = task?.metadata
+  if (!metadata || typeof metadata !== 'object') return false
+  return Boolean(metadata.waiting_on_qc)
 }
 
 function useFounderData() {
@@ -552,14 +560,19 @@ export function FounderCockpitPanel() {
                           {taskActionState[task.id]?.status === 'saving' ? 'Updating...' : 'Approve For Execution'}
                         </button>
                       ) : null}
-                      {task.status === 'review' ? (
+                      {task.status === 'review' && !task.waitingOnQc ? (
                         <button
                           onClick={() => updateTaskStatus(task.id, 'quality_review')}
                           disabled={taskActionState[task.id]?.status === 'saving'}
                           className="px-3 py-2 rounded-lg bg-indigo-500/15 text-indigo-300 text-sm font-medium hover:bg-indigo-500/20 transition-smooth disabled:opacity-60"
                         >
-                          {taskActionState[task.id]?.status === 'saving' ? 'Updating...' : 'Send To QC'}
+                          {taskActionState[task.id]?.status === 'saving' ? 'Updating...' : 'Queue For QC'}
                         </button>
+                      ) : null}
+                      {task.status === 'review' && task.waitingOnQc ? (
+                        <div className="px-3 py-2 rounded-lg bg-indigo-500/10 text-indigo-300 text-sm font-medium">
+                          Waiting on QC
+                        </div>
                       ) : null}
                       {task.status === 'quality_review' && task.aegisApproved ? (
                         <button
@@ -929,14 +942,19 @@ export function FounderCockpitPanel() {
                     Founder approved • queued for execution
                   </div>
                 ) : null}
-                {selectedTask.status === 'review' ? (
+                {selectedTask.status === 'review' && !isWaitingOnQc(selectedTask) ? (
                   <button
                     onClick={() => void updateTaskStatus(selectedTask.id, 'quality_review')}
                     disabled={taskActionState[selectedTask.id]?.status === 'saving'}
                     className="px-3 py-2 rounded-lg bg-indigo-500/15 text-indigo-300 text-sm font-medium hover:bg-indigo-500/20 transition-smooth disabled:opacity-60"
                   >
-                    {taskActionState[selectedTask.id]?.status === 'saving' ? 'Updating...' : 'Send To QC'}
+                    {taskActionState[selectedTask.id]?.status === 'saving' ? 'Updating...' : 'Queue For QC'}
                   </button>
+                ) : null}
+                {selectedTask.status === 'review' && isWaitingOnQc(selectedTask) ? (
+                  <div className="px-3 py-2 rounded-lg bg-indigo-500/10 text-indigo-300 text-sm font-medium">
+                    Waiting on QC
+                  </div>
                 ) : null}
                 {selectedTask.status === 'quality_review' && selectedTask.aegisApproved ? (
                   <button

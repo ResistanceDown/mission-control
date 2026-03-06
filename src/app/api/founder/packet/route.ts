@@ -222,11 +222,20 @@ function loadTaskSnapshot(workspaceId: number) {
       aegisApproved: hasAegisApproval(db, task.id, workspaceId),
       disposition: String(parsedMetadata.disposition || ''),
       executionMode: String(parsedMetadata.execution_mode || ''),
+      waitingOnQc: Boolean(parsedMetadata.waiting_on_qc),
     }
   })
 
-  const approvalQueue = approvalCandidates.filter((task) => task.status !== 'quality_review' || task.aegisApproved)
-  const waitingOnQcQueue = approvalCandidates.filter((task) => task.status === 'quality_review' && !task.aegisApproved)
+  const approvalQueue = approvalCandidates.filter((task) => {
+    if (task.status === 'quality_review') return task.aegisApproved
+    if (task.status === 'review') return !task.waitingOnQc
+    return true
+  })
+  const waitingOnQcQueue = approvalCandidates.filter((task) => {
+    if (task.status === 'quality_review' && !task.aegisApproved) return true
+    if (task.status === 'review' && task.waitingOnQc) return true
+    return false
+  })
 
   const appFinishTaskRows = db.prepare(`
     SELECT id, title, status, assigned_to, priority, updated_at, metadata
