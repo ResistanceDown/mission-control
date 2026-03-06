@@ -12,6 +12,7 @@ const FOUNDER_PACKET_ROOT = path.join(HABI_ROOT, 'output', 'founder', 'daily')
 const SIGNAL_LEDGER_PATH = path.join(HABI_ROOT, 'output', 'founder', 'customer-signal-ledger.json')
 const PRODUCT_PROOF_PATH = path.join(HABI_ROOT, 'output', 'founder', 'product-proof-ledger.json')
 const ADOPTION_SCORECARD_PATH = path.join(HABI_ROOT, 'output', 'revenue', 'revenue-escape-scorecard.json')
+const GROWTH_WEEKS_ROOT = path.join(HABI_ROOT, 'output', 'growth', 'weeks')
 
 async function readJsonOrNull<T>(filePath: string): Promise<T | null> {
   try {
@@ -54,6 +55,26 @@ async function findLatestFounderPacketPath(root: string): Promise<string | null>
 
   candidates.sort((left, right) => right.mtimeMs - left.mtimeMs)
   return candidates[0]?.packetPath ?? null
+}
+
+async function findLatestGrowthWeek(root: string): Promise<string | null> {
+  let entries: Array<{ name: string; isDirectory(): boolean }> = []
+  try {
+    entries = await fs.readdir(root, { withFileTypes: true }) as Array<{ name: string; isDirectory(): boolean }>
+  } catch {
+    return null
+  }
+
+  const weekNames = entries
+    .filter((entry) => entry.isDirectory() && /^week-\d+$/i.test(entry.name))
+    .map((entry) => entry.name)
+    .sort((left, right) => {
+      const leftNum = Number.parseInt(left.split('-')[1] || '0', 10)
+      const rightNum = Number.parseInt(right.split('-')[1] || '0', 10)
+      return rightNum - leftNum
+    })
+
+  return weekNames[0] ?? null
 }
 
 function summarizeRepeatedPains(entries: Array<{ problem?: string }>): string[] {
@@ -397,6 +418,17 @@ export async function GET(request: NextRequest) {
     const signalLedger = (await readJsonOrNull<any[]>(SIGNAL_LEDGER_PATH)) || []
     const productProofLedger = (await readJsonOrNull<any[]>(PRODUCT_PROOF_PATH)) || []
     const adoption = await readJsonOrNull<any>(ADOPTION_SCORECARD_PATH)
+    const latestGrowthWeek = await findLatestGrowthWeek(GROWTH_WEEKS_ROOT)
+    const growthPaths = latestGrowthWeek
+      ? {
+          researchBriefPath: path.join(GROWTH_WEEKS_ROOT, latestGrowthWeek, 'research-brief.json'),
+          draftPackPath: path.join(GROWTH_WEEKS_ROOT, latestGrowthWeek, 'draft-pack.json'),
+          scorecardPath: path.join(GROWTH_WEEKS_ROOT, latestGrowthWeek, 'scorecard.json'),
+        }
+      : null
+    const growthResearch = growthPaths ? await readJsonOrNull<any>(growthPaths.researchBriefPath) : null
+    const growthDraftPack = growthPaths ? await readJsonOrNull<any>(growthPaths.draftPackPath) : null
+    const growthScorecard = growthPaths ? await readJsonOrNull<any>(growthPaths.scorecardPath) : null
     const repeatedPains = summarizeRepeatedPains(signalLedger)
     const workspaceId = auth.user.workspace_id ?? 1
 
@@ -416,6 +448,15 @@ export async function GET(request: NextRequest) {
         total: productProofLedger.length,
         latest: productProofLedger.slice(-5).reverse(),
         ledgerPath: PRODUCT_PROOF_PATH,
+      },
+      growth: {
+        week: latestGrowthWeek,
+        researchBriefPath: growthPaths?.researchBriefPath ?? null,
+        draftPackPath: growthPaths?.draftPackPath ?? null,
+        scorecardPath: growthPaths?.scorecardPath ?? null,
+        researchSignals: Array.isArray(growthResearch?.signals) ? growthResearch.signals.slice(0, 3) : [],
+        draftCandidates: Array.isArray(growthDraftPack?.drafts) ? growthDraftPack.drafts.slice(0, 3) : [],
+        scorecard: growthScorecard,
       },
       tasks: loadTaskSnapshot(workspaceId),
     })

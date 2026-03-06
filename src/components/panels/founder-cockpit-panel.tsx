@@ -38,6 +38,31 @@ interface FounderApiResponse {
     latest: Array<{ id: string; title: string; publicStoryAngle: string; stage: string; capturedAt: string }>
     ledgerPath: string
   }
+  growth: {
+    week: string | null
+    researchBriefPath: string | null
+    draftPackPath: string | null
+    scorecardPath: string | null
+    researchSignals: string[]
+    draftCandidates: Array<{
+      id: string
+      pillar: string
+      angle: string
+      source: string
+      rationale: string
+      text: string
+      status: string
+      approval: string
+    }>
+    scorecard: {
+      week?: string
+      posts_planned?: number
+      posts_published?: number
+      replies_target?: number
+      replies_completed?: number
+      status?: string
+    } | null
+  }
   tasks: {
     totalActive: number
     awaitingReview: number
@@ -300,7 +325,7 @@ export function FounderCockpitPanel() {
   const [signalState, setSignalState] = useState<{ status: 'idle' | 'saving' | 'saved' | 'error'; message?: string }>({ status: 'idle' })
   const [signalExpanded, setSignalExpanded] = useState(false)
   const [lastSavedSignal, setLastSavedSignal] = useState<string | null>(null)
-  const [secondaryTab, setSecondaryTab] = useState<'signals' | 'proof' | 'system'>('signals')
+  const [secondaryTab, setSecondaryTab] = useState<'signals' | 'proof' | 'growth' | 'system'>('signals')
   const [selectedTask, setSelectedTask] = useState<FounderTaskDetail | null>(null)
   const [taskDetailState, setTaskDetailState] = useState<{ status: 'idle' | 'loading' | 'error'; message?: string }>({ status: 'idle' })
 
@@ -853,12 +878,13 @@ export function FounderCockpitPanel() {
                 {[
                   { key: 'signals', label: 'Signals' },
                   { key: 'proof', label: 'Product Proof' },
+                  { key: 'growth', label: 'Growth' },
                   { key: 'system', label: 'System' },
                 ].map((tab) => (
                   <button
                     key={tab.key}
                     type="button"
-                    onClick={() => setSecondaryTab(tab.key as 'signals' | 'proof' | 'system')}
+                    onClick={() => setSecondaryTab(tab.key as 'signals' | 'proof' | 'growth' | 'system')}
                     className={`rounded-lg px-3 py-2 text-sm font-medium transition-smooth ${
                       secondaryTab === tab.key
                         ? 'bg-primary/15 text-primary'
@@ -921,6 +947,53 @@ export function FounderCockpitPanel() {
                     <button onClick={() => navigateToPanel('cron')} className="w-full rounded-lg border border-white/10 bg-black/15 px-3 py-2 text-left text-sm text-foreground transition-smooth hover:bg-surface-2">
                       Open Cron
                     </button>
+                  </div>
+                </div>
+              ) : null}
+
+              {secondaryTab === 'growth' ? (
+                <div>
+                  <div className="text-xs text-muted-foreground">
+                    {data.growth.week ? `${data.growth.week} growth pack` : 'No growth pack generated yet.'}
+                  </div>
+                  <div className="mt-3 grid gap-3 xl:grid-cols-[0.9fr_1.1fr]">
+                    <div className="space-y-3">
+                      <div className="rounded-lg border border-cyan-500/15 bg-black/15 px-3 py-3">
+                        <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Research signals</div>
+                        <div className="mt-2 space-y-2 text-sm text-foreground">
+                          {data.growth.researchSignals.length ? data.growth.researchSignals.map((signal, index) => (
+                            <div key={`growth-signal-${index}`} className="flex gap-2">
+                              <span className="text-primary">•</span>
+                              <span>{signal}</span>
+                            </div>
+                          )) : <div className="text-muted-foreground">No research signals captured yet.</div>}
+                        </div>
+                      </div>
+                      <div className="rounded-lg border border-cyan-500/15 bg-black/15 px-3 py-3">
+                        <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Current week status</div>
+                        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                          <Metric label="Posts" value={`${data.growth.scorecard?.posts_published ?? 0}/${data.growth.scorecard?.posts_planned ?? 0}`} subtitle="Published / planned" color="blue" />
+                          <Metric label="Replies" value={`${data.growth.scorecard?.replies_completed ?? 0}/${data.growth.scorecard?.replies_target ?? 0}`} subtitle="Completed / target" color="green" />
+                        </div>
+                      </div>
+                    </div>
+                    <div className="rounded-lg border border-cyan-500/15 bg-black/15 px-3 py-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Draft candidates</div>
+                          <div className="mt-1 text-sm text-foreground">Review these in Mission Control instead of Discord. They should be grounded in real signals and product proof.</div>
+                        </div>
+                      </div>
+                      <div className="mt-3 space-y-3">
+                        {data.growth.draftCandidates.length ? data.growth.draftCandidates.map((draft) => (
+                          <div key={draft.id} className="rounded-lg border border-white/10 bg-black/20 p-3">
+                            <div className="text-sm font-medium text-foreground">{draft.pillar}: {draft.angle}</div>
+                            <div className="mt-1 text-xs text-muted-foreground">Source: {draft.source}</div>
+                            <div className="mt-2 text-sm text-foreground">{draft.text}</div>
+                          </div>
+                        )) : <div className="text-muted-foreground">No draft candidates generated yet.</div>}
+                      </div>
+                    </div>
                   </div>
                 </div>
               ) : null}
