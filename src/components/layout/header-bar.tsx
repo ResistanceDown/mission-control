@@ -26,6 +26,7 @@ export function HeaderBar() {
   const activeSessions = sessions.filter(s => s.active).length
   const tabLabels: Record<string, string> = {
     overview: 'Overview',
+    founder: 'Founder Cockpit',
     agents: 'Agent Squad',
     tasks: 'Task Board',
     sessions: 'Sessions',

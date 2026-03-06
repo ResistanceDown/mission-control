@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import net from 'node:net'
+import os from 'node:os'
 import { existsSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { runCommand, runOpenClaw, runClawdbot } from '@/lib/command'
@@ -196,18 +197,30 @@ async function getSystemStatus(workspaceId: number) {
   }
 
   try {
-    // System uptime
+    // System uptime (Linux first, then macOS fallback, then Node runtime fallback)
     const { stdout: uptimeOutput } = await runCommand('uptime', ['-s'], {
       timeoutMs: 3000
     })
     const bootTime = new Date(uptimeOutput.trim())
     status.uptime = Date.now() - bootTime.getTime()
   } catch (error) {
-    logger.error({ err: error }, 'Error getting uptime')
+    try {
+      const { stdout: bootOutput } = await runCommand('sysctl', ['-n', 'kern.boottime'], {
+        timeoutMs: 3000
+      })
+      const match = bootOutput.match(/sec\s*=\s*(\d+)/)
+      if (match?.[1]) {
+        status.uptime = Date.now() - Number.parseInt(match[1], 10) * 1000
+      } else {
+        status.uptime = Math.max(0, Math.floor(os.uptime() * 1000))
+      }
+    } catch {
+      status.uptime = Math.max(0, Math.floor(os.uptime() * 1000))
+    }
   }
 
   try {
-    // Memory info
+    // Memory info (Linux `free` first)
     const { stdout: memOutput } = await runCommand('free', ['-m'], {
       timeoutMs: 3000
     })
@@ -222,7 +235,13 @@ async function getSystemStatus(workspaceId: number) {
       }
     }
   } catch (error) {
-    logger.error({ err: error }, 'Error getting memory info')
+    const totalMb = Math.round(os.totalmem() / (1024 * 1024))
+    const freeMb = Math.round(os.freemem() / (1024 * 1024))
+    status.memory = {
+      total: totalMb,
+      used: Math.max(0, totalMb - freeMb),
+      available: freeMb
+    }
   }
 
   try {

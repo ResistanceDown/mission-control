@@ -19,6 +19,7 @@ let db: Database.Database | null = null;
 export function getDatabase(): Database.Database {
   if (!db) {
     ensureDirExists(dirname(DB_PATH));
+    logger.info({ dbPath: DB_PATH }, 'Mission Control database path resolved')
     db = new Database(DB_PATH);
     
     // Enable WAL mode for better concurrent access
@@ -163,7 +164,7 @@ export interface Task {
   id: number;
   title: string;
   description?: string;
-  status: 'inbox' | 'assigned' | 'in_progress' | 'review' | 'quality_review' | 'done';
+  status: 'inbox' | 'assigned' | 'in_progress' | 'review' | 'quality_review' | 'done' | 'cancelled';
   priority: 'low' | 'medium' | 'high' | 'urgent';
   project_id?: number;
   project_ticket_no?: number;

@@ -5,6 +5,8 @@ import { validateBody, createCommentSchema } from '@/lib/validation';
 import { mutationLimiter } from '@/lib/rate-limit';
 import { logger } from '@/lib/logger';
 import { resolveMentionRecipients } from '@/lib/mentions';
+import { isHabiTask } from '@/lib/habi-task-contract';
+import { ensureHabiTaskSubscriptions } from '@/lib/habi-task-ops';
 
 /**
  * GET /api/tasks/[id]/comments - Get all comments for a task
@@ -186,6 +188,9 @@ export async function POST(
     });
     if (task.assigned_to) {
       db_helpers.ensureTaskSubscription(taskId, task.assigned_to, workspaceId);
+    }
+    if (isHabiTask({ assigned_to: task.assigned_to })) {
+      ensureHabiTaskSubscriptions(taskId, workspaceId, task.assigned_to, author)
     }
 
     // Notify subscribers

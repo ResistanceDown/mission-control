@@ -14,6 +14,23 @@ interface LogFilters {
   session?: string
 }
 
+function normalizeLevel(value: unknown): string {
+  if (typeof value === 'number') {
+    if (value >= 50) return 'error'
+    if (value >= 40) return 'warn'
+    if (value >= 30) return 'info'
+    return 'debug'
+  }
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase()
+    if (normalized === 'fatal') return 'error'
+    if (normalized === 'warning') return 'warn'
+    if (normalized === 'trace') return 'debug'
+    return normalized
+  }
+  return 'info'
+}
+
 export function LogViewerPanel() {
   const { logs, logFilters, setLogFilters, clearLogs, addLog } = useMissionControl()
   const [isAutoScroll, setIsAutoScroll] = useState(true)
@@ -137,8 +154,8 @@ export function LogViewerPanel() {
     }
   }
 
-  const getLogLevelColor = (level: string) => {
-    switch (level.toLowerCase()) {
+  const getLogLevelColor = (level: unknown) => {
+    switch (normalizeLevel(level)) {
       case 'error': return 'text-red-400'
       case 'warn': return 'text-yellow-400'
       case 'info': return 'text-blue-400'
@@ -147,8 +164,8 @@ export function LogViewerPanel() {
     }
   }
 
-  const getLogLevelBg = (level: string) => {
-    switch (level.toLowerCase()) {
+  const getLogLevelBg = (level: unknown) => {
+    switch (normalizeLevel(level)) {
       case 'error': return 'bg-red-500/10 border-red-500/20'
       case 'warn': return 'bg-yellow-500/10 border-yellow-500/20'
       case 'info': return 'bg-blue-500/10 border-blue-500/20'
@@ -158,9 +175,14 @@ export function LogViewerPanel() {
   }
 
   const filteredLogs = logs.filter(entry => {
-    if (logFilters.level && entry.level !== logFilters.level) return false
+    if (logFilters.level && normalizeLevel(entry.level) !== logFilters.level) return false
     if (logFilters.source && entry.source !== logFilters.source) return false
-    if (logFilters.search && !entry.message.toLowerCase().includes(logFilters.search.toLowerCase())) return false
+    if (
+      logFilters.search &&
+      !String(entry.message ?? '')
+        .toLowerCase()
+        .includes(logFilters.search.toLowerCase())
+    ) return false
     if (logFilters.session && (!entry.session || !entry.session.includes(logFilters.session))) return false
     return true
   })

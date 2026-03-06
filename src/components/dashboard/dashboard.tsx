@@ -4,6 +4,7 @@ import { useState, useCallback } from 'react'
 import { useMissionControl } from '@/store'
 import { useNavigateToPanel } from '@/lib/navigation'
 import { useSmartPoll } from '@/lib/use-smart-poll'
+import { FounderSnapshotCard } from '@/components/panels/founder-cockpit-panel'
 
 interface DbStats {
   tasks: { total: number; byStatus: Record<string, number> }
@@ -121,6 +122,8 @@ export function Dashboard() {
 
   return (
     <div className="p-5 space-y-5">
+      <FounderSnapshotCard />
+
       {/* Top Metric Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {isLocal ? (
