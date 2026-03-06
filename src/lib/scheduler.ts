@@ -1,5 +1,6 @@
 import { getDatabase, logAuditEvent } from './db'
 import { syncAgentsFromConfig } from './agent-sync'
+import { getAgentLiveStatuses } from './sessions'
 import { config, ensureDirExists } from './config'
 import { join, dirname } from 'path'
 import { readdirSync, statSync, unlinkSync } from 'fs'
@@ -157,6 +158,25 @@ async function runHeartbeatCheck(): Promise<{ ok: boolean; message: string }> {
     const now = Math.floor(Date.now() / 1000)
     const timeoutMinutes = getSettingNumber('general.agent_timeout_minutes', 10)
     const threshold = now - timeoutMinutes * 60
+    const liveStatuses = getAgentLiveStatuses()
+
+    // Refresh DB state from live gateway sessions before evaluating stale agents.
+    const syncLiveAgent = db.prepare(`
+      UPDATE agents
+      SET status = ?, last_seen = ?, updated_at = ?
+      WHERE workspace_id = ?
+        AND (LOWER(name) = LOWER(?) OR LOWER(REPLACE(name, ' ', '-')) = LOWER(?))
+    `)
+    for (const [agentName, info] of liveStatuses) {
+      syncLiveAgent.run(
+        info.status === 'active' ? 'busy' : info.status,
+        Math.floor(info.lastActivity / 1000),
+        now,
+        1,
+        agentName,
+        agentName
+      )
+    }
 
     // Find agents that are not offline but haven't been seen recently
     const staleAgents = db.prepare(`
@@ -178,6 +198,8 @@ async function runHeartbeatCheck(): Promise<{ ok: boolean; message: string }> {
     const names: string[] = []
     db.transaction(() => {
       for (const agent of staleAgents) {
+        const live = liveStatuses.get(agent.name) || liveStatuses.get(agent.name.toLowerCase())
+        if (live && live.status !== 'offline') continue
         markOffline.run('offline', now, agent.id)
         logActivity.run(agent.id, `Agent "${agent.name}" marked offline (no heartbeat for ${timeoutMinutes}m)`)
         names.push(agent.name)
@@ -196,13 +218,17 @@ async function runHeartbeatCheck(): Promise<{ ok: boolean; message: string }> {
       }
     })()
 
+    if (names.length === 0) {
+      return { ok: true, message: 'All agents healthy' }
+    }
+
     logAuditEvent({
       action: 'heartbeat_check',
       actor: 'scheduler',
       detail: { marked_offline: names },
     })
 
-    return { ok: true, message: `Marked ${staleAgents.length} agent(s) offline: ${names.join(', ')}` }
+    return { ok: true, message: `Marked ${names.length} agent(s) offline: ${names.join(', ')}` }
   } catch (err: any) {
     return { ok: false, message: `Heartbeat check failed: ${err.message}` }
   }

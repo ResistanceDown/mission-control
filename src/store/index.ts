@@ -350,6 +350,7 @@ interface MissionControlStore {
     session?: string
     search?: string
   }
+  setLogs: (logs: LogEntry[]) => void
   addLog: (log: LogEntry) => void
   setLogFilters: (filters: Partial<{
     level?: string
@@ -484,6 +485,7 @@ export const useMissionControl = create<MissionControlStore>()(
     // Logs
     logs: [],
     logFilters: {},
+    setLogs: (logs) => set({ logs }),
     addLog: (log) =>
       set((state) => {
         // Check if log already exists to prevent duplicates
