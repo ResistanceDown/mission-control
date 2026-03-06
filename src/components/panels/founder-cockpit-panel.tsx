@@ -327,6 +327,7 @@ export function FounderCockpitPanel() {
   const [lastSavedSignal, setLastSavedSignal] = useState<string | null>(null)
   const [selectedTask, setSelectedTask] = useState<FounderTaskDetail | null>(null)
   const [taskDetailState, setTaskDetailState] = useState<{ status: 'idle' | 'loading' | 'error'; message?: string }>({ status: 'idle' })
+  const [growthActionState, setGrowthActionState] = useState<{ status: 'idle' | 'saving' | 'error' | 'saved'; message?: string }>({ status: 'idle' })
 
   if (loading) {
     return <div className="panel"><div className="panel-body"><div className="h-36 rounded-lg shimmer" /></div></div>
@@ -477,6 +478,34 @@ export function FounderCockpitPanel() {
       await reload()
     } catch {
       setSignalState({ status: 'error', message: 'Failed to save signal.' })
+    }
+  }
+
+  async function runGrowthAction(action: 'refresh_research' | 'generate_drafts' | 'approve_draft' | 'reject_draft' | 'reset_to_research', draftId?: string) {
+    const growthWeek = data?.growth?.week ?? null
+    setGrowthActionState({ status: 'saving' })
+    try {
+      const response = await fetch('/api/founder/growth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, draftId, week: growthWeek }),
+      })
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        setGrowthActionState({ status: 'error', message: payload.error || 'Growth update failed.' })
+        return
+      }
+      await reload()
+      const messageMap: Record<string, string> = {
+        refresh_research: 'Research refreshed.',
+        generate_drafts: 'Draft candidates generated.',
+        approve_draft: 'Draft approved.',
+        reject_draft: 'Draft rejected.',
+        reset_to_research: 'Drafts cleared. Growth is back to research-first state.',
+      }
+      setGrowthActionState({ status: 'saved', message: messageMap[action] || 'Growth updated.' })
+    } catch {
+      setGrowthActionState({ status: 'error', message: 'Growth update failed.' })
     }
   }
 
@@ -884,11 +913,42 @@ export function FounderCockpitPanel() {
                       {data.growth.week ? `${data.growth.week} research-backed draft pack` : 'No growth pack generated yet.'}
                     </div>
                   </div>
-                  {data.growth.week ? (
-                    <div className="text-xs text-muted-foreground">
-                      {`${data.growth.scorecard?.posts_published ?? 0}/${data.growth.scorecard?.posts_planned ?? 0} posts • ${data.growth.scorecard?.replies_completed ?? 0}/${data.growth.scorecard?.replies_target ?? 0} replies`}
-                    </div>
-                  ) : null}
+                  <div className="flex flex-wrap justify-end gap-2">
+                    <button
+                      onClick={() => void runGrowthAction('refresh_research')}
+                      disabled={growthActionState.status === 'saving'}
+                      className="rounded-lg border border-cyan-500/20 bg-black/15 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2 disabled:opacity-60"
+                    >
+                      Refresh Research
+                    </button>
+                    {data.growth.draftCandidates.length ? (
+                      <button
+                        onClick={() => void runGrowthAction('reset_to_research')}
+                        disabled={growthActionState.status === 'saving'}
+                        className="rounded-lg border border-amber-500/20 bg-black/15 px-3 py-2 text-xs font-medium text-amber-200 transition-smooth hover:bg-surface-2 disabled:opacity-60"
+                      >
+                        Clear Drafts
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => void runGrowthAction('generate_drafts')}
+                        disabled={growthActionState.status === 'saving'}
+                        className="rounded-lg bg-cyan-500/15 px-3 py-2 text-xs font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/20 disabled:opacity-60"
+                      >
+                        Generate Drafts
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <div className="mt-2 flex items-center justify-between gap-3">
+                  <div className="text-xs text-muted-foreground">
+                    {data.growth.week
+                      ? `${data.growth.scorecard?.posts_published ?? 0}/${data.growth.scorecard?.posts_planned ?? 0} posts • ${data.growth.scorecard?.replies_completed ?? 0}/${data.growth.scorecard?.replies_target ?? 0} replies`
+                      : 'No growth week is active yet.'}
+                  </div>
+                  <div className={`text-xs ${growthActionState.status === 'error' ? 'text-rose-300' : 'text-muted-foreground'}`}>
+                    {growthActionState.message || 'Research comes first. Generate drafts only after the brief looks right.'}
+                  </div>
                 </div>
                 <div className="mt-4 grid gap-3 xl:grid-cols-[0.9fr_1.1fr]">
                   <div className="space-y-3">
@@ -913,16 +973,37 @@ export function FounderCockpitPanel() {
                   </div>
                   <div className="rounded-lg border border-cyan-500/15 bg-black/15 px-3 py-3">
                     <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Draft candidates</div>
-                    <div className="mt-1 text-sm text-foreground">Review these here instead of chasing them through Discord.</div>
+                    <div className="mt-1 text-sm text-foreground">Approve or reject drafts here. Keep the research tight before turning this into a post.</div>
                     <div className="mt-3 space-y-3">
                       {data.growth.draftCandidates.length ? data.growth.draftCandidates.map((draft) => (
                         <div key={draft.id} className="rounded-lg border border-white/10 bg-black/20 p-3">
-                          <div className="text-sm font-medium text-foreground">{draft.pillar}: {draft.angle}</div>
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="text-sm font-medium text-foreground">{draft.pillar}: {draft.angle}</div>
+                            <span className={`rounded-full border px-2 py-0.5 text-[11px] uppercase tracking-wide ${draft.approval === 'approved' ? 'border-emerald-500/25 text-emerald-300' : draft.approval === 'rejected' ? 'border-rose-500/25 text-rose-300' : 'border-border/70 text-muted-foreground'}`}>
+                              {draft.approval}
+                            </span>
+                          </div>
                           <div className="mt-1 text-xs text-muted-foreground">Source: {draft.source}</div>
                           <div className="mt-1 text-xs text-muted-foreground">{draft.rationale}</div>
                           <div className="mt-2 text-sm text-foreground">{draft.text}</div>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <button
+                              onClick={() => void runGrowthAction('approve_draft', draft.id)}
+                              disabled={growthActionState.status === 'saving' || draft.approval === 'approved'}
+                              className="rounded-lg bg-emerald-500/15 px-3 py-2 text-xs font-medium text-emerald-200 transition-smooth hover:bg-emerald-500/20 disabled:opacity-60"
+                            >
+                              Approve Draft
+                            </button>
+                            <button
+                              onClick={() => void runGrowthAction('reject_draft', draft.id)}
+                              disabled={growthActionState.status === 'saving' || draft.approval === 'rejected'}
+                              className="rounded-lg border border-border px-3 py-2 text-xs font-medium text-muted-foreground transition-smooth hover:bg-surface-2 disabled:opacity-60"
+                            >
+                              Reject
+                            </button>
+                          </div>
                         </div>
-                      )) : <div className="text-muted-foreground">No draft candidates generated yet.</div>}
+                      )) : <div className="text-muted-foreground">Research is ready. Generate a fresh draft pack when you want candidates to review.</div>}
                     </div>
                   </div>
                 </div>
