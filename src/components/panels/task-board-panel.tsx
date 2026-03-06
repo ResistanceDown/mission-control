@@ -1007,7 +1007,7 @@ export function TaskDetailModal({
   const reviewStatusLabel = task.status === 'quality_review'
     ? (task.aegisApproved ? 'QC passed. This is ready for your final approval.' : 'QC is still running. This is not ready for founder approval yet.')
     : task.status === 'review'
-      ? 'Implementation is complete enough to be sent through QC.'
+      ? (metadata.waiting_on_qc ? 'QC is queued. This is waiting on a quality review pass before founder approval.' : 'Implementation is complete enough to be sent through QC.')
       : task.status === 'assigned'
         ? 'This task is waiting on founder approval before execution begins.'
         : task.status === 'in_progress'
@@ -1018,7 +1018,7 @@ export function TaskDetailModal({
   const founderJudgment = task.status === 'quality_review'
     ? (task.aegisApproved ? 'Approve and mark done, or send it back if the result does not meet the bar.' : 'Wait for QC to finish, or open the task for context while it is being reviewed.')
     : task.status === 'review'
-      ? 'Send this to QC if the evidence looks complete, or send it back with a concrete note.'
+      ? (metadata.waiting_on_qc ? 'Wait for QC to finish before making a founder approval decision, or send it back if you already know the work is incomplete.' : 'Queue this for QC if the evidence looks complete, or send it back with a concrete note.')
       : task.status === 'assigned'
         ? 'Approve execution if this should start now, or leave it queued.'
         : 'Confirm the evidence matches the scope before changing the task state.'

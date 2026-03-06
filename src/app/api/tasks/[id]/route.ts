@@ -167,9 +167,26 @@ export async function PUT(
         founder_approved_by: auth.user.username,
       };
     }
+    const queuedForQc =
+      requestedStatus === 'quality_review' &&
+      currentTask.status === 'review' &&
+      isHabiTask({ assigned_to: effectiveAssignedTo })
+
+    if (queuedForQc) {
+      persistedStatus = 'review'
+      effectiveMetadata = {
+        ...currentMetadata,
+        ...(typeof metadata === 'object' && metadata ? metadata : {}),
+        waiting_on_qc: true,
+        qc_requested_at: new Date(now * 1000).toISOString(),
+        qc_requested_by: auth.user.username,
+        qc_passed: false,
+        sent_back_by_qc: false,
+      }
+    }
     const shouldValidateHabiContract =
       isHabiTask({ assigned_to: effectiveAssignedTo }) &&
-      (persistedStatus === 'done' || assigned_to !== undefined || metadata !== undefined || plannedExecutionApproval);
+      (persistedStatus === 'done' || assigned_to !== undefined || metadata !== undefined || plannedExecutionApproval || queuedForQc);
     if (shouldValidateHabiContract) {
       const contract = validateHabiTaskContract({
         assigned_to: effectiveAssignedTo,
