@@ -18,6 +18,13 @@ import { habiTaskIngestSchema, validateBody } from '@/lib/validation'
 
 type IngestStatus = 'assigned' | 'in_progress' | 'review' | 'quality_review'
 
+function shouldSkipResolvedReferenceItem(item: {
+  status_hint?: string
+  disposition?: string
+}) {
+  return item.status_hint === 'resolved' || item.disposition === 'reference_only'
+}
+
 function resolveGeneralProjectId(db: ReturnType<typeof getDatabase>, workspaceId: number): number {
   const project = db.prepare(`
     SELECT id FROM projects
@@ -37,14 +44,14 @@ function resolveTargetStatus(
   const isPlannedExecution =
     (options?.executionMode === 'draft_pr' || options?.executionMode === 'audit_only') &&
     (options?.disposition === 'execute_now' || options?.disposition === 'founder_decision_needed')
-  let status: IngestStatus = isPlannedExecution ? 'assigned' : (hasEvidence ? 'in_progress' : 'assigned')
+  let status: IngestStatus = 'assigned'
 
   switch (statusHint) {
     case 'blocked':
-      status = 'in_progress'
+      status = 'assigned'
       break
     case 'active':
-      status = isPlannedExecution ? 'assigned' : (hasEvidence ? 'in_progress' : 'assigned')
+      status = 'assigned'
       break
     case 'review_ready':
       status = 'review'
@@ -71,11 +78,25 @@ function resolveTargetStatus(
 function resolveExistingTaskStatus(
   existingStatus: string,
   proposedStatus: IngestStatus,
-  options?: { executionMode?: string; disposition?: string; executionContextReady?: boolean }
+  options?: {
+    executionMode?: string
+    disposition?: string
+    executionContextReady?: boolean
+    blockedReason?: string
+    qcPassed?: boolean
+  }
 ): IngestStatus {
   const isPlannedExecution =
     (options?.executionMode === 'draft_pr' || options?.executionMode === 'audit_only') &&
     (options?.disposition === 'execute_now' || options?.disposition === 'founder_decision_needed')
+
+  if (options?.qcPassed && proposedStatus === 'assigned') {
+    return 'quality_review'
+  }
+
+  if (options?.blockedReason && proposedStatus === 'assigned') {
+    return 'assigned'
+  }
 
   if (
     isPlannedExecution &&
@@ -145,6 +166,15 @@ function formatOfflineComment(assignee: string) {
     `${assignee} does not have an active linked session right now.`,
     'Task remains queued. Relink the session if work should resume immediately.',
   ].join('\n')
+}
+
+function shouldSkipCancelledFingerprintReuse(existingTask: any) {
+  const metadata = mergeHabiMetadata(existingTask?.metadata, {})
+  const cancelledReason = String(metadata.cancelled_reason || '').trim().toLowerCase()
+  return (
+    existingTask?.status === 'cancelled' &&
+    ['superseded_by_redesign_cutover', 'reference_only_decision_already_recorded'].includes(cancelledReason)
+  )
 }
 
 function cancelSupersededDuplicates(
@@ -299,7 +329,44 @@ export async function POST(request: NextRequest) {
         LIMIT 1
       `).get(workspaceId, fingerprint) as any
 
+      if (shouldSkipResolvedReferenceItem(item)) {
+        if (!dry_run && existingTask && !['done', 'cancelled'].includes(existingTask.status)) {
+          const resolvedMetadata = mergeHabiMetadata(existingTask.metadata, {
+            cancelled_reason: 'resolved_at_source',
+          })
+          db.prepare(`
+            UPDATE tasks
+            SET status = 'cancelled', metadata = ?, updated_at = ?
+            WHERE id = ? AND workspace_id = ?
+          `).run(JSON.stringify(resolvedMetadata), now, existingTask.id, workspaceId)
+          addTaskComment(
+            db,
+            workspaceId,
+            existingTask.id,
+            'Foreman update\nSource backlog now marks this item as resolved/reference-only. Retiring the task to keep the queue honest.'
+          )
+        }
+        actionPlan.push({
+          action: 'skip',
+          task_id: existingTask?.id,
+          title: item.title,
+          lane: item.lane,
+          reason: 'resolved_reference_item',
+        })
+        continue
+      }
+
       const shouldCreate = !existingTask || existingTask.status === 'done' || existingTask.status === 'cancelled'
+      if (existingTask && shouldSkipCancelledFingerprintReuse(existingTask)) {
+        actionPlan.push({
+          action: 'skip',
+          task_id: existingTask.id,
+          title: item.title,
+          lane: item.lane,
+          reason: `cancelled_reason=${mergeHabiMetadata(existingTask.metadata, {}).cancelled_reason}`,
+        })
+        continue
+      }
       if (shouldCreate) {
         const metadata = metadataPatch
         const contract = validateHabiTaskContract({ assigned_to: assignee, metadata })
@@ -429,6 +496,8 @@ export async function POST(request: NextRequest) {
         executionMode: item.execution_mode,
         disposition: item.disposition,
         executionContextReady: previousMetadata.execution_context_ready === true,
+        blockedReason: targetStatus.blockedReason || metadataPatch.blocked_reason,
+        qcPassed: previousMetadata.qc_passed === true,
       })
       const mergedMetadata = mergeHabiMetadata(existingTask.metadata, metadataPatch)
       const contract = validateHabiTaskContract({ assigned_to: assignee, metadata: mergedMetadata })

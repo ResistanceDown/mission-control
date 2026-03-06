@@ -72,7 +72,10 @@ export async function GET(
     }
     
     // Parse JSON fields
-    const taskWithParsedData = mapTaskRow(task);
+    const taskWithParsedData = {
+      ...mapTaskRow(task),
+      aegisApproved: hasAegisApproval(db, taskId, workspaceId),
+    };
     
     return NextResponse.json({ task: taskWithParsedData });
   } catch (error) {
@@ -542,7 +545,10 @@ export async function PUT(
       LEFT JOIN projects p ON p.id = t.project_id AND p.workspace_id = t.workspace_id
       WHERE t.id = ? AND t.workspace_id = ?
     `).get(taskId, workspaceId) as Task;
-    const parsedTask = mapTaskRow(updatedTask);
+    const parsedTask = {
+      ...mapTaskRow(updatedTask),
+      aegisApproved: hasAegisApproval(db, taskId, workspaceId),
+    };
 
     // Broadcast to SSE clients
     eventBus.broadcast('task.updated', parsedTask);

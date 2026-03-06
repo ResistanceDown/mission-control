@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useMissionControl } from '@/store'
 import { useSmartPoll } from '@/lib/use-smart-poll'
@@ -66,6 +66,19 @@ interface ParsedSystemComment {
   title: string
   lines: string[]
   tone?: 'neutral' | 'warning' | 'action'
+}
+
+type HarnessSummary = {
+  status?: string
+  scope?: string
+  issue_count?: number
+  blocking_findings?: number
+  audit_json_path?: string
+}
+
+type DeliveryState = {
+  label: string
+  detail: string
 }
 
 function parseSystemComment(comment: Comment): ParsedSystemComment | null {
@@ -350,11 +363,10 @@ export function TaskBoardPanel() {
   const [showProjectManager, setShowProjectManager] = useState(false)
   const [editingTask, setEditingTask] = useState<Task | null>(null)
   const [showStickyScrollbar, setShowStickyScrollbar] = useState(false)
-  const [stickyScrollbarWidth, setStickyScrollbarWidth] = useState(0)
+  const [stickyScrollbarMax, setStickyScrollbarMax] = useState(0)
+  const [stickyScrollbarValue, setStickyScrollbarValue] = useState(0)
   const dragCounter = useRef(0)
   const boardScrollRef = useRef<HTMLDivElement | null>(null)
-  const stickyScrollbarRef = useRef<HTMLDivElement | null>(null)
-  const syncSourceRef = useRef<'board' | 'sticky' | null>(null)
   const selectedTaskIdFromUrl = Number.parseInt(searchParams.get('taskId') || '', 10)
 
   const updateTaskUrl = useCallback((taskId: number | null, mode: 'push' | 'replace' = 'push') => {
@@ -381,20 +393,12 @@ export function TaskBoardPanel() {
 
   const syncStickyScrollbar = useCallback(() => {
     const board = boardScrollRef.current
-    const sticky = stickyScrollbarRef.current
     if (!board) return
 
     const hasOverflow = board.scrollWidth > board.clientWidth + 1
-    setStickyScrollbarWidth(board.scrollWidth)
+    setStickyScrollbarMax(Math.max(0, board.scrollWidth - board.clientWidth))
+    setStickyScrollbarValue(board.scrollLeft)
     setShowStickyScrollbar(hasOverflow)
-
-    if (sticky && syncSourceRef.current !== 'sticky') {
-      syncSourceRef.current = 'board'
-      sticky.scrollLeft = board.scrollLeft
-      requestAnimationFrame(() => {
-        if (syncSourceRef.current === 'board') syncSourceRef.current = null
-      })
-    }
   }, [])
 
   // Fetch tasks, agents, and projects
@@ -465,21 +469,7 @@ export function TaskBoardPanel() {
     if (!board) return
 
     const handleBoardScroll = () => {
-      if (!stickyScrollbarRef.current || syncSourceRef.current === 'sticky') return
-      syncSourceRef.current = 'board'
-      stickyScrollbarRef.current.scrollLeft = board.scrollLeft
-      requestAnimationFrame(() => {
-        if (syncSourceRef.current === 'board') syncSourceRef.current = null
-      })
-    }
-
-    const handleStickyScroll = () => {
-      if (!stickyScrollbarRef.current || syncSourceRef.current === 'board') return
-      syncSourceRef.current = 'sticky'
-      board.scrollLeft = stickyScrollbarRef.current.scrollLeft
-      requestAnimationFrame(() => {
-        if (syncSourceRef.current === 'sticky') syncSourceRef.current = null
-      })
+      setStickyScrollbarValue(board.scrollLeft)
     }
 
     const resizeObserver = new ResizeObserver(() => {
@@ -487,14 +477,12 @@ export function TaskBoardPanel() {
     })
 
     board.addEventListener('scroll', handleBoardScroll, { passive: true })
-    stickyScrollbarRef.current?.addEventListener('scroll', handleStickyScroll, { passive: true })
     window.addEventListener('resize', syncStickyScrollbar)
     resizeObserver.observe(board)
     syncStickyScrollbar()
 
     return () => {
       board.removeEventListener('scroll', handleBoardScroll)
-      stickyScrollbarRef.current?.removeEventListener('scroll', handleStickyScroll)
       window.removeEventListener('resize', syncStickyScrollbar)
       resizeObserver.disconnect()
     }
@@ -865,13 +853,22 @@ export function TaskBoardPanel() {
 
       {showStickyScrollbar && (
         <div className="sticky bottom-0 z-20 px-4 pb-3 pt-1">
-          <div
-            ref={stickyScrollbarRef}
-            className="floating-task-scrollbar overflow-x-auto overflow-y-hidden bg-background/95 backdrop-blur"
-            aria-hidden="true"
-          >
-            <div style={{ width: stickyScrollbarWidth, height: 1 }} />
-          </div>
+          <input
+            type="range"
+            min={0}
+            max={stickyScrollbarMax}
+            step={1}
+            value={Math.min(stickyScrollbarValue, stickyScrollbarMax)}
+            onChange={(event) => {
+              const nextValue = Number(event.target.value)
+              setStickyScrollbarValue(nextValue)
+              if (boardScrollRef.current) {
+                boardScrollRef.current.scrollLeft = nextValue
+              }
+            }}
+            className="floating-task-scrollbar-range w-full"
+            aria-label="Scroll task board horizontally"
+          />
         </div>
       )}
 
@@ -926,13 +923,15 @@ export function TaskBoardPanel() {
 }
 
 // Task Detail Modal Component (placeholder - would be implemented separately)
-function TaskDetailModal({
+export function TaskDetailModal({
   task,
   agents,
   projects,
   onClose,
   onUpdate,
-  onEdit
+  onEdit,
+  showEditButton = true,
+  actionSlot,
 }: {
   task: Task
   agents: Agent[]
@@ -940,6 +939,8 @@ function TaskDetailModal({
   onClose: () => void
   onUpdate: () => void
   onEdit: (task: Task) => void
+  showEditButton?: boolean
+  actionSlot?: ReactNode
 }) {
   const { currentUser } = useMissionControl()
   const commentAuthor = currentUser?.username || 'system'
@@ -971,6 +972,38 @@ function TaskDetailModal({
   const evidencePath = typeof metadata.evidence_path === 'string' ? metadata.evidence_path : ''
   const handoffPath = typeof metadata.handoff_artifact === 'string' ? metadata.handoff_artifact : ''
   const worktreePath = typeof metadata.worktree_path === 'string' ? metadata.worktree_path : ''
+  const harnessArtifact = typeof metadata.harness_artifact === 'string' ? metadata.harness_artifact : ''
+  const harnessSummary = metadata.harness_summary && typeof metadata.harness_summary === 'object' ? metadata.harness_summary as HarnessSummary : null
+  const harnessDiscoverySummary = metadata.harness_discovery_summary && typeof metadata.harness_discovery_summary === 'object' ? metadata.harness_discovery_summary as HarnessSummary : null
+  const harnessStatus = harnessSummary?.status || harnessDiscoverySummary?.status || (metadata.harness_required ? 'required' : '')
+  const harnessScope = String(harnessSummary?.scope || harnessDiscoverySummary?.scope || '')
+  const harnessIssueCount = harnessSummary?.issue_count ?? harnessDiscoverySummary?.issue_count
+  const harnessBlockingCount = harnessSummary?.blocking_findings
+  const harnessDisplay = harnessArtifact
+    ? harnessArtifact
+    : harnessSummary?.audit_json_path || harnessDiscoverySummary?.audit_json_path || 'No harness artifact attached.'
+  const deliveryState: DeliveryState = (() => {
+    const liveInMain = metadata.live_in_main === true
+    const liveInMainAt = typeof metadata.live_in_main_at === 'string' ? metadata.live_in_main_at : ''
+    const branchName = typeof metadata.branch_name === 'string' ? metadata.branch_name : ''
+    const branchDetail = branchName ? `Branch: ${branchName}` : 'No branch attached.'
+    if (liveInMain) {
+      return {
+        label: 'Live in main',
+        detail: liveInMainAt ? `Merged into the main workspace and validated there. Updated: ${liveInMainAt}` : 'Merged into the main workspace and validated there.',
+      }
+    }
+    if (branchName) {
+      return {
+        label: 'Branch preview',
+        detail: `${branchDetail}. Review this as branch/worktree work until the live route is switched.`,
+      }
+    }
+    return {
+      label: 'No delivery state recorded',
+      detail: 'This task does not yet declare whether the work is branch-only or live in the main workspace.',
+    }
+  })()
   const reviewStatusLabel = task.status === 'quality_review'
     ? (task.aegisApproved ? 'QC passed. This is ready for your final approval.' : 'QC is still running. This is not ready for founder approval yet.')
     : task.status === 'review'
@@ -1171,12 +1204,14 @@ function TaskDetailModal({
           <div className="flex justify-between items-start mb-4">
             <h3 id="task-detail-title" className="text-xl font-bold text-foreground">{task.title}</h3>
             <div className="flex gap-2">
-              <button
-                onClick={() => onEdit(task)}
-                className="px-3 py-1.5 bg-primary/20 text-primary hover:bg-primary/30 rounded-md transition-smooth text-sm font-medium"
-              >
-                Edit
-              </button>
+              {showEditButton ? (
+                <button
+                  onClick={() => onEdit(task)}
+                  className="px-3 py-1.5 bg-primary/20 text-primary hover:bg-primary/30 rounded-md transition-smooth text-sm font-medium"
+                >
+                  Edit
+                </button>
+              ) : null}
               <button
                 onClick={onClose}
                 aria-label="Close task details"
@@ -1213,29 +1248,56 @@ function TaskDetailModal({
           {activeTab === 'details' && (
             <div id="tabpanel-details" role="tabpanel" aria-label="Details" className="grid grid-cols-2 gap-4 text-sm mt-4">
               <div className="col-span-2 rounded-xl border border-border/70 bg-surface-1/50 p-4 space-y-3">
+                {actionSlot ? (
+                  <div className="rounded-lg border border-primary/20 bg-primary/5 p-3">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Founder Actions</div>
+                    <div className="mt-3">{actionSlot}</div>
+                  </div>
+                ) : null}
                 <div>
                   <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Review Summary</div>
                   <div className="mt-2 text-sm text-foreground">{reviewStatusLabel}</div>
                 </div>
-                <div className="grid gap-3 md:grid-cols-2">
-                  <div>
+                <div className="space-y-3">
+                  <div className="rounded-lg border border-border/60 bg-surface-2/45 p-3">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Delivery state</div>
+                    <div className="mt-2 space-y-1 rounded-md bg-black/20 p-3">
+                      <div className="text-sm font-medium text-foreground">{deliveryState.label}</div>
+                      <div className="text-sm text-foreground whitespace-pre-wrap">{deliveryState.detail}</div>
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-border/60 bg-surface-2/45 p-3">
                     <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">What changed</div>
                     <div className="mt-1 text-sm text-foreground whitespace-pre-wrap">{whatChanged}</div>
                   </div>
-                  <div>
+                  <div className="rounded-lg border border-border/60 bg-surface-2/45 p-3">
                     <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Why it is ready</div>
                     <div className="mt-1 text-sm text-foreground whitespace-pre-wrap">{whyReady}</div>
                   </div>
-                  <div>
+                  <div className="rounded-lg border border-border/60 bg-surface-2/45 p-3">
                     <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Evidence</div>
-                    <div className="mt-1 text-sm text-foreground whitespace-pre-wrap">{evidencePath || 'No evidence path attached.'}</div>
-                    {handoffPath ? <div className="mt-1 text-xs text-muted-foreground">Handoff: {handoffPath}</div> : null}
-                    {worktreePath ? <div className="mt-1 text-xs text-muted-foreground">Worktree: {worktreePath}</div> : null}
+                    <div className="mt-2 space-y-2 rounded-md bg-black/20 p-3">
+                      <div className="break-words text-sm text-foreground whitespace-pre-wrap [overflow-wrap:anywhere]">{evidencePath || 'No evidence path attached.'}</div>
+                      {handoffPath ? <div className="break-words text-xs text-muted-foreground [overflow-wrap:anywhere]">Handoff: {handoffPath}</div> : null}
+                      {worktreePath ? <div className="break-words text-xs text-muted-foreground [overflow-wrap:anywhere]">Worktree: {worktreePath}</div> : null}
+                    </div>
                   </div>
-                  <div>
+                  <div className="rounded-lg border border-border/60 bg-surface-2/45 p-3">
                     <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Validation</div>
-                    <div className="mt-1 text-sm text-foreground whitespace-pre-wrap">{validationCommands.length ? validationCommands.join('\n') : 'No validation commands attached.'}</div>
+                    <div className="mt-2 max-h-40 overflow-auto rounded-md bg-black/20 p-3">
+                      <div className="break-words font-mono-tight text-sm text-foreground whitespace-pre-wrap [overflow-wrap:anywhere]">{validationCommands.length ? validationCommands.join('\n') : 'No validation commands attached.'}</div>
+                    </div>
                     {latestReview ? <div className="mt-1 text-xs text-muted-foreground">Latest QC: {latestReview.reviewer} — {latestReview.status}</div> : null}
+                  </div>
+                  <div className="rounded-lg border border-border/60 bg-surface-2/45 p-3">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Harness</div>
+                    <div className="mt-2 space-y-1 rounded-md bg-black/20 p-3">
+                      <div className="break-words text-sm text-foreground whitespace-pre-wrap [overflow-wrap:anywhere]">{harnessDisplay}</div>
+                      {harnessStatus ? <div className="text-xs text-muted-foreground">Status: {harnessStatus}</div> : null}
+                      {harnessScope ? <div className="text-xs text-muted-foreground">Scope: {harnessScope}</div> : null}
+                      {typeof harnessBlockingCount === 'number' ? <div className="text-xs text-muted-foreground">Blocking findings: {harnessBlockingCount}</div> : null}
+                      {typeof harnessIssueCount === 'number' ? <div className="text-xs text-muted-foreground">Issue count: {harnessIssueCount}</div> : null}
+                    </div>
                   </div>
                 </div>
                 <div>
