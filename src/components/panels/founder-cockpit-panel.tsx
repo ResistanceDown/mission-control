@@ -1,9 +1,9 @@
 'use client'
 
 import { useCallback, useState } from 'react'
-import { useRouter } from 'next/navigation'
 import { useSmartPoll } from '@/lib/use-smart-poll'
 import { useNavigateToPanel } from '@/lib/navigation'
+import { TaskDetailModal } from '@/components/panels/task-board-panel'
 
 interface FounderApiResponse {
   hasPacket: boolean
@@ -78,6 +78,29 @@ interface FounderApiResponse {
       staleAssigned: number
     }
   }
+}
+
+type FounderTaskDetail = {
+  id: number
+  title: string
+  description?: string
+  status: 'inbox' | 'assigned' | 'in_progress' | 'review' | 'quality_review' | 'done' | 'cancelled'
+  priority: 'low' | 'medium' | 'high' | 'critical' | 'urgent'
+  assigned_to?: string
+  created_by: string
+  created_at: number
+  updated_at: number
+  due_date?: number
+  estimated_hours?: number
+  actual_hours?: number
+  tags?: string[]
+  metadata?: any
+  aegisApproved?: boolean
+  project_id?: number
+  project_ticket_no?: number
+  project_name?: string
+  project_prefix?: string
+  ticket_ref?: string
 }
 
 function useFounderData() {
@@ -224,7 +247,6 @@ export function FounderSnapshotCard() {
 }
 
 export function FounderCockpitPanel() {
-  const router = useRouter()
   const navigateToPanel = useNavigateToPanel()
   const { data, loading, reload } = useFounderData()
   const [taskActionState, setTaskActionState] = useState<Record<number, { status: 'idle' | 'saving' | 'error'; message?: string }>>({})
@@ -244,6 +266,8 @@ export function FounderCockpitPanel() {
   const [signalExpanded, setSignalExpanded] = useState(false)
   const [lastSavedSignal, setLastSavedSignal] = useState<string | null>(null)
   const [secondaryTab, setSecondaryTab] = useState<'signals' | 'proof' | 'system'>('signals')
+  const [selectedTask, setSelectedTask] = useState<FounderTaskDetail | null>(null)
+  const [taskDetailState, setTaskDetailState] = useState<{ status: 'idle' | 'loading' | 'error'; message?: string }>({ status: 'idle' })
 
   if (loading) {
     return <div className="panel"><div className="panel-body"><div className="h-36 rounded-lg shimmer" /></div></div>
@@ -266,8 +290,20 @@ export function FounderCockpitPanel() {
       })
     : ['No active Habi task movement is visible yet.']
 
-  const openTaskReviewItem = (taskId: number) => {
-    router.push(`/tasks?taskId=${taskId}`)
+  const openTaskReviewItem = async (taskId: number) => {
+    setTaskDetailState({ status: 'loading' })
+    try {
+      const response = await fetch(`/api/tasks/${taskId}`)
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok) {
+        setTaskDetailState({ status: 'error', message: payload.error || 'Failed to load task details.' })
+        return
+      }
+      setSelectedTask(payload.task)
+      setTaskDetailState({ status: 'idle' })
+    } catch {
+      setTaskDetailState({ status: 'error', message: 'Failed to load task details.' })
+    }
   }
 
   function beginSendBack(taskId: number) {
@@ -336,6 +372,13 @@ export function FounderCockpitPanel() {
       setExpandedSendBack((current) => ({ ...current, [taskId]: false }))
       setSendBackDrafts((current) => ({ ...current, [taskId]: '' }))
       await reload()
+      if (selectedTask?.id === taskId) {
+        const refreshed = await fetch(`/api/tasks/${taskId}`)
+        const refreshedPayload = await refreshed.json().catch(() => ({}))
+        if (refreshed.ok && refreshedPayload.task) {
+          setSelectedTask(refreshedPayload.task)
+        }
+      }
     } catch {
       setTaskActionState((current) => ({
         ...current,
@@ -380,6 +423,11 @@ export function FounderCockpitPanel() {
 
   return (
     <div className="space-y-4 p-5">
+      {taskDetailState.status === 'error' ? (
+        <div className="rounded-lg border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-sm text-rose-200">
+          {taskDetailState.message}
+        </div>
+      ) : null}
       <div className="panel border-white/10 bg-[#0f141b] shadow-[0_18px_45px_rgba(0,0,0,0.35)]">
         <div className="panel-header flex items-start justify-between gap-3">
           <div>
@@ -478,7 +526,7 @@ export function FounderCockpitPanel() {
                         </div>
                       </div>
                       <button
-                        onClick={() => openTaskReviewItem(task.id)}
+                        onClick={() => void openTaskReviewItem(task.id)}
                         className="shrink-0 px-3 py-2 rounded-lg bg-primary/15 text-primary text-sm font-medium hover:bg-primary/20 transition-smooth"
                       >
                         Open
@@ -579,7 +627,7 @@ export function FounderCockpitPanel() {
                   <button
                     key={task.id}
                     type="button"
-                    onClick={() => openTaskReviewItem(task.id)}
+                    onClick={() => void openTaskReviewItem(task.id)}
                     className="w-full rounded-lg border border-amber-500/15 bg-black/15 p-3 text-left transition-smooth hover:bg-surface-2"
                   >
                     <div className="flex items-start justify-between gap-3">
@@ -611,7 +659,7 @@ export function FounderCockpitPanel() {
                   <button
                     key={task.id}
                     type="button"
-                    onClick={() => openTaskReviewItem(task.id)}
+                    onClick={() => void openTaskReviewItem(task.id)}
                     className="w-full rounded-lg border border-purple-500/15 bg-black/15 p-3 text-left transition-smooth hover:bg-surface-2"
                   >
                     <div className="flex items-start justify-between gap-3">
@@ -832,6 +880,102 @@ export function FounderCockpitPanel() {
           </div>
         </div>
       </div>
+      {taskDetailState.status === 'loading' ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="rounded-lg border border-border bg-card px-4 py-3 text-sm text-foreground shadow-xl">
+            Loading task details...
+          </div>
+        </div>
+      ) : null}
+      {selectedTask ? (
+        <TaskDetailModal
+          task={selectedTask}
+          agents={[]}
+          projects={[]}
+          showEditButton={false}
+          onClose={() => setSelectedTask(null)}
+          onUpdate={() => {
+            void reload()
+            void openTaskReviewItem(selectedTask.id)
+          }}
+          onEdit={() => {}}
+          actionSlot={
+            <div className="space-y-3">
+              <div className="flex flex-wrap gap-2">
+                {selectedTask.status === 'assigned' ? (
+                  <button
+                    onClick={() => void updateTaskStatus(selectedTask.id, 'in_progress', {
+                      comment: selectedTask.metadata?.disposition === 'founder_decision_needed'
+                        ? 'Founder approved this decision task to move into active work. Continue with the requested analysis and return with evidence.'
+                        : 'Founder approved this task for execution. Begin work, attach evidence as you go, and return it to review when ready.',
+                    })}
+                    disabled={taskActionState[selectedTask.id]?.status === 'saving'}
+                    className="px-3 py-2 rounded-lg bg-emerald-500/15 text-emerald-300 text-sm font-medium hover:bg-emerald-500/20 transition-smooth disabled:opacity-60"
+                  >
+                    {taskActionState[selectedTask.id]?.status === 'saving' ? 'Updating...' : 'Approve For Execution'}
+                  </button>
+                ) : null}
+                {selectedTask.status === 'review' ? (
+                  <button
+                    onClick={() => void updateTaskStatus(selectedTask.id, 'quality_review')}
+                    disabled={taskActionState[selectedTask.id]?.status === 'saving'}
+                    className="px-3 py-2 rounded-lg bg-indigo-500/15 text-indigo-300 text-sm font-medium hover:bg-indigo-500/20 transition-smooth disabled:opacity-60"
+                  >
+                    {taskActionState[selectedTask.id]?.status === 'saving' ? 'Updating...' : 'Send To QC'}
+                  </button>
+                ) : null}
+                {selectedTask.status === 'quality_review' && selectedTask.aegisApproved ? (
+                  <button
+                    onClick={() => void updateTaskStatus(selectedTask.id, 'done')}
+                    disabled={taskActionState[selectedTask.id]?.status === 'saving'}
+                    className="px-3 py-2 rounded-lg bg-emerald-500/15 text-emerald-300 text-sm font-medium hover:bg-emerald-500/20 transition-smooth disabled:opacity-60"
+                  >
+                    {taskActionState[selectedTask.id]?.status === 'saving' ? 'Updating...' : 'Approve And Mark Done'}
+                  </button>
+                ) : null}
+                <button
+                  onClick={() => beginSendBack(selectedTask.id)}
+                  disabled={taskActionState[selectedTask.id]?.status === 'saving'}
+                  className="px-3 py-2 rounded-lg bg-secondary text-foreground text-sm font-medium hover:bg-secondary/80 transition-smooth disabled:opacity-60"
+                >
+                  Send Back
+                </button>
+              </div>
+              {expandedSendBack[selectedTask.id] ? (
+                <div className="rounded-lg border border-red-500/15 bg-black/20 p-3">
+                  <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Send Back Reason</div>
+                  <div className="mt-1 text-xs text-muted-foreground">This note is required. It will be posted on the task so the assignee knows exactly what to change.</div>
+                  <textarea
+                    className="mt-2 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm min-h-20"
+                    placeholder="Explain what needs to change before this comes back for approval."
+                    value={sendBackDrafts[selectedTask.id] || ''}
+                    onChange={(event) => setSendBackDrafts((current) => ({ ...current, [selectedTask.id]: event.target.value }))}
+                  />
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      onClick={() => submitSendBack(selectedTask.id)}
+                      disabled={taskActionState[selectedTask.id]?.status === 'saving'}
+                      className="px-3 py-2 rounded-lg bg-secondary text-foreground text-sm font-medium hover:bg-secondary/80 transition-smooth disabled:opacity-60"
+                    >
+                      {taskActionState[selectedTask.id]?.status === 'saving' ? 'Updating...' : 'Send Back To In Progress'}
+                    </button>
+                    <button
+                      onClick={() => setExpandedSendBack((current) => ({ ...current, [selectedTask.id]: false }))}
+                      disabled={taskActionState[selectedTask.id]?.status === 'saving'}
+                      className="px-3 py-2 rounded-lg border border-border text-sm font-medium text-muted-foreground hover:bg-surface-2 transition-smooth disabled:opacity-60"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+              {taskActionState[selectedTask.id]?.status === 'error' ? (
+                <div className="text-xs text-rose-300">{taskActionState[selectedTask.id]?.message}</div>
+              ) : null}
+            </div>
+          }
+        />
+      ) : null}
     </div>
   )
 }

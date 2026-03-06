@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useMissionControl } from '@/store'
 import { useSmartPoll } from '@/lib/use-smart-poll'
@@ -919,13 +919,15 @@ export function TaskBoardPanel() {
 }
 
 // Task Detail Modal Component (placeholder - would be implemented separately)
-function TaskDetailModal({
+export function TaskDetailModal({
   task,
   agents,
   projects,
   onClose,
   onUpdate,
-  onEdit
+  onEdit,
+  showEditButton = true,
+  actionSlot,
 }: {
   task: Task
   agents: Agent[]
@@ -933,6 +935,8 @@ function TaskDetailModal({
   onClose: () => void
   onUpdate: () => void
   onEdit: (task: Task) => void
+  showEditButton?: boolean
+  actionSlot?: ReactNode
 }) {
   const resolvedProjectName =
     task.project_name ||
@@ -1173,12 +1177,14 @@ function TaskDetailModal({
           <div className="flex justify-between items-start mb-4">
             <h3 id="task-detail-title" className="text-xl font-bold text-foreground">{task.title}</h3>
             <div className="flex gap-2">
-              <button
-                onClick={() => onEdit(task)}
-                className="px-3 py-1.5 bg-primary/20 text-primary hover:bg-primary/30 rounded-md transition-smooth text-sm font-medium"
-              >
-                Edit
-              </button>
+              {showEditButton ? (
+                <button
+                  onClick={() => onEdit(task)}
+                  className="px-3 py-1.5 bg-primary/20 text-primary hover:bg-primary/30 rounded-md transition-smooth text-sm font-medium"
+                >
+                  Edit
+                </button>
+              ) : null}
               <button
                 onClick={onClose}
                 aria-label="Close task details"
@@ -1215,6 +1221,12 @@ function TaskDetailModal({
           {activeTab === 'details' && (
             <div id="tabpanel-details" role="tabpanel" aria-label="Details" className="grid grid-cols-2 gap-4 text-sm mt-4">
               <div className="col-span-2 rounded-xl border border-border/70 bg-surface-1/50 p-4 space-y-3">
+                {actionSlot ? (
+                  <div className="rounded-lg border border-primary/20 bg-primary/5 p-3">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Founder Actions</div>
+                    <div className="mt-3">{actionSlot}</div>
+                  </div>
+                ) : null}
                 <div>
                   <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Review Summary</div>
                   <div className="mt-2 text-sm text-foreground">{reviewStatusLabel}</div>
