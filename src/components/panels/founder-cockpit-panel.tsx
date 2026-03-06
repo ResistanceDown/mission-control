@@ -67,7 +67,7 @@ interface FounderApiResponse {
     }>
     readyForFounderDecision: number
     reviewQueue: Array<{ id: number; title: string; status: string; assigned_to: string | null; priority: string; updated_at: number; aegisApproved: boolean }>
-    appFinishQueue: Array<{ id: number; title: string; status: string; assigned_to: string | null; priority: string; updated_at: number }>
+    appFinishQueue: Array<{ id: number; title: string; status: string; assigned_to: string | null; priority: string; updated_at: number; founderApproved: boolean }>
     appFinishCounts: {
       active: number
       blockedByFounder: number
@@ -101,6 +101,12 @@ type FounderTaskDetail = {
   project_name?: string
   project_prefix?: string
   ticket_ref?: string
+}
+
+function hasFounderApproval(task: { metadata?: Record<string, any> | null } | null | undefined) {
+  const metadata = task?.metadata
+  if (!metadata || typeof metadata !== 'object') return false
+  return Boolean(metadata.founder_approved_at || metadata.founder_approved_for_execution)
 }
 
 function useFounderData() {
@@ -668,6 +674,9 @@ export function FounderCockpitPanel() {
                         <div className="mt-1 text-xs text-muted-foreground">
                           {task.assigned_to || 'unassigned'} • {task.status} • {task.priority}
                         </div>
+                        {task.status === 'assigned' && task.founderApproved ? (
+                          <div className="mt-1 text-xs text-emerald-300">Founder approved • queued for execution</div>
+                        ) : null}
                       </div>
                       <span className="shrink-0 text-xs text-primary">Open</span>
                     </div>
@@ -902,7 +911,7 @@ export function FounderCockpitPanel() {
           actionSlot={
             <div className="space-y-3">
               <div className="flex flex-wrap gap-2">
-                {selectedTask.status === 'assigned' ? (
+                {selectedTask.status === 'assigned' && !hasFounderApproval(selectedTask) ? (
                   <button
                     onClick={() => void updateTaskStatus(selectedTask.id, 'in_progress', {
                       comment: selectedTask.metadata?.disposition === 'founder_decision_needed'
@@ -914,6 +923,11 @@ export function FounderCockpitPanel() {
                   >
                     {taskActionState[selectedTask.id]?.status === 'saving' ? 'Updating...' : 'Approve For Execution'}
                   </button>
+                ) : null}
+                {selectedTask.status === 'assigned' && hasFounderApproval(selectedTask) ? (
+                  <div className="px-3 py-2 rounded-lg bg-emerald-500/10 text-emerald-300 text-sm font-medium">
+                    Founder approved • queued for execution
+                  </div>
                 ) : null}
                 {selectedTask.status === 'review' ? (
                   <button

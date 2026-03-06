@@ -116,25 +116,36 @@
     display: none;
   }
 
-  .floating-task-scrollbar {
-    scrollbar-width: thin;
-  }
-
-  .floating-task-scrollbar::-webkit-scrollbar {
+  .floating-task-scrollbar-range {
+    appearance: none;
     height: 5px;
-  }
-
-  .floating-task-scrollbar::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  .floating-task-scrollbar::-webkit-scrollbar-thumb {
-    background: hsl(var(--border));
     border-radius: 9999px;
+    background: hsl(var(--border));
+    outline: none;
   }
 
-  .floating-task-scrollbar::-webkit-scrollbar-thumb:hover {
+  .floating-task-scrollbar-range::-webkit-slider-thumb {
+    appearance: none;
+    width: 40px;
+    height: 12px;
+    border-radius: 9999px;
     background: hsl(var(--muted-foreground));
+    cursor: ew-resize;
+  }
+
+  .floating-task-scrollbar-range::-moz-range-thumb {
+    width: 40px;
+    height: 12px;
+    border: 0;
+    border-radius: 9999px;
+    background: hsl(var(--muted-foreground));
+    cursor: ew-resize;
+  }
+
+  .floating-task-scrollbar-range::-moz-range-track {
+    height: 5px;
+    border-radius: 9999px;
+    background: hsl(var(--border));
   }
 }
 
