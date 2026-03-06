@@ -312,6 +312,10 @@ function loadTaskSnapshot(workspaceId: number) {
     const executionMode = String(metadata.execution_mode || '').trim()
     const blockedReason = String(metadata.blocked_reason || '').trim()
     const founderApproved = hasFounderApproval(metadata)
+    const waitingOnForeman = Boolean(metadata.waiting_on_foreman)
+    const staleAssigned = Boolean(metadata.stale_assigned)
+    const waitingOnQc = Boolean(metadata.waiting_on_qc)
+    const sentBackByQc = Boolean(metadata.sent_back_by_qc)
     const evidenceExists = evidencePath ? existsSync(evidencePath) : false
     const worktreeExists =
       executionMode === 'draft_pr'
@@ -335,6 +339,10 @@ function loadTaskSnapshot(workspaceId: number) {
       worktreeExists,
       stalled,
       founderApproved,
+      waitingOnForeman,
+      staleAssigned,
+      waitingOnQc,
+      sentBackByQc,
     }
   })
 
@@ -355,6 +363,10 @@ function loadTaskSnapshot(workspaceId: number) {
       ).length,
       waitingOnKickoff: appFinishHealth.filter((task) => task.status === 'in_progress' && !task.kickoffSeen).length,
       stalledInProgress: appFinishHealth.filter((task) => task.stalled).length,
+      waitingOnForeman: appFinishHealth.filter((task) => task.waitingOnForeman).length,
+      waitingOnQc: appFinishHealth.filter((task) => task.waitingOnQc).length,
+      sentBackByQc: appFinishHealth.filter((task) => task.sentBackByQc).length,
+      staleAssigned: appFinishHealth.filter((task) => task.staleAssigned).length,
     },
   }
 }
