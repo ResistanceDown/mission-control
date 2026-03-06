@@ -129,6 +129,8 @@ export async function PUT(
       tags,
       metadata
     } = body;
+    const requestedStatus = status;
+    let persistedStatus = requestedStatus;
     
     const now = Math.floor(Date.now() / 1000);
     const descriptionMentionResolution = description !== undefined
@@ -143,11 +145,28 @@ export async function PUT(
 
     const previousDescriptionMentionRecipients = resolveMentionRecipients(currentTask.description || '', db, workspaceId).recipients;
     const effectiveAssignedTo = assigned_to !== undefined ? assigned_to : currentTask.assigned_to;
-    const effectiveMetadata = metadata !== undefined ? metadata : (currentTask as any).metadata;
+    let effectiveMetadata = metadata !== undefined ? metadata : (currentTask as any).metadata;
     const currentMetadata = parseHabiTaskMetadata(currentTask.metadata);
+    const plannedExecutionApproval =
+      requestedStatus === 'in_progress' &&
+      currentTask.status === 'assigned' &&
+      isHabiTask({ assigned_to: effectiveAssignedTo }) &&
+      ['draft_pr', 'audit_only'].includes(String(currentMetadata.execution_mode || '')) &&
+      !currentMetadata.founder_approved_at;
+
+    if (plannedExecutionApproval) {
+      persistedStatus = 'assigned';
+      effectiveMetadata = {
+        ...currentMetadata,
+        ...(typeof metadata === 'object' && metadata ? metadata : {}),
+        founder_approved_for_execution: true,
+        founder_approved_at: new Date(now * 1000).toISOString(),
+        founder_approved_by: auth.user.username,
+      };
+    }
     const shouldValidateHabiContract =
       isHabiTask({ assigned_to: effectiveAssignedTo }) &&
-      (status === 'done' || assigned_to !== undefined || metadata !== undefined);
+      (persistedStatus === 'done' || assigned_to !== undefined || metadata !== undefined || plannedExecutionApproval);
     if (shouldValidateHabiContract) {
       const contract = validateHabiTaskContract({
         assigned_to: effectiveAssignedTo,
@@ -175,14 +194,14 @@ export async function PUT(
       updateParams.push(description);
     }
     if (status !== undefined) {
-      if (status === 'done' && !hasAegisApproval(db, taskId, workspaceId)) {
+      if (persistedStatus === 'done' && !hasAegisApproval(db, taskId, workspaceId)) {
         return NextResponse.json(
           { error: 'Aegis approval is required to move task to done.' },
           { status: 403 }
         )
       }
       fieldsToUpdate.push('status = ?');
-      updateParams.push(status);
+      updateParams.push(persistedStatus);
     }
     if (priority !== undefined) {
       fieldsToUpdate.push('priority = ?');
@@ -238,9 +257,9 @@ export async function PUT(
       fieldsToUpdate.push('tags = ?');
       updateParams.push(JSON.stringify(tags));
     }
-    if (metadata !== undefined) {
+    if (metadata !== undefined || plannedExecutionApproval) {
       fieldsToUpdate.push('metadata = ?');
-      updateParams.push(JSON.stringify(metadata));
+      updateParams.push(JSON.stringify(effectiveMetadata));
     }
     
     fieldsToUpdate.push('updated_at = ?');
@@ -262,8 +281,8 @@ export async function PUT(
     // Track changes and log activities
     const changes: string[] = [];
     
-    if (status && status !== currentTask.status) {
-      changes.push(`status: ${currentTask.status} → ${status}`);
+      if (persistedStatus && persistedStatus !== currentTask.status) {
+      changes.push(`status: ${currentTask.status} → ${persistedStatus}`);
       
       // Create notification for status change if assigned
       if (currentTask.assigned_to) {
@@ -271,7 +290,7 @@ export async function PUT(
           currentTask.assigned_to,
           'status_change',
           'Task Status Updated',
-          `Task "${currentTask.title}" status changed to ${status}`,
+          `Task "${currentTask.title}" status changed to ${persistedStatus}`,
           'task',
           taskId,
           workspaceId
@@ -302,7 +321,7 @@ export async function PUT(
           taskId,
           title: title || currentTask.title,
           priority: String(priority || currentTask.priority),
-          status: String(status || currentTask.status),
+          status: String(persistedStatus || currentTask.status),
         })
         if (!dispatch.delivered) {
           logger.warn(
@@ -318,7 +337,7 @@ export async function PUT(
     }
 
     const shouldDispatchExecutionStart =
-      status === 'in_progress' &&
+      persistedStatus === 'in_progress' &&
       isHabiTask({ assigned_to: effectiveAssignedTo }) &&
       Boolean(effectiveAssignedTo) &&
       (
@@ -355,7 +374,7 @@ export async function PUT(
           {
             assignee: effectiveAssignedTo,
             previous_status: currentTask.status,
-            next_status: status,
+            next_status: persistedStatus,
             reason: preparedExecution.failureReason,
           },
           workspaceId
@@ -392,7 +411,7 @@ export async function PUT(
           {
             assignee: effectiveAssignedTo,
             previous_status: currentTask.status,
-            next_status: status,
+            next_status: persistedStatus,
             reason: dispatch.reason || 'unknown',
           },
           workspaceId
@@ -424,7 +443,7 @@ export async function PUT(
             {
               assignee: effectiveAssignedTo,
               previous_status: currentTask.status,
-              next_status: status,
+              next_status: persistedStatus,
               session_key: dispatch.sessionKey || null,
               execution_mode: preparedExecution.metadata.execution_mode || null,
               worktree_path: preparedExecution.metadata.worktree_path || null,
@@ -436,6 +455,33 @@ export async function PUT(
       }
     }
     
+    if (plannedExecutionApproval) {
+      changes.push('founder approved for execution');
+      db.prepare(`
+        INSERT INTO comments (task_id, author, content, created_at, parent_id, mentions, workspace_id)
+        VALUES (?, ?, ?, ?, NULL, NULL, ?)
+      `).run(
+        taskId,
+        'jeremy',
+        'Founder approved this task for execution. It is queued for implementation and should not be treated as active work until coding actually starts.',
+        now,
+        workspaceId
+      );
+      db_helpers.logActivity(
+        'task_execution_approved',
+        'task',
+        taskId,
+        auth.user.username,
+        `Founder approved execution for ${currentTask.title}`,
+        {
+          assignee: effectiveAssignedTo,
+          previous_status: currentTask.status,
+          next_status: 'assigned',
+        },
+        workspaceId
+      );
+    }
+
     if (title && title !== currentTask.title) {
       changes.push('title updated');
     }
@@ -483,7 +529,7 @@ export async function PUT(
             priority: currentTask.priority,
             assigned_to: currentTask.assigned_to
           },
-          newValues: { title, status, priority, assigned_to }
+          newValues: { title, status: persistedStatus, priority, assigned_to }
         },
         workspaceId
       );
