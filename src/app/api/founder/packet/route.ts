@@ -77,6 +77,37 @@ async function findLatestGrowthWeek(root: string): Promise<string | null> {
   return weekNames[0] ?? null
 }
 
+function normalizeGrowthResearchSignals(input: unknown): string[] {
+  if (!Array.isArray(input)) return []
+
+  return input
+    .map((entry) => {
+      if (typeof entry === 'string') {
+        return entry.trim()
+      }
+
+      if (!entry || typeof entry !== 'object') {
+        return ''
+      }
+
+      const record = entry as Record<string, unknown>
+      const persona = String(record.Persona || record.persona || '').trim()
+      const problem = String(record.Problem || record.problem || '').trim()
+      const objection = String(record.Objection || record.objection || '').trim()
+      const nextAction = String(record['Next Action'] || record.nextAction || '').trim()
+
+      const parts = [
+        persona ? `${persona}: ${problem || 'signal captured'}` : problem,
+        objection ? `objection: ${objection}` : '',
+        nextAction ? `next: ${nextAction}` : '',
+      ].filter(Boolean)
+
+      return parts.join(' | ').trim()
+    })
+    .filter(Boolean)
+    .slice(0, 3)
+}
+
 function summarizeRepeatedPains(entries: Array<{ problem?: string }>): string[] {
   const counts = new Map<string, number>()
   for (const entry of entries) {
@@ -454,7 +485,7 @@ export async function GET(request: NextRequest) {
         researchBriefPath: growthPaths?.researchBriefPath ?? null,
         draftPackPath: growthPaths?.draftPackPath ?? null,
         scorecardPath: growthPaths?.scorecardPath ?? null,
-        researchSignals: Array.isArray(growthResearch?.signals) ? growthResearch.signals.slice(0, 3) : [],
+        researchSignals: normalizeGrowthResearchSignals(growthResearch?.signals),
         draftCandidates: Array.isArray(growthDraftPack?.drafts) ? growthDraftPack.drafts.slice(0, 3) : [],
         scorecard: growthScorecard,
       },
