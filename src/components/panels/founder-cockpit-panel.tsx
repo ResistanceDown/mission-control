@@ -533,7 +533,7 @@ export function FounderCockpitPanel() {
             <div className="mt-2 text-sm leading-6 text-foreground">{packet.summary}</div>
           </div>
 
-          <details className="rounded-xl border border-purple-500/20 bg-gradient-to-br from-purple-500/8 via-surface-2/80 to-surface-2/80 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]" open>
+          <details className="rounded-xl border border-purple-500/20 bg-gradient-to-br from-purple-500/8 via-surface-2/80 to-surface-2/80 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
             <summary className="cursor-pointer text-sm font-semibold text-foreground">Founder SOP</summary>
             <div className="mt-4 grid xl:grid-cols-3 gap-3 text-sm text-foreground">
               <div className="rounded-lg border border-blue-500/15 bg-black/15 p-3">
