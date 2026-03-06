@@ -60,6 +60,10 @@ interface FounderApiResponse {
       active: number
       blockedByFounder: number
       blockedByEvidence: number
+      waitingOnForeman: number
+      waitingOnQc: number
+      sentBackByQc: number
+      staleAssigned: number
     }
   }
 }
@@ -746,7 +750,13 @@ export function FounderCockpitPanel() {
 
               {secondaryTab === 'system' ? (
                 <div>
-                  <div className="text-xs text-muted-foreground">Quick links for the places you step into when the bots need help.</div>
+                  <div className="text-xs text-muted-foreground">Oversight truth and the places you step into when the bots need help.</div>
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    <Metric label="Waiting On Foreman" value={data.tasks.appFinishCounts.waitingOnForeman} subtitle="Queue truth checks" />
+                    <Metric label="Waiting On QC" value={data.tasks.appFinishCounts.waitingOnQc} subtitle="Review lane" />
+                    <Metric label="Sent Back By QC" value={data.tasks.appFinishCounts.sentBackByQc} subtitle="Need more work" />
+                    <Metric label="Stale Assigned" value={data.tasks.appFinishCounts.staleAssigned} subtitle="Approved but idle" />
+                  </div>
                   <div className="mt-3 grid gap-2 sm:grid-cols-3">
                     <button onClick={() => navigateToPanel('tasks')} className="w-full rounded-lg border border-border/70 px-3 py-2 text-left text-sm text-foreground transition-smooth hover:bg-surface-2">
                       Open Tasks

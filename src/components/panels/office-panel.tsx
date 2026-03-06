@@ -117,8 +117,19 @@ export function OfficePanel() {
 
   const roleGroups = useMemo(() => {
     const groups = new Map<string, Agent[]>()
+    const getRoleLabel = (agent: Agent): string => {
+      const name = (agent.name || '').toLowerCase()
+      if (name === 'main') return 'Founder'
+      if (name === 'habi-control') return 'Control Lead'
+      if (name === 'habi-foreman') return 'Foreman'
+      if (name === 'habi-readiness') return 'Readiness'
+      if (name === 'habi-qc') return 'Quality Control'
+      if (name === 'habi-growth') return 'Growth'
+      if (name.startsWith('ops-')) return 'Ops Automation'
+      return agent.role || 'Unassigned'
+    }
     for (const a of displayAgents) {
-      const role = a.role || 'Unassigned'
+      const role = getRoleLabel(a)
       if (!groups.has(role)) groups.set(role, [])
       groups.get(role)!.push(a)
     }
@@ -129,10 +140,12 @@ export function OfficePanel() {
     const groups = new Map<string, Agent[]>()
     const getCategory = (agent: Agent): string => {
       const name = (agent.name || '').toLowerCase()
-      if (name.startsWith('habi-')) return 'Habi Lanes'
+      if (name === 'main') return 'Founder'
+      if (name === 'habi-control') return 'Habi Control'
+      if (name === 'habi-foreman' || name === 'habi-qc') return 'Habi Oversight'
+      if (name === 'habi-readiness') return 'Habi Delivery'
+      if (name === 'habi-growth') return 'Habi Growth'
       if (name.startsWith('ops-')) return 'Ops Automation'
-      if (name.includes('canary')) return 'Canary'
-      if (name.startsWith('main')) return 'Core'
       if (name.startsWith('remote-')) return 'Remote'
       return 'Other'
     }
@@ -143,7 +156,7 @@ export function OfficePanel() {
       groups.get(category)!.push(a)
     }
 
-    const order = ['Habi Lanes', 'Ops Automation', 'Core', 'Canary', 'Remote', 'Other']
+    const order = ['Founder', 'Habi Control', 'Habi Oversight', 'Habi Delivery', 'Habi Growth', 'Ops Automation', 'Remote', 'Other']
     return new Map(
       [...groups.entries()].sort(([a], [b]) => {
         const ai = order.indexOf(a)

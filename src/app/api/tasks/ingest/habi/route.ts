@@ -147,6 +147,81 @@ function formatOfflineComment(assignee: string) {
   ].join('\n')
 }
 
+function cancelSupersededDuplicates(
+  db: ReturnType<typeof getDatabase>,
+  workspaceId: number,
+  survivingTaskId: number,
+  actor: string,
+  now: number,
+  metadata: Record<string, unknown>,
+) {
+  const keys = [
+    String(metadata.branch_name || '').trim(),
+    String(metadata.worktree_path || '').trim(),
+    String(metadata.evidence_path || '').trim(),
+    String(metadata.handoff_artifact || '').trim(),
+  ].filter(Boolean)
+
+  if (keys.length === 0) return
+
+  const placeholders = keys.map(() => '?').join(',')
+  const rows = db.prepare(`
+    SELECT id, title, status, metadata
+    FROM tasks
+    WHERE workspace_id = ?
+      AND id != ?
+      AND status NOT IN ('done', 'cancelled')
+      AND (
+        json_extract(metadata, '$.branch_name') IN (${placeholders})
+        OR json_extract(metadata, '$.worktree_path') IN (${placeholders})
+        OR json_extract(metadata, '$.evidence_path') IN (${placeholders})
+        OR json_extract(metadata, '$.handoff_artifact') IN (${placeholders})
+      )
+    ORDER BY updated_at DESC
+  `).all(workspaceId, survivingTaskId, ...keys, ...keys, ...keys, ...keys) as Array<{
+    id: number
+    title: string
+    status: string
+    metadata?: string | null
+  }>
+
+  const survivorFingerprint = String(metadata.fingerprint || '')
+  for (const row of rows) {
+    const previousMetadata = mergeHabiMetadata(row.metadata, {})
+    if (String(previousMetadata.fingerprint || '') === survivorFingerprint) continue
+    const mergedMetadata = {
+      ...previousMetadata,
+      cancelled_reason: 'superseded_by_redesign_cutover',
+      superseded_by_task_id: survivingTaskId,
+      superseded_at: new Date().toISOString(),
+    }
+    db.prepare(`
+      UPDATE tasks
+      SET status = 'cancelled', metadata = ?, updated_at = ?
+      WHERE id = ? AND workspace_id = ?
+    `).run(JSON.stringify(mergedMetadata), now, row.id, workspaceId)
+    addTaskComment(
+      db,
+      workspaceId,
+      row.id,
+      [
+        'Task cancelled',
+        `Superseded by task #${survivingTaskId} during Habi ingest reconciliation.`,
+        'Reason: redesign-first cutover replaced an older duplicate work stream.',
+      ].join('\n'),
+    )
+    db_helpers.logActivity(
+      'task_superseded',
+      'task',
+      row.id,
+      actor,
+      `Habi ingest cancelled duplicate task "${row.title}"`,
+      { superseded_by_task_id: survivingTaskId, cancelled_reason: 'superseded_by_redesign_cutover' },
+      workspaceId
+    )
+  }
+}
+
 export async function POST(request: NextRequest) {
   const auth = requireRole(request, 'operator')
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status })
@@ -170,6 +245,15 @@ export async function POST(request: NextRequest) {
     let updated = 0
 
     for (const item of items) {
+      if (item.disposition === 'defer' || item.disposition === 'narrative_only') {
+        actionPlan.push({
+          action: 'skip',
+          title: item.title,
+          lane: item.lane,
+          reason: `disposition=${item.disposition}`,
+        })
+        continue
+      }
       const assignee = inferHabiAssignee(item.lane, item.assignee)
       const fingerprint =
         (item.fingerprint || '').trim() ||
@@ -305,6 +389,7 @@ export async function POST(request: NextRequest) {
           { lane: item.lane, fingerprint, status: targetStatus.status, priority },
           workspaceId
         )
+        cancelSupersededDuplicates(db, workspaceId, createdTask.id, source || actor, now, metadata)
         eventBus.broadcast('task.created', createdTask)
 
         const dispatch = await dispatchTaskAssignment({
@@ -427,6 +512,7 @@ export async function POST(request: NextRequest) {
         },
         workspaceId
       )
+      cancelSupersededDuplicates(db, workspaceId, existingTask.id, source || actor, now, mergedMetadata)
     }
 
     return NextResponse.json({

@@ -69,6 +69,10 @@ function summarizeRepeatedPains(entries: Array<{ problem?: string }>): string[] 
     .map(([problem]) => problem)
 }
 
+function hasFounderApproval(metadata: Record<string, unknown>) {
+  return Boolean(metadata.founder_approved_at || metadata.founder_approved_for_execution)
+}
+
 function hasAegisApproval(
   db: ReturnType<typeof getDatabase>,
   taskId: number,
@@ -172,6 +176,8 @@ function loadTaskSnapshot(workspaceId: number) {
           AND coalesce(json_extract(metadata, '$.origin_lane'), '') != 'growth'
           AND coalesce(json_extract(metadata, '$.execution_mode'), '') IN ('audit_only', 'draft_pr')
           AND coalesce(json_extract(metadata, '$.disposition'), '') IN ('execute_now', 'founder_decision_needed')
+          AND coalesce(json_extract(metadata, '$.founder_approved_for_execution'), 0) != 1
+          AND coalesce(json_extract(metadata, '$.founder_approved_at'), '') = ''
         )
       )
     ORDER BY
@@ -249,7 +255,23 @@ function loadTaskSnapshot(workspaceId: number) {
   const appFinishQueue = appFinishTaskRows
     .filter((task) => !['review', 'quality_review'].includes(task.status))
     .slice(0, 8)
-    .map(({ metadata: _metadata, ...task }) => task)
+    .map((task) => {
+      let metadata: Record<string, unknown> = {}
+      try {
+        metadata = task.metadata ? JSON.parse(task.metadata) : {}
+      } catch {
+        metadata = {}
+      }
+      return {
+        id: task.id,
+        title: task.title,
+        status: task.status,
+        assigned_to: task.assigned_to,
+        priority: task.priority,
+        updated_at: task.updated_at,
+        founderApproved: hasFounderApproval(metadata),
+      }
+    })
 
   const appFinishTaskIds = appFinishTaskRows.map((task) => task.id)
   const commentRows = appFinishTaskIds.length
@@ -289,6 +311,11 @@ function loadTaskSnapshot(workspaceId: number) {
     const worktreePath = String(metadata.worktree_path || '').trim()
     const executionMode = String(metadata.execution_mode || '').trim()
     const blockedReason = String(metadata.blocked_reason || '').trim()
+    const founderApproved = hasFounderApproval(metadata)
+    const waitingOnForeman = Boolean(metadata.waiting_on_foreman)
+    const staleAssigned = Boolean(metadata.stale_assigned)
+    const waitingOnQc = Boolean(metadata.waiting_on_qc)
+    const sentBackByQc = Boolean(metadata.sent_back_by_qc)
     const evidenceExists = evidencePath ? existsSync(evidencePath) : false
     const worktreeExists =
       executionMode === 'draft_pr'
@@ -311,6 +338,11 @@ function loadTaskSnapshot(workspaceId: number) {
       evidenceExists,
       worktreeExists,
       stalled,
+      founderApproved,
+      waitingOnForeman,
+      staleAssigned,
+      waitingOnQc,
+      sentBackByQc,
     }
   })
 
@@ -324,13 +356,17 @@ function loadTaskSnapshot(workspaceId: number) {
     appFinishQueue,
     appFinishCounts: {
       active: appFinishTaskRows.length,
-      blockedByFounder: appFinishHealth.filter((task) => task.status === 'assigned').length,
+      blockedByFounder: appFinishHealth.filter((task) => task.status === 'assigned' && !task.founderApproved).length,
       blockedByEvidence: appFinishHealth.filter((task) =>
         ['in_progress', 'review', 'quality_review'].includes(task.status) &&
         (task.blockedReason || !task.evidenceExists || !task.worktreeExists)
       ).length,
       waitingOnKickoff: appFinishHealth.filter((task) => task.status === 'in_progress' && !task.kickoffSeen).length,
       stalledInProgress: appFinishHealth.filter((task) => task.stalled).length,
+      waitingOnForeman: appFinishHealth.filter((task) => task.waitingOnForeman).length,
+      waitingOnQc: appFinishHealth.filter((task) => task.waitingOnQc).length,
+      sentBackByQc: appFinishHealth.filter((task) => task.sentBackByQc).length,
+      staleAssigned: appFinishHealth.filter((task) => task.staleAssigned).length,
     },
   }
 }
