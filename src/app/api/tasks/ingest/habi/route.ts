@@ -41,7 +41,7 @@ function resolveTargetStatus(
 
   switch (statusHint) {
     case 'blocked':
-      status = 'in_progress'
+      status = 'assigned'
       break
     case 'active':
       status = 'assigned'
