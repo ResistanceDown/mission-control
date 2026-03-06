@@ -108,28 +108,33 @@
     @apply bg-muted-foreground;
   }
 
-  .task-board-scrollbar::-webkit-scrollbar,
-  .floating-task-scrollbar::-webkit-scrollbar {
-    height: 14px;
+  .task-board-scrollbar {
+    scrollbar-width: none;
   }
 
-  .task-board-scrollbar,
+  .task-board-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
   .floating-task-scrollbar {
-    scrollbar-width: auto;
+    scrollbar-width: thin;
+  }
+
+  .floating-task-scrollbar::-webkit-scrollbar {
+    height: 5px;
   }
 
   .floating-task-scrollbar::-webkit-scrollbar-track {
-    background: hsl(var(--surface-1));
-    border-radius: 9999px;
+    background: transparent;
   }
 
   .floating-task-scrollbar::-webkit-scrollbar-thumb {
-    background: hsl(var(--muted-foreground) / 0.7);
+    background: hsl(var(--border));
     border-radius: 9999px;
   }
 
   .floating-task-scrollbar::-webkit-scrollbar-thumb:hover {
-    background: hsl(var(--foreground) / 0.6);
+    background: hsl(var(--muted-foreground));
   }
 }
 

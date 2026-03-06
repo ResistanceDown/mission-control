@@ -705,7 +705,7 @@ export function TaskBoardPanel() {
       )}
 
       {/* Kanban Board */}
-      <div ref={boardScrollRef} className="task-board-scrollbar flex-1 flex gap-4 p-4 overflow-x-auto" role="region" aria-label="Task board">
+      <div ref={boardScrollRef} className="task-board-scrollbar flex-1 flex gap-4 p-4 pb-8 overflow-x-auto" role="region" aria-label="Task board">
         {statusColumns.map(column => (
           <div
             key={column.key}
@@ -852,7 +852,7 @@ export function TaskBoardPanel() {
         <div className="sticky bottom-0 z-20 px-4 pb-3 pt-1">
           <div
             ref={stickyScrollbarRef}
-            className="floating-task-scrollbar overflow-x-auto overflow-y-hidden rounded-full border border-border/70 bg-background/95 shadow-lg backdrop-blur"
+            className="floating-task-scrollbar overflow-x-auto overflow-y-hidden bg-background/95 backdrop-blur"
             aria-hidden="true"
           >
             <div style={{ width: stickyScrollbarWidth, height: 1 }} />
