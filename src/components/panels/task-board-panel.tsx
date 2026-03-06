@@ -8,6 +8,7 @@ import { useSmartPoll } from '@/lib/use-smart-poll'
 import { createClientLogger } from '@/lib/client-logger'
 
 import { useFocusTrap } from '@/lib/use-focus-trap'
+import { parseHabiTaskMetadata } from '@/lib/habi-task-contract'
 
 import { AgentAvatar } from '@/components/ui/agent-avatar'
 import { MarkdownRenderer } from '@/components/markdown-renderer'
@@ -125,6 +126,15 @@ function parseSystemComment(comment: Comment): ParsedSystemComment | null {
   }
 
   return null
+}
+
+function isKickoffSummaryComment(content?: string | null) {
+  return String(content || '').trim().startsWith('Execution kickoff')
+}
+
+function isExecutionProgressSummaryComment(content?: string | null) {
+  const normalized = String(content || '').trim().toLowerCase()
+  return normalized.startsWith('execution progress') || normalized.startsWith('ready for review') || normalized.startsWith('execution blocked')
 }
 
 interface Project {
@@ -324,7 +334,12 @@ export function TaskBoardPanel() {
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [showProjectManager, setShowProjectManager] = useState(false)
   const [editingTask, setEditingTask] = useState<Task | null>(null)
+  const [showStickyScrollbar, setShowStickyScrollbar] = useState(false)
+  const [stickyScrollbarWidth, setStickyScrollbarWidth] = useState(0)
   const dragCounter = useRef(0)
+  const boardScrollRef = useRef<HTMLDivElement | null>(null)
+  const stickyScrollbarRef = useRef<HTMLDivElement | null>(null)
+  const syncSourceRef = useRef<'board' | 'sticky' | null>(null)
   const selectedTaskIdFromUrl = Number.parseInt(searchParams.get('taskId') || '', 10)
 
   const updateTaskUrl = useCallback((taskId: number | null, mode: 'push' | 'replace' = 'push') => {
@@ -348,6 +363,24 @@ export function TaskBoardPanel() {
     ...t,
     aegisApproved: Boolean(aegisMap[t.id])
   }))
+
+  const syncStickyScrollbar = useCallback(() => {
+    const board = boardScrollRef.current
+    const sticky = stickyScrollbarRef.current
+    if (!board) return
+
+    const hasOverflow = board.scrollWidth > board.clientWidth + 1
+    setStickyScrollbarWidth(board.scrollWidth)
+    setShowStickyScrollbar(hasOverflow)
+
+    if (sticky && syncSourceRef.current !== 'sticky') {
+      syncSourceRef.current = 'board'
+      sticky.scrollLeft = board.scrollLeft
+      requestAnimationFrame(() => {
+        if (syncSourceRef.current === 'board') syncSourceRef.current = null
+      })
+    }
+  }, [])
 
   // Fetch tasks, agents, and projects
   const fetchData = useCallback(async () => {
@@ -411,6 +444,50 @@ export function TaskBoardPanel() {
   useEffect(() => {
     fetchData()
   }, [fetchData])
+
+  useEffect(() => {
+    const board = boardScrollRef.current
+    if (!board) return
+
+    const handleBoardScroll = () => {
+      if (!stickyScrollbarRef.current || syncSourceRef.current === 'sticky') return
+      syncSourceRef.current = 'board'
+      stickyScrollbarRef.current.scrollLeft = board.scrollLeft
+      requestAnimationFrame(() => {
+        if (syncSourceRef.current === 'board') syncSourceRef.current = null
+      })
+    }
+
+    const handleStickyScroll = () => {
+      if (!stickyScrollbarRef.current || syncSourceRef.current === 'board') return
+      syncSourceRef.current = 'sticky'
+      board.scrollLeft = stickyScrollbarRef.current.scrollLeft
+      requestAnimationFrame(() => {
+        if (syncSourceRef.current === 'sticky') syncSourceRef.current = null
+      })
+    }
+
+    const resizeObserver = new ResizeObserver(() => {
+      syncStickyScrollbar()
+    })
+
+    board.addEventListener('scroll', handleBoardScroll, { passive: true })
+    stickyScrollbarRef.current?.addEventListener('scroll', handleStickyScroll, { passive: true })
+    window.addEventListener('resize', syncStickyScrollbar)
+    resizeObserver.observe(board)
+    syncStickyScrollbar()
+
+    return () => {
+      board.removeEventListener('scroll', handleBoardScroll)
+      stickyScrollbarRef.current?.removeEventListener('scroll', handleStickyScroll)
+      window.removeEventListener('resize', syncStickyScrollbar)
+      resizeObserver.disconnect()
+    }
+  }, [syncStickyScrollbar])
+
+  useEffect(() => {
+    syncStickyScrollbar()
+  }, [tasks, projectFilter, syncStickyScrollbar])
 
   useEffect(() => {
     if (!Number.isFinite(selectedTaskIdFromUrl)) {
@@ -483,12 +560,12 @@ export function TaskBoardPanel() {
       if (newStatus === 'done') {
         const reviewResponse = await fetch(`/api/quality-review?taskId=${draggedTask.id}`)
         if (!reviewResponse.ok) {
-          throw new Error('Unable to verify Aegis approval')
+          throw new Error('Unable to verify QC approval')
         }
         const reviewData = await reviewResponse.json()
         const latest = reviewData.reviews?.find((review: any) => review.reviewer === 'aegis')
         if (!latest || latest.status !== 'approved') {
-          throw new Error('Aegis approval is required before moving to done')
+          throw new Error('QC approval is required before moving to done')
         }
       }
 
@@ -628,7 +705,7 @@ export function TaskBoardPanel() {
       )}
 
       {/* Kanban Board */}
-      <div className="flex-1 flex gap-4 p-4 overflow-x-auto" role="region" aria-label="Task board">
+      <div ref={boardScrollRef} className="task-board-scrollbar flex-1 flex gap-4 p-4 overflow-x-auto" role="region" aria-label="Task board">
         {statusColumns.map(column => (
           <div
             key={column.key}
@@ -685,7 +762,7 @@ export function TaskBoardPanel() {
                       )}
                       {task.aegisApproved && (
                         <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-700 text-emerald-100">
-                          Aegis Approved
+                          QC Passed
                         </span>
                       )}
                       <span className={`text-xs px-2 py-1 rounded font-medium ${
@@ -770,6 +847,18 @@ export function TaskBoardPanel() {
           </div>
         ))}
       </div>
+
+      {showStickyScrollbar && (
+        <div className="sticky bottom-0 z-20 px-4 pb-3 pt-1">
+          <div
+            ref={stickyScrollbarRef}
+            className="floating-task-scrollbar overflow-x-auto overflow-y-hidden rounded-full border border-border/70 bg-background/95 shadow-lg backdrop-blur"
+            aria-hidden="true"
+          >
+            <div style={{ width: stickyScrollbarWidth, height: 1 }} />
+          </div>
+        </div>
+      )}
 
       {/* Task Detail Modal */}
       {selectedTask && !editingTask && (
@@ -856,6 +945,34 @@ function TaskDetailModal({
   const mentionTargets = useMentionTargets()
   const [activeTab, setActiveTab] = useState<'details' | 'comments' | 'quality'>('details')
   const [reviewer, setReviewer] = useState('aegis')
+  const metadata = parseHabiTaskMetadata(task.metadata)
+  const kickoffComment = comments.find((comment) => isKickoffSummaryComment(comment.content))
+  const progressComment = comments.find((comment) => isExecutionProgressSummaryComment(comment.content))
+  const latestReview = reviews[0]
+  const validationCommands = Array.isArray(metadata.validation_commands)
+    ? metadata.validation_commands.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    : []
+  const evidencePath = typeof metadata.evidence_path === 'string' ? metadata.evidence_path : ''
+  const handoffPath = typeof metadata.handoff_artifact === 'string' ? metadata.handoff_artifact : ''
+  const worktreePath = typeof metadata.worktree_path === 'string' ? metadata.worktree_path : ''
+  const reviewStatusLabel = task.status === 'quality_review'
+    ? (task.aegisApproved ? 'QC passed. This is ready for your final approval.' : 'QC is still running. This is not ready for founder approval yet.')
+    : task.status === 'review'
+      ? 'Implementation is complete enough to be sent through QC.'
+      : task.status === 'assigned'
+        ? 'This task is waiting on founder approval before execution begins.'
+        : task.status === 'in_progress'
+          ? 'Execution is active. Review the latest evidence before changing state.'
+          : 'Use the evidence and validation below to make the next decision.'
+  const whatChanged = progressComment?.content || kickoffComment?.content || 'No structured implementation update has been posted yet.'
+  const whyReady = latestReview?.notes || reviewStatusLabel
+  const founderJudgment = task.status === 'quality_review'
+    ? (task.aegisApproved ? 'Approve and mark done, or send it back if the result does not meet the bar.' : 'Wait for QC to finish, or open the task for context while it is being reviewed.')
+    : task.status === 'review'
+      ? 'Send this to QC if the evidence looks complete, or send it back with a concrete note.'
+      : task.status === 'assigned'
+        ? 'Approve execution if this should start now, or leave it queued.'
+        : 'Confirm the evidence matches the scope before changing the task state.'
 
   const fetchReviews = useCallback(async () => {
     try {
@@ -1079,6 +1196,37 @@ function TaskDetailModal({
 
           {activeTab === 'details' && (
             <div id="tabpanel-details" role="tabpanel" aria-label="Details" className="grid grid-cols-2 gap-4 text-sm mt-4">
+              <div className="col-span-2 rounded-xl border border-border/70 bg-surface-1/50 p-4 space-y-3">
+                <div>
+                  <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Review Summary</div>
+                  <div className="mt-2 text-sm text-foreground">{reviewStatusLabel}</div>
+                </div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div>
+                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">What changed</div>
+                    <div className="mt-1 text-sm text-foreground whitespace-pre-wrap">{whatChanged}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Why it is ready</div>
+                    <div className="mt-1 text-sm text-foreground whitespace-pre-wrap">{whyReady}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Evidence</div>
+                    <div className="mt-1 text-sm text-foreground whitespace-pre-wrap">{evidencePath || 'No evidence path attached.'}</div>
+                    {handoffPath ? <div className="mt-1 text-xs text-muted-foreground">Handoff: {handoffPath}</div> : null}
+                    {worktreePath ? <div className="mt-1 text-xs text-muted-foreground">Worktree: {worktreePath}</div> : null}
+                  </div>
+                  <div>
+                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Validation</div>
+                    <div className="mt-1 text-sm text-foreground whitespace-pre-wrap">{validationCommands.length ? validationCommands.join('\n') : 'No validation commands attached.'}</div>
+                    {latestReview ? <div className="mt-1 text-xs text-muted-foreground">Latest QC: {latestReview.reviewer} — {latestReview.status}</div> : null}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">What still needs your judgment</div>
+                  <div className="mt-1 text-sm text-foreground whitespace-pre-wrap">{founderJudgment}</div>
+                </div>
+              </div>
               {task.ticket_ref && (
                 <div>
                   <span className="text-muted-foreground">Ticket:</span>
@@ -1232,7 +1380,7 @@ function TaskDetailModal({
 
           {activeTab === 'quality' && (
             <div id="tabpanel-quality" role="tabpanel" aria-label="Quality Review" className="mt-6">
-              <h5 className="text-sm font-medium text-foreground mb-2">Aegis Quality Review</h5>
+              <h5 className="text-sm font-medium text-foreground mb-2">QC Review</h5>
               {reviewError && (
                 <div className="text-xs text-red-400 mb-2">{reviewError}</div>
               )}

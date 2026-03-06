@@ -205,7 +205,7 @@ function loadTaskSnapshot(workspaceId: number) {
     updated_at: number
   }>
 
-  const approvalQueue = approvalQueueRows.map((task) => {
+  const approvalCandidates = approvalQueueRows.map((task) => {
     const metadata = db.prepare(`
       SELECT metadata FROM tasks
       WHERE id = ? AND workspace_id = ?
@@ -224,6 +224,9 @@ function loadTaskSnapshot(workspaceId: number) {
       executionMode: String(parsedMetadata.execution_mode || ''),
     }
   })
+
+  const approvalQueue = approvalCandidates.filter((task) => task.status !== 'quality_review' || task.aegisApproved)
+  const waitingOnQcQueue = approvalCandidates.filter((task) => task.status === 'quality_review' && !task.aegisApproved)
 
   const appFinishTaskRows = db.prepare(`
     SELECT id, title, status, assigned_to, priority, updated_at, metadata
@@ -350,9 +353,11 @@ function loadTaskSnapshot(workspaceId: number) {
     totalActive,
     byStatus,
     awaitingReview: approvalQueue.length,
+    readyForFounderDecision: approvalQueue.length,
     topActive,
     reviewQueue,
     approvalQueue,
+    waitingOnQcQueue,
     appFinishQueue,
     appFinishCounts: {
       active: appFinishTaskRows.length,

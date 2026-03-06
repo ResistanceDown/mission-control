@@ -54,6 +54,18 @@ interface FounderApiResponse {
       disposition: string
       executionMode: string
     }>
+    waitingOnQcQueue: Array<{
+      id: number
+      title: string
+      status: string
+      assigned_to: string | null
+      priority: string
+      updated_at: number
+      aegisApproved: boolean
+      disposition: string
+      executionMode: string
+    }>
+    readyForFounderDecision: number
     reviewQueue: Array<{ id: number; title: string; status: string; assigned_to: string | null; priority: string; updated_at: number; aegisApproved: boolean }>
     appFinishQueue: Array<{ id: number; title: string; status: string; assigned_to: string | null; priority: string; updated_at: number }>
     appFinishCounts: {
@@ -90,7 +102,7 @@ function useFounderData() {
 
 function Metric({ label, value, subtitle }: { label: string; value: string | number; subtitle?: string }) {
   return (
-    <div className="rounded-xl border border-border bg-surface-1/70 px-3 py-3">
+    <div className="rounded-xl border border-white/10 bg-surface-2/85 px-3 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
       <div className="text-2xs uppercase tracking-wide text-muted-foreground">{label}</div>
       <div className="mt-1 text-xl font-semibold text-foreground">{value}</div>
       {subtitle ? <div className="mt-1 text-2xs text-muted-foreground">{subtitle}</div> : null}
@@ -100,7 +112,7 @@ function Metric({ label, value, subtitle }: { label: string; value: string | num
 
 function SectionList({ title, items, empty }: { title: string; items: string[]; empty: string }) {
   return (
-    <div className="rounded-xl border border-border bg-surface-1/70 p-4">
+    <div className="rounded-xl border border-white/10 bg-surface-2/80 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
       <h3 className="text-sm font-semibold text-foreground">{title}</h3>
       <div className="mt-3 space-y-2 text-sm text-foreground">
         {items.length
@@ -173,8 +185,8 @@ export function FounderSnapshotCard() {
         </div>
 
         <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
-          <Metric label="Active Tasks" value={data.tasks.totalActive} subtitle={`${data.tasks.awaitingReview} awaiting approval`} />
-          <Metric label="Approvals" value={data.tasks.approvalQueue.length} subtitle="Need your call" />
+          <Metric label="Active Tasks" value={data.tasks.totalActive} subtitle={`${data.tasks.readyForFounderDecision} ready for your decision`} />
+          <Metric label="Approvals" value={data.tasks.readyForFounderDecision} subtitle="Need your call" />
           <Metric label="Signals" value={data.signals.total} subtitle={`${data.signals.repeatedPainCount} repeated pains`} />
           <Metric label="Activated Users" value={data.adoption?.activatedUsers ?? 0} subtitle={`${data.adoption?.weeklyActiveUsers ?? 0} weekly active`} />
         </div>
@@ -350,7 +362,7 @@ export function FounderCockpitPanel() {
 
   return (
     <div className="space-y-4 p-5">
-      <div className="panel">
+      <div className="panel border-white/10 bg-[#0f141b] shadow-[0_18px_45px_rgba(0,0,0,0.35)]">
         <div className="panel-header flex items-start justify-between gap-3">
           <div>
             <h2 className="text-sm font-semibold text-foreground">Founder Cockpit</h2>
@@ -362,15 +374,15 @@ export function FounderCockpitPanel() {
           </div>
         </div>
         <div className="panel-body space-y-4">
-          <div className="rounded-xl border border-border bg-surface-1/70 p-4">
+          <div className="rounded-xl border border-white/10 bg-surface-2/80 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
             <div className="text-xs font-medium text-foreground">Summary</div>
             <div className="mt-2 text-sm leading-6 text-foreground">{packet.summary}</div>
           </div>
 
-          <details className="rounded-xl border border-border bg-surface-1/70 p-4" open>
+          <details className="rounded-xl border border-white/10 bg-surface-2/80 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]" open>
             <summary className="cursor-pointer text-sm font-semibold text-foreground">Founder SOP</summary>
             <div className="mt-4 grid xl:grid-cols-3 gap-3 text-sm text-foreground">
-              <div className="rounded-lg border border-border/70 p-3">
+              <div className="rounded-lg border border-white/10 bg-black/15 p-3">
                 <div className="font-medium">Morning</div>
                 <div className="mt-2 space-y-2 text-muted-foreground">
                   <div>1. Read this page.</div>
@@ -378,7 +390,7 @@ export function FounderCockpitPanel() {
                   <div>3. Check blockers and approvals.</div>
                 </div>
               </div>
-              <div className="rounded-lg border border-border/70 p-3">
+              <div className="rounded-lg border border-white/10 bg-black/15 p-3">
                 <div className="font-medium">During The Day</div>
                 <div className="mt-2 space-y-2 text-muted-foreground">
                   <div>1. Do 1 real founder action: conversation, outreach, beta follow-up, or reply block.</div>
@@ -386,7 +398,7 @@ export function FounderCockpitPanel() {
                   <div>3. Only step in when a task needs a decision.</div>
                 </div>
               </div>
-              <div className="rounded-lg border border-border/70 p-3">
+              <div className="rounded-lg border border-white/10 bg-black/15 p-3">
                 <div className="font-medium">Closeout</div>
                 <div className="mt-2 space-y-2 text-muted-foreground">
                   <div>1. Confirm what shipped.</div>
@@ -395,26 +407,27 @@ export function FounderCockpitPanel() {
                 </div>
               </div>
             </div>
-            <div className="mt-4 rounded-lg border border-border/70 p-3 text-sm text-muted-foreground">
+            <div className="mt-4 rounded-lg border border-white/10 bg-black/15 p-3 text-sm text-muted-foreground">
               Your job is to choose priorities, talk to users, and approve risky or public actions. The bots should do the digging, drafting, evidence collection, and task movement.
             </div>
           </details>
 
           <div className="grid grid-cols-2 xl:grid-cols-6 gap-3">
             <Metric label="Active Habi Tasks" value={data.tasks.totalActive} subtitle={`${data.tasks.awaitingReview} awaiting approval`} />
-            <Metric label="Approvals Needed" value={data.tasks.approvalQueue.length} subtitle="Founder gate queue" />
+            <Metric label="Approvals Needed" value={data.tasks.readyForFounderDecision} subtitle="Founder-actionable" />
             <Metric label="App Finish Queue" value={data.tasks.appFinishCounts.active} subtitle="Planned product work" />
             <Metric label="Blocked By Founder" value={data.tasks.appFinishCounts.blockedByFounder} subtitle="Needs a decision" />
+            <Metric label="Waiting On QC" value={data.tasks.waitingOnQcQueue.length} subtitle="Not ready for you yet" />
             <Metric label="Founder Conversations" value={data.adoption?.founderConversations ?? 0} subtitle={`Signals ${data.signals.total}`} />
             <Metric label="Activated Users" value={data.adoption?.activatedUsers ?? 0} subtitle={`${data.adoption?.weeklyActiveUsers ?? 0} weekly active`} />
           </div>
 
           <div className="grid items-start xl:grid-cols-[1.15fr_0.85fr] gap-3">
-            <div className="rounded-xl border border-border bg-surface-1/70 p-4">
+            <div className="rounded-xl border border-white/10 bg-surface-2/82 p-4 shadow-[0_12px_28px_rgba(0,0,0,0.18)]">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <h3 className="text-sm font-semibold text-foreground">Approval Queue</h3>
-                  <p className="mt-1 text-xs text-muted-foreground">Approve, advance, or send back the items currently waiting on your decision.</p>
+                  <h3 className="text-sm font-semibold text-foreground">Needs Your Decision</h3>
+                  <p className="mt-1 text-xs text-muted-foreground">Only tasks you can act on right now appear here.</p>
                 </div>
                 <button onClick={() => navigateToPanel('tasks')} className="px-3 py-2 rounded-lg border border-border text-muted-foreground text-sm font-medium hover:bg-surface-2 transition-smooth">
                   Open Tasks
@@ -422,18 +435,18 @@ export function FounderCockpitPanel() {
               </div>
               <div className="mt-4 flex items-center justify-between gap-3">
                 <div>
-                  <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Needs your call now</div>
-                  <div className="mt-1 text-sm text-foreground">Start planned work, advance completed work, or send items back with guidance.</div>
+                  <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Ready for your decision</div>
+                  <div className="mt-1 text-sm text-foreground">Approve execution, send work to QC, approve finished work, or send it back with guidance.</div>
                 </div>
                 <div className="text-xs text-muted-foreground">
                   {data.tasks.approvalQueue.length ? `Showing ${approvalQueuePreviewCount} of ${data.tasks.approvalQueue.length}` : 'Nothing waiting'}
                 </div>
               </div>
               <div className="mt-4">
-                {data.tasks.approvalQueue.length ? (
+                  {data.tasks.approvalQueue.length ? (
                   <div className="max-h-[34rem] space-y-2 overflow-y-auto pr-1">
                     {data.tasks.approvalQueue.map((task) => (
-                      <div key={task.id} className="rounded-lg border border-border/70 p-3">
+                      <div key={task.id} className="rounded-lg border border-white/10 bg-black/15 p-3">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
@@ -442,7 +455,7 @@ export function FounderCockpitPanel() {
                         </div>
                         <div className="mt-1 text-xs text-muted-foreground">
                           {task.assigned_to || 'unassigned'} • {task.priority}
-                          {task.status === 'quality_review' ? ` • Aegis ${task.aegisApproved ? 'approved' : 'pending'}` : ''}
+                          {task.status === 'quality_review' ? ' • QC passed' : ''}
                           {task.status === 'assigned' && task.disposition === 'founder_decision_needed' ? ' • founder decision' : ''}
                         </div>
                       </div>
@@ -473,7 +486,7 @@ export function FounderCockpitPanel() {
                           disabled={taskActionState[task.id]?.status === 'saving'}
                           className="px-3 py-2 rounded-lg bg-indigo-500/15 text-indigo-300 text-sm font-medium hover:bg-indigo-500/20 transition-smooth disabled:opacity-60"
                         >
-                          {taskActionState[task.id]?.status === 'saving' ? 'Updating...' : 'Move To Quality Review'}
+                          {taskActionState[task.id]?.status === 'saving' ? 'Updating...' : 'Send To QC'}
                         </button>
                       ) : null}
                       {task.status === 'quality_review' && task.aegisApproved ? (
@@ -492,14 +505,9 @@ export function FounderCockpitPanel() {
                       >
                         Send Back
                       </button>
-                      {task.status === 'quality_review' && !task.aegisApproved ? (
-                        <div className="px-3 py-2 rounded-lg border border-border/70 text-xs text-muted-foreground">
-                          Waiting on Aegis approval before done.
-                        </div>
-                      ) : null}
                     </div>
                     {expandedSendBack[task.id] ? (
-                      <div className="mt-3 rounded-lg border border-border/70 p-3">
+                      <div className="mt-3 rounded-lg border border-white/10 bg-black/20 p-3">
                         <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Send Back Reason</div>
                         <div className="mt-1 text-xs text-muted-foreground">
                           This note is required. It will be posted on the task so the assignee knows exactly what to change.
@@ -535,8 +543,40 @@ export function FounderCockpitPanel() {
                     ))}
                   </div>
                 ) : (
-                  <div className="rounded-lg border border-border/70 p-3 text-sm text-muted-foreground">
-                    No Habi tasks are waiting on you right now.
+                  <div className="rounded-lg border border-white/10 bg-black/15 p-3 text-sm text-muted-foreground">
+                    No Habi tasks are ready for your decision right now.
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-5 flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Waiting on QC</div>
+                  <div className="mt-1 text-sm text-foreground">Visible for awareness, but not yet actionable by you.</div>
+                </div>
+                <div className="text-xs text-muted-foreground">{data.tasks.waitingOnQcQueue.length || 'No'} item{data.tasks.waitingOnQcQueue.length === 1 ? '' : 's'}</div>
+              </div>
+              <div className="mt-4 max-h-[14rem] space-y-2 overflow-y-auto pr-1">
+                {data.tasks.waitingOnQcQueue.length ? data.tasks.waitingOnQcQueue.map((task) => (
+                  <button
+                    key={task.id}
+                    type="button"
+                    onClick={() => openTaskReviewItem(task.id)}
+                    className="w-full rounded-lg border border-white/10 bg-black/15 p-3 text-left transition-smooth hover:bg-surface-2"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium text-foreground truncate">#{task.id} {task.title}</div>
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          {task.assigned_to || 'unassigned'} • {task.status} • {task.priority} • QC still running
+                        </div>
+                      </div>
+                      <span className="shrink-0 text-xs text-muted-foreground">Open</span>
+                    </div>
+                  </button>
+                )) : (
+                  <div className="rounded-lg border border-white/10 bg-black/15 p-3 text-sm text-muted-foreground">
+                    No tasks are currently waiting on QC.
                   </div>
                 )}
               </div>
@@ -554,7 +594,7 @@ export function FounderCockpitPanel() {
                     key={task.id}
                     type="button"
                     onClick={() => openTaskReviewItem(task.id)}
-                    className="w-full rounded-lg border border-border/70 p-3 text-left transition-smooth hover:bg-surface-2"
+                    className="w-full rounded-lg border border-white/10 bg-black/15 p-3 text-left transition-smooth hover:bg-surface-2"
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
@@ -567,7 +607,7 @@ export function FounderCockpitPanel() {
                     </div>
                   </button>
                 )) : (
-                  <div className="rounded-lg border border-border/70 p-3 text-sm text-muted-foreground">
+                  <div className="rounded-lg border border-white/10 bg-black/15 p-3 text-sm text-muted-foreground">
                     No planned app-finish work is visible yet.
                   </div>
                 )}
@@ -575,7 +615,7 @@ export function FounderCockpitPanel() {
             </div>
 
             <div className="space-y-3">
-              <div className="rounded-xl border border-border bg-surface-1/70 p-4">
+              <div className="rounded-xl border border-white/10 bg-surface-2/82 p-4 shadow-[0_12px_28px_rgba(0,0,0,0.18)]">
                 <h3 className="text-sm font-semibold text-foreground">Founder Radar</h3>
                 <p className="mt-1 text-xs text-muted-foreground">Only the highest-value context that affects today’s decisions.</p>
                 <div className="mt-4 space-y-4">
@@ -615,7 +655,7 @@ export function FounderCockpitPanel() {
                 </div>
               </div>
 
-              <div className="h-fit self-start rounded-xl border border-border bg-surface-1/70 p-4">
+              <div className="h-fit self-start rounded-xl border border-white/10 bg-surface-2/82 p-4 shadow-[0_12px_28px_rgba(0,0,0,0.18)]">
                 <button
                   type="button"
                   onClick={() => setSignalExpanded((current) => !current)}
@@ -689,7 +729,7 @@ export function FounderCockpitPanel() {
             </div>
           </div>
 
-          <div className="rounded-xl border border-border bg-surface-1/70 p-4">
+          <div className="rounded-xl border border-white/10 bg-surface-2/82 p-4 shadow-[0_12px_28px_rgba(0,0,0,0.18)]">
             <div className="flex items-center justify-between gap-3">
               <div>
                 <h3 className="text-sm font-semibold text-foreground">Founder Reference</h3>
@@ -723,7 +763,7 @@ export function FounderCockpitPanel() {
                   <div className="text-xs text-muted-foreground">{data.signals.total} logged • {data.signals.repeatedPainCount} repeated pain patterns</div>
                   <div className="mt-3 space-y-2 text-sm">
                     {data.signals.latest.length ? data.signals.latest.slice(0, 4).map((signal) => (
-                      <div key={signal.id} className="rounded-lg border border-border/70 px-3 py-2">
+                      <div key={signal.id} className="rounded-lg border border-white/10 bg-black/15 px-3 py-2">
                         <div className="font-medium text-foreground">{signal.persona}</div>
                         <div className="mt-1 text-muted-foreground">{signal.problem}</div>
                         <div className="mt-1 text-xs text-primary">Next: {signal.nextAction}</div>
@@ -738,7 +778,7 @@ export function FounderCockpitPanel() {
                   <div className="text-xs text-muted-foreground">{data.productProof.total} proof item(s) logged</div>
                   <div className="mt-3 space-y-2 text-sm">
                     {data.productProof.latest.length ? data.productProof.latest.slice(0, 4).map((proof) => (
-                      <div key={proof.id} className="rounded-lg border border-border/70 px-3 py-2">
+                      <div key={proof.id} className="rounded-lg border border-white/10 bg-black/15 px-3 py-2">
                         <div className="font-medium text-foreground">{proof.title}</div>
                         <div className="mt-1 text-muted-foreground">{proof.publicStoryAngle}</div>
                         <div className="mt-1 text-xs text-primary">{proof.stage}</div>
@@ -758,13 +798,13 @@ export function FounderCockpitPanel() {
                     <Metric label="Stale Assigned" value={data.tasks.appFinishCounts.staleAssigned} subtitle="Approved but idle" />
                   </div>
                   <div className="mt-3 grid gap-2 sm:grid-cols-3">
-                    <button onClick={() => navigateToPanel('tasks')} className="w-full rounded-lg border border-border/70 px-3 py-2 text-left text-sm text-foreground transition-smooth hover:bg-surface-2">
+                    <button onClick={() => navigateToPanel('tasks')} className="w-full rounded-lg border border-white/10 bg-black/15 px-3 py-2 text-left text-sm text-foreground transition-smooth hover:bg-surface-2">
                       Open Tasks
                     </button>
-                    <button onClick={() => navigateToPanel('office')} className="w-full rounded-lg border border-border/70 px-3 py-2 text-left text-sm text-foreground transition-smooth hover:bg-surface-2">
+                    <button onClick={() => navigateToPanel('office')} className="w-full rounded-lg border border-white/10 bg-black/15 px-3 py-2 text-left text-sm text-foreground transition-smooth hover:bg-surface-2">
                       Open Office
                     </button>
-                    <button onClick={() => navigateToPanel('cron')} className="w-full rounded-lg border border-border/70 px-3 py-2 text-left text-sm text-foreground transition-smooth hover:bg-surface-2">
+                    <button onClick={() => navigateToPanel('cron')} className="w-full rounded-lg border border-white/10 bg-black/15 px-3 py-2 text-left text-sm text-foreground transition-smooth hover:bg-surface-2">
                       Open Cron
                     </button>
                   </div>
