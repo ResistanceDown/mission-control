@@ -11,6 +11,7 @@ import { requireRole } from '@/lib/auth'
 import { MODEL_CATALOG } from '@/lib/models'
 import { logger } from '@/lib/logger'
 import { detectProviderSubscriptions, getPrimarySubscription } from '@/lib/provider-subscriptions'
+import { syncAgentSessionLinks } from '@/lib/agent-session-link'
 
 export async function GET(request: NextRequest) {
   const auth = requireRole(request, 'viewer')
@@ -192,56 +193,56 @@ async function getSystemStatus(workspaceId: number) {
     memory: { total: 0, used: 0, available: 0 },
     disk: { total: 0, used: 0, available: 0 },
     sessions: { total: 0, active: 0 },
+    agents: { total: 0, online: 0, byStatus: {} as Record<string, number> },
     processes: []
   }
 
   try {
-    // System uptime (cross-platform)
-    if (process.platform === 'darwin') {
-      const { stdout } = await runCommand('sysctl', ['-n', 'kern.boottime'], {
-        timeoutMs: 3000
-      })
-      // Output format: { sec = 1234567890, usec = 0 } ...
-      const match = stdout.match(/sec\s*=\s*(\d+)/)
-      if (match) {
-        status.uptime = Date.now() - parseInt(match[1]) * 1000
-      }
-    } else {
-      const { stdout } = await runCommand('uptime', ['-s'], {
-        timeoutMs: 3000
-      })
-      const bootTime = new Date(stdout.trim())
-      status.uptime = Date.now() - bootTime.getTime()
-    }
+    // System uptime (Linux first, then macOS fallback, then Node runtime fallback)
+    const { stdout: uptimeOutput } = await runCommand('uptime', ['-s'], {
+      timeoutMs: 3000
+    })
+    const bootTime = new Date(uptimeOutput.trim())
+    status.uptime = Date.now() - bootTime.getTime()
   } catch (error) {
-    logger.error({ err: error }, 'Error getting uptime')
+    try {
+      const { stdout: bootOutput } = await runCommand('sysctl', ['-n', 'kern.boottime'], {
+        timeoutMs: 3000
+      })
+      const match = bootOutput.match(/sec\s*=\s*(\d+)/)
+      if (match?.[1]) {
+        status.uptime = Date.now() - Number.parseInt(match[1], 10) * 1000
+      } else {
+        status.uptime = Math.max(0, Math.floor(os.uptime() * 1000))
+      }
+    } catch {
+      status.uptime = Math.max(0, Math.floor(os.uptime() * 1000))
+    }
   }
 
   try {
-    // Memory info (cross-platform)
-    if (process.platform === 'darwin') {
-      const totalBytes = os.totalmem()
-      const freeBytes = os.freemem()
-      const totalMB = Math.round(totalBytes / (1024 * 1024))
-      const usedMB = Math.round((totalBytes - freeBytes) / (1024 * 1024))
-      const availableMB = Math.round(freeBytes / (1024 * 1024))
-      status.memory = { total: totalMB, used: usedMB, available: availableMB }
-    } else {
-      const { stdout: memOutput } = await runCommand('free', ['-m'], {
-        timeoutMs: 3000
-      })
-      const memLine = memOutput.split('\n').find(line => line.startsWith('Mem:'))
-      if (memLine) {
-        const parts = memLine.split(/\s+/)
-        status.memory = {
-          total: parseInt(parts[1]) || 0,
-          used: parseInt(parts[2]) || 0,
-          available: parseInt(parts[6]) || 0
-        }
+    // Memory info (Linux `free` first)
+    const { stdout: memOutput } = await runCommand('free', ['-m'], {
+      timeoutMs: 3000
+    })
+    const memLines = memOutput.split('\n')
+    const memLine = memLines.find(line => line.startsWith('Mem:'))
+    if (memLine) {
+      const parts = memLine.split(/\s+/)
+      status.memory = {
+        total: parseInt(parts[1]) || 0,
+        used: parseInt(parts[2]) || 0,
+        available: parseInt(parts[6]) || 0
       }
     }
   } catch (error) {
-    logger.error({ err: error }, 'Error getting memory info')
+    const totalMb = Math.round(os.totalmem() / (1024 * 1024))
+    const freeMb = Math.round(os.freemem() / (1024 * 1024))
+    status.memory = {
+      total: totalMb,
+      used: Math.max(0, totalMb - freeMb),
+      available: freeMb
+    }
   }
 
   try {
@@ -289,15 +290,40 @@ async function getSystemStatus(workspaceId: number) {
   try {
     // Read sessions directly from agent session stores on disk
     const gatewaySessions = getAllGatewaySessions()
+    const liveStatuses = getAgentLiveStatuses()
     status.sessions = {
       total: gatewaySessions.length,
       active: gatewaySessions.filter((s) => s.active).length,
     }
 
+    try {
+      const db = getDatabase()
+      const agentRows = db.prepare('SELECT name, status FROM agents WHERE workspace_id = ?').all(workspaceId) as Array<{ name: string; status: string }>
+      const totalAgents = agentRows.length
+      const byStatus: Record<string, number> = {}
+      let online = 0
+      for (const agent of agentRows) {
+        const live =
+          liveStatuses.get(agent.name) ||
+          liveStatuses.get(String(agent.name).toLowerCase())
+        const resolved = live
+          ? (live.status === 'active' ? 'busy' : live.status)
+          : (agent.status || 'offline')
+        byStatus[resolved] = (byStatus[resolved] || 0) + 1
+        if (resolved === 'busy' || resolved === 'idle') online += 1
+      }
+      status.agents = {
+        total: totalAgents,
+        online,
+        byStatus,
+      }
+    } catch (dbErr) {
+      logger.error({ err: dbErr }, 'Error computing live agent counts')
+    }
+
     // Sync agent statuses in DB from live session data
     try {
       const db = getDatabase()
-      const liveStatuses = getAgentLiveStatuses()
       const now = Math.floor(Date.now() / 1000)
       // Match by: exact name, lowercase, or normalized (spaces→hyphens)
       const updateStmt = db.prepare(
@@ -316,6 +342,7 @@ async function getSystemStatus(workspaceId: number) {
           agentName
         )
       }
+      syncAgentSessionLinks(workspaceId)
     } catch (dbErr) {
       logger.error({ err: dbErr }, 'Error syncing agent statuses')
     }
@@ -434,17 +461,14 @@ async function performHealthCheck() {
     })
   }
 
-  // Check disk space (cross-platform: use df -h / and parse capacity column)
+  // Check disk space
   try {
-    const { stdout } = await runCommand('df', ['-h', '/'], {
+    const { stdout } = await runCommand('df', ['/', '--output=pcent'], {
       timeoutMs: 3000
     })
     const lines = stdout.trim().split('\n')
     const last = lines[lines.length - 1] || ''
-    const parts = last.split(/\s+/)
-    // On macOS capacity is col 4 ("85%"), on Linux use% is col 4 as well
-    const pctField = parts.find(p => p.endsWith('%')) || '0%'
-    const usagePercent = parseInt(pctField.replace('%', '') || '0')
+    const usagePercent = parseInt(last.replace('%', '').trim() || '0')
     
     health.checks.push({
       name: 'Disk Space',
@@ -459,21 +483,15 @@ async function performHealthCheck() {
     })
   }
 
-  // Check memory usage (cross-platform)
+  // Check memory usage
   try {
-    let usagePercent: number
-    if (process.platform === 'darwin') {
-      const totalBytes = os.totalmem()
-      const freeBytes = os.freemem()
-      usagePercent = Math.round(((totalBytes - freeBytes) / totalBytes) * 100)
-    } else {
-      const { stdout } = await runCommand('free', ['-m'], { timeoutMs: 3000 })
-      const memLine = stdout.split('\n').find((line) => line.startsWith('Mem:'))
-      const parts = (memLine || '').split(/\s+/)
-      const total = parseInt(parts[1] || '0')
-      const available = parseInt(parts[6] || '0')
-      usagePercent = Math.round(((total - available) / total) * 100)
-    }
+    const { stdout } = await runCommand('free', ['-m'], { timeoutMs: 3000 })
+    const lines = stdout.split('\n')
+    const memLine = lines.find((line) => line.startsWith('Mem:'))
+    const parts = (memLine || '').split(/\s+/)
+    const total = parseInt(parts[1] || '0')
+    const available = parseInt(parts[6] || '0')
+    const usagePercent = Math.round(((total - available) / total) * 100)
 
     health.checks.push({
       name: 'Memory Usage',

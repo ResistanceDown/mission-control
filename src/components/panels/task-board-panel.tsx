@@ -8,6 +8,7 @@ import { useSmartPoll } from '@/lib/use-smart-poll'
 import { createClientLogger } from '@/lib/client-logger'
 
 import { useFocusTrap } from '@/lib/use-focus-trap'
+import { parseHabiTaskMetadata } from '@/lib/habi-task-contract'
 
 import { AgentAvatar } from '@/components/ui/agent-avatar'
 import { MarkdownRenderer } from '@/components/markdown-renderer'
@@ -18,7 +19,7 @@ interface Task {
   id: number
   title: string
   description?: string
-  status: 'inbox' | 'assigned' | 'in_progress' | 'review' | 'quality_review' | 'done'
+  status: 'inbox' | 'assigned' | 'in_progress' | 'review' | 'quality_review' | 'done' | 'cancelled'
   priority: 'low' | 'medium' | 'high' | 'critical' | 'urgent'
   assigned_to?: string
   created_by: string
@@ -61,6 +62,81 @@ interface Comment {
   replies?: Comment[]
 }
 
+interface ParsedSystemComment {
+  title: string
+  lines: string[]
+  tone?: 'neutral' | 'warning' | 'action'
+}
+
+function parseSystemComment(comment: Comment): ParsedSystemComment | null {
+  if (comment.author !== 'system') return null
+  const content = comment.content.trim()
+
+  if (content.startsWith('Ingest sync update\n')) {
+    const lines = content.split('\n').slice(1).filter(Boolean)
+    return { title: 'Task Sync Update', lines, tone: 'neutral' }
+  }
+
+  if (content.startsWith('Ingest created task\n')) {
+    const lines = content.split('\n').slice(1).filter(Boolean)
+    return { title: 'Task Created By Ingest', lines, tone: 'action' }
+  }
+
+  if (content.startsWith('Ingest note\n')) {
+    return { title: 'Ingest Note', lines: content.split('\n').slice(1).filter(Boolean), tone: 'neutral' }
+  }
+
+  if (content.startsWith('Guardrail applied\n')) {
+    return { title: 'Guardrail Applied', lines: content.split('\n').slice(1).filter(Boolean), tone: 'warning' }
+  }
+
+  if (content.startsWith('Assignee offline\n')) {
+    return { title: 'Assignee Offline', lines: content.split('\n').slice(1).filter(Boolean), tone: 'warning' }
+  }
+
+  if (content.startsWith('Founder sent this back')) {
+    return { title: 'Founder Sent Back', lines: [content], tone: 'action' }
+  }
+
+  if (content.startsWith('Ingest sync from ')) {
+    const source = content.match(/^Ingest sync from (.*?):/)?.[1] || 'artifact'
+    const details = content.split(': ').slice(1).join(': ')
+    const lines = [
+      `Source: ${source}`,
+      ...details.split(', ').map((part) => part.trim()).filter(Boolean),
+    ]
+    return { title: 'Task Sync Update', lines, tone: 'neutral' }
+  }
+
+  if (content.startsWith('Ingest created task from ')) {
+    const source = content.replace(/^Ingest created task from /, '')
+    return { title: 'Task Created By Ingest', lines: [source], tone: 'action' }
+  }
+
+  if (content.startsWith('Ingest note: ')) {
+    return { title: 'Ingest Note', lines: [content.replace('Ingest note: ', '')], tone: 'neutral' }
+  }
+
+  if (content.startsWith('Auto-guardrail: ')) {
+    return { title: 'Guardrail Applied', lines: [content.replace('Auto-guardrail: ', '')], tone: 'warning' }
+  }
+
+  if (content.includes('currently offline. Task is queued')) {
+    return { title: 'Assignee Offline', lines: [content], tone: 'warning' }
+  }
+
+  return null
+}
+
+function isKickoffSummaryComment(content?: string | null) {
+  return String(content || '').trim().startsWith('Execution kickoff')
+}
+
+function isExecutionProgressSummaryComment(content?: string | null) {
+  const normalized = String(content || '').trim().toLowerCase()
+  return normalized.startsWith('execution progress') || normalized.startsWith('ready for review') || normalized.startsWith('execution blocked')
+}
+
 interface Project {
   id: number
   name: string
@@ -84,6 +160,7 @@ const statusColumns = [
   { key: 'review', title: 'Review', color: 'bg-purple-500/20 text-purple-400' },
   { key: 'quality_review', title: 'Quality Review', color: 'bg-indigo-500/20 text-indigo-400' },
   { key: 'done', title: 'Done', color: 'bg-green-500/20 text-green-400' },
+  { key: 'cancelled', title: 'Cancelled', color: 'bg-zinc-500/20 text-zinc-300' },
 ]
 
 const priorityColors: Record<string, string> = {
@@ -272,7 +349,12 @@ export function TaskBoardPanel() {
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [showProjectManager, setShowProjectManager] = useState(false)
   const [editingTask, setEditingTask] = useState<Task | null>(null)
+  const [showStickyScrollbar, setShowStickyScrollbar] = useState(false)
+  const [stickyScrollbarWidth, setStickyScrollbarWidth] = useState(0)
   const dragCounter = useRef(0)
+  const boardScrollRef = useRef<HTMLDivElement | null>(null)
+  const stickyScrollbarRef = useRef<HTMLDivElement | null>(null)
+  const syncSourceRef = useRef<'board' | 'sticky' | null>(null)
   const selectedTaskIdFromUrl = Number.parseInt(searchParams.get('taskId') || '', 10)
 
   const updateTaskUrl = useCallback((taskId: number | null, mode: 'push' | 'replace' = 'push') => {
@@ -296,6 +378,24 @@ export function TaskBoardPanel() {
     ...t,
     aegisApproved: Boolean(aegisMap[t.id])
   }))
+
+  const syncStickyScrollbar = useCallback(() => {
+    const board = boardScrollRef.current
+    const sticky = stickyScrollbarRef.current
+    if (!board) return
+
+    const hasOverflow = board.scrollWidth > board.clientWidth + 1
+    setStickyScrollbarWidth(board.scrollWidth)
+    setShowStickyScrollbar(hasOverflow)
+
+    if (sticky && syncSourceRef.current !== 'sticky') {
+      syncSourceRef.current = 'board'
+      sticky.scrollLeft = board.scrollLeft
+      requestAnimationFrame(() => {
+        if (syncSourceRef.current === 'board') syncSourceRef.current = null
+      })
+    }
+  }, [])
 
   // Fetch tasks, agents, and projects
   const fetchData = useCallback(async () => {
@@ -359,6 +459,50 @@ export function TaskBoardPanel() {
   useEffect(() => {
     fetchData()
   }, [fetchData])
+
+  useEffect(() => {
+    const board = boardScrollRef.current
+    if (!board) return
+
+    const handleBoardScroll = () => {
+      if (!stickyScrollbarRef.current || syncSourceRef.current === 'sticky') return
+      syncSourceRef.current = 'board'
+      stickyScrollbarRef.current.scrollLeft = board.scrollLeft
+      requestAnimationFrame(() => {
+        if (syncSourceRef.current === 'board') syncSourceRef.current = null
+      })
+    }
+
+    const handleStickyScroll = () => {
+      if (!stickyScrollbarRef.current || syncSourceRef.current === 'board') return
+      syncSourceRef.current = 'sticky'
+      board.scrollLeft = stickyScrollbarRef.current.scrollLeft
+      requestAnimationFrame(() => {
+        if (syncSourceRef.current === 'sticky') syncSourceRef.current = null
+      })
+    }
+
+    const resizeObserver = new ResizeObserver(() => {
+      syncStickyScrollbar()
+    })
+
+    board.addEventListener('scroll', handleBoardScroll, { passive: true })
+    stickyScrollbarRef.current?.addEventListener('scroll', handleStickyScroll, { passive: true })
+    window.addEventListener('resize', syncStickyScrollbar)
+    resizeObserver.observe(board)
+    syncStickyScrollbar()
+
+    return () => {
+      board.removeEventListener('scroll', handleBoardScroll)
+      stickyScrollbarRef.current?.removeEventListener('scroll', handleStickyScroll)
+      window.removeEventListener('resize', syncStickyScrollbar)
+      resizeObserver.disconnect()
+    }
+  }, [syncStickyScrollbar])
+
+  useEffect(() => {
+    syncStickyScrollbar()
+  }, [tasks, projectFilter, syncStickyScrollbar])
 
   useEffect(() => {
     if (!Number.isFinite(selectedTaskIdFromUrl)) {
@@ -431,12 +575,12 @@ export function TaskBoardPanel() {
       if (newStatus === 'done') {
         const reviewResponse = await fetch(`/api/quality-review?taskId=${draggedTask.id}`)
         if (!reviewResponse.ok) {
-          throw new Error('Unable to verify Aegis approval')
+          throw new Error('Unable to verify QC approval')
         }
         const reviewData = await reviewResponse.json()
         const latest = reviewData.reviews?.find((review: any) => review.reviewer === 'aegis')
         if (!latest || latest.status !== 'approved') {
-          throw new Error('Aegis approval is required before moving to done')
+          throw new Error('QC approval is required before moving to done')
         }
       }
 
@@ -576,7 +720,7 @@ export function TaskBoardPanel() {
       )}
 
       {/* Kanban Board */}
-      <div className="flex-1 flex gap-4 p-4 overflow-x-auto" role="region" aria-label="Task board">
+      <div ref={boardScrollRef} className="task-board-scrollbar flex-1 flex gap-4 p-4 pb-8 overflow-x-auto" role="region" aria-label="Task board">
         {statusColumns.map(column => (
           <div
             key={column.key}
@@ -633,7 +777,7 @@ export function TaskBoardPanel() {
                       )}
                       {task.aegisApproved && (
                         <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-700 text-emerald-100">
-                          Aegis Approved
+                          QC Passed
                         </span>
                       )}
                       <span className={`text-xs px-2 py-1 rounded font-medium ${
@@ -719,6 +863,18 @@ export function TaskBoardPanel() {
         ))}
       </div>
 
+      {showStickyScrollbar && (
+        <div className="sticky bottom-0 z-20 px-4 pb-3 pt-1">
+          <div
+            ref={stickyScrollbarRef}
+            className="floating-task-scrollbar overflow-x-auto overflow-y-hidden bg-background/95 backdrop-blur"
+            aria-hidden="true"
+          >
+            <div style={{ width: stickyScrollbarWidth, height: 1 }} />
+          </div>
+        </div>
+      )}
+
       {/* Task Detail Modal */}
       {selectedTask && !editingTask && (
         <TaskDetailModal
@@ -794,8 +950,10 @@ function TaskDetailModal({
   const [loadingComments, setLoadingComments] = useState(false)
   const [commentText, setCommentText] = useState('')
   const [commentError, setCommentError] = useState<string | null>(null)
+  const [commentSortOrder, setCommentSortOrder] = useState<'newest' | 'oldest'>('newest')
   const [broadcastMessage, setBroadcastMessage] = useState('')
   const [broadcastStatus, setBroadcastStatus] = useState<string | null>(null)
+  const [pingStatus, setPingStatus] = useState<string | null>(null)
   const [reviews, setReviews] = useState<any[]>([])
   const [reviewStatus, setReviewStatus] = useState<'approved' | 'rejected'>('approved')
   const [reviewNotes, setReviewNotes] = useState('')
@@ -803,6 +961,34 @@ function TaskDetailModal({
   const mentionTargets = useMentionTargets()
   const [activeTab, setActiveTab] = useState<'details' | 'comments' | 'quality'>('details')
   const [reviewer, setReviewer] = useState('aegis')
+  const metadata = parseHabiTaskMetadata(task.metadata)
+  const kickoffComment = comments.find((comment) => isKickoffSummaryComment(comment.content))
+  const progressComment = comments.find((comment) => isExecutionProgressSummaryComment(comment.content))
+  const latestReview = reviews[0]
+  const validationCommands = Array.isArray(metadata.validation_commands)
+    ? metadata.validation_commands.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    : []
+  const evidencePath = typeof metadata.evidence_path === 'string' ? metadata.evidence_path : ''
+  const handoffPath = typeof metadata.handoff_artifact === 'string' ? metadata.handoff_artifact : ''
+  const worktreePath = typeof metadata.worktree_path === 'string' ? metadata.worktree_path : ''
+  const reviewStatusLabel = task.status === 'quality_review'
+    ? (task.aegisApproved ? 'QC passed. This is ready for your final approval.' : 'QC is still running. This is not ready for founder approval yet.')
+    : task.status === 'review'
+      ? 'Implementation is complete enough to be sent through QC.'
+      : task.status === 'assigned'
+        ? 'This task is waiting on founder approval before execution begins.'
+        : task.status === 'in_progress'
+          ? 'Execution is active. Review the latest evidence before changing state.'
+          : 'Use the evidence and validation below to make the next decision.'
+  const whatChanged = progressComment?.content || kickoffComment?.content || 'No structured implementation update has been posted yet.'
+  const whyReady = latestReview?.notes || reviewStatusLabel
+  const founderJudgment = task.status === 'quality_review'
+    ? (task.aegisApproved ? 'Approve and mark done, or send it back if the result does not meet the bar.' : 'Wait for QC to finish, or open the task for context while it is being reviewed.')
+    : task.status === 'review'
+      ? 'Send this to QC if the evidence looks complete, or send it back with a concrete note.'
+      : task.status === 'assigned'
+        ? 'Approve execution if this should start now, or leave it queued.'
+        : 'Confirm the evidence matches the scope before changing the task state.'
 
   const fetchReviews = useCallback(async () => {
     try {
@@ -908,20 +1094,73 @@ function TaskDetailModal({
     }
   }
 
-  const renderComment = (comment: Comment, depth: number = 0) => (
-    <div key={comment.id} className={`border-l-2 border-border pl-3 ${depth > 0 ? 'ml-4' : ''}`}>
-      <div className="flex items-center justify-between text-xs text-muted-foreground">
-        <span className="font-medium text-foreground/80">{comment.author}</span>
-        <span>{new Date(comment.created_at * 1000).toLocaleString()}</span>
-      </div>
-      <div className="text-sm text-foreground/90 mt-1 whitespace-pre-wrap">{comment.content}</div>
-      {comment.replies && comment.replies.length > 0 && (
-        <div className="mt-3 space-y-3">
-          {comment.replies.map(reply => renderComment(reply, depth + 1))}
+  const handlePingAssignee = async () => {
+    if (!task.assigned_to) return
+    try {
+      setPingStatus('Pinging assignee...')
+      const response = await fetch(`/api/tasks/${task.id}/ping-assignee`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: 'Please post your latest progress/evidence update on this task card.',
+        }),
+      })
+      const data = await response.json()
+      if (!response.ok) {
+        throw new Error(data.error || data.reason || 'Ping failed')
+      }
+      setPingStatus(`Ping delivered to ${data.assignee || task.assigned_to}`)
+      await fetchComments()
+      onUpdate()
+    } catch (error) {
+      setPingStatus(error instanceof Error ? error.message : 'Ping failed')
+    }
+  }
+
+  const renderComment = (comment: Comment, depth: number = 0) => {
+    const systemComment = parseSystemComment(comment)
+    const systemToneClass = systemComment?.tone === 'warning'
+      ? 'border-amber-500/30 bg-amber-500/10'
+      : systemComment?.tone === 'action'
+        ? 'border-indigo-500/30 bg-indigo-500/10'
+        : 'border-border bg-surface-1/50'
+
+    return (
+      <div key={comment.id} className={`border-l-2 border-border pl-3 ${depth > 0 ? 'ml-4' : ''}`}>
+        <div className="flex items-center justify-between text-xs text-muted-foreground">
+          <span className="font-medium text-foreground/80">{comment.author}</span>
+          <span>{new Date(comment.created_at * 1000).toLocaleString()}</span>
         </div>
-      )}
-    </div>
-  )
+        {systemComment ? (
+          <div className={`mt-2 rounded-lg border px-3 py-2 ${systemToneClass}`}>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{systemComment.title}</div>
+            <div className="mt-2 space-y-1 text-sm text-foreground/90">
+              {systemComment.lines.map((line, index) => (
+                <div key={`${comment.id}-line-${index}`} className="whitespace-pre-wrap">{line}</div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="text-sm text-foreground/90 mt-1 whitespace-pre-wrap">{comment.content}</div>
+        )}
+        {comment.replies && comment.replies.length > 0 && (
+          <div className="mt-3 space-y-3">
+            {comment.replies.map(reply => renderComment(reply, depth + 1))}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  const sortCommentThread = (items: Comment[]): Comment[] => {
+    const direction = commentSortOrder === 'newest' ? -1 : 1
+    return [...items]
+      .sort((a, b) => (a.created_at - b.created_at) * direction)
+      .map((item) => ({
+        ...item,
+        replies: item.replies ? sortCommentThread(item.replies) : []
+      }))
+  }
 
   const dialogRef = useFocusTrap(onClose)
 
@@ -973,6 +1212,37 @@ function TaskDetailModal({
 
           {activeTab === 'details' && (
             <div id="tabpanel-details" role="tabpanel" aria-label="Details" className="grid grid-cols-2 gap-4 text-sm mt-4">
+              <div className="col-span-2 rounded-xl border border-border/70 bg-surface-1/50 p-4 space-y-3">
+                <div>
+                  <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Review Summary</div>
+                  <div className="mt-2 text-sm text-foreground">{reviewStatusLabel}</div>
+                </div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div>
+                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">What changed</div>
+                    <div className="mt-1 text-sm text-foreground whitespace-pre-wrap">{whatChanged}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Why it is ready</div>
+                    <div className="mt-1 text-sm text-foreground whitespace-pre-wrap">{whyReady}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Evidence</div>
+                    <div className="mt-1 text-sm text-foreground whitespace-pre-wrap">{evidencePath || 'No evidence path attached.'}</div>
+                    {handoffPath ? <div className="mt-1 text-xs text-muted-foreground">Handoff: {handoffPath}</div> : null}
+                    {worktreePath ? <div className="mt-1 text-xs text-muted-foreground">Worktree: {worktreePath}</div> : null}
+                  </div>
+                  <div>
+                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Validation</div>
+                    <div className="mt-1 text-sm text-foreground whitespace-pre-wrap">{validationCommands.length ? validationCommands.join('\n') : 'No validation commands attached.'}</div>
+                    {latestReview ? <div className="mt-1 text-xs text-muted-foreground">Latest QC: {latestReview.reviewer} — {latestReview.status}</div> : null}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">What still needs your judgment</div>
+                  <div className="mt-1 text-sm text-foreground whitespace-pre-wrap">{founderJudgment}</div>
+                </div>
+              </div>
               {task.ticket_ref && (
                 <div>
                   <span className="text-muted-foreground">Ticket:</span>
@@ -1005,6 +1275,19 @@ function TaskDetailModal({
                     <span>Unassigned</span>
                   )}
                 </span>
+                <div className="mt-2">
+                  <button
+                    type="button"
+                    onClick={handlePingAssignee}
+                    disabled={!task.assigned_to}
+                    className="px-2 py-1 text-xs rounded border border-primary/30 text-primary hover:bg-primary/10 disabled:opacity-50 disabled:cursor-not-allowed transition-smooth"
+                  >
+                    Ping Assignee
+                  </button>
+                  {pingStatus && (
+                    <div className="text-xs text-muted-foreground mt-1">{pingStatus}</div>
+                  )}
+                </div>
               </div>
               <div>
                 <span className="text-muted-foreground">Created:</span>
@@ -1017,12 +1300,23 @@ function TaskDetailModal({
             <div id="tabpanel-comments" role="tabpanel" aria-label="Comments" className="mt-6">
             <div className="flex items-center justify-between mb-3">
               <h4 className="text-lg font-semibold text-foreground">Comments</h4>
-              <button
-                onClick={fetchComments}
-                className="text-xs text-blue-400 hover:text-blue-300"
-              >
-                Refresh
-              </button>
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-muted-foreground">Sort</label>
+                <select
+                  value={commentSortOrder}
+                  onChange={(e) => setCommentSortOrder(e.target.value as 'newest' | 'oldest')}
+                  className="bg-surface-1 text-foreground border border-border rounded-md px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary/50"
+                >
+                  <option value="newest">Newest first</option>
+                  <option value="oldest">Oldest first</option>
+                </select>
+                <button
+                  onClick={fetchComments}
+                  className="text-xs text-blue-400 hover:text-blue-300"
+                >
+                  Refresh
+                </button>
+              </div>
             </div>
 
             {commentError && (
@@ -1031,15 +1325,17 @@ function TaskDetailModal({
               </div>
             )}
 
-            {loadingComments ? (
-              <div className="text-muted-foreground text-sm">Loading comments...</div>
-            ) : comments.length === 0 ? (
-              <div className="text-muted-foreground/50 text-sm">No comments yet.</div>
-            ) : (
-              <div className="space-y-4">
-                {comments.map(comment => renderComment(comment))}
-              </div>
-            )}
+            <div className="max-h-[26rem] overflow-y-auto border border-border/60 rounded-md p-3 bg-surface-1/30">
+              {loadingComments ? (
+                <div className="text-muted-foreground text-sm">Loading comments...</div>
+              ) : comments.length === 0 ? (
+                <div className="text-muted-foreground/50 text-sm">No comments yet.</div>
+              ) : (
+                <div className="space-y-4">
+                  {sortCommentThread(comments).map(comment => renderComment(comment))}
+                </div>
+              )}
+            </div>
 
             <form onSubmit={handleAddComment} className="mt-4 space-y-3">
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
@@ -1102,7 +1398,7 @@ function TaskDetailModal({
 
           {activeTab === 'quality' && (
             <div id="tabpanel-quality" role="tabpanel" aria-label="Quality Review" className="mt-6">
-              <h5 className="text-sm font-medium text-foreground mb-2">Aegis Quality Review</h5>
+              <h5 className="text-sm font-medium text-foreground mb-2">QC Review</h5>
               {reviewError && (
                 <div className="text-xs text-red-400 mb-2">{reviewError}</div>
               )}
@@ -1434,6 +1730,7 @@ function EditTaskModal({
                   <option value="review">Review</option>
                   <option value="quality_review">Quality Review</option>
                   <option value="done">Done</option>
+                  <option value="cancelled">Cancelled</option>
                 </select>
               </div>
 

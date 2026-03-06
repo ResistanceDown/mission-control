@@ -91,7 +91,7 @@ export interface Task {
   id: number
   title: string
   description?: string
-  status: 'inbox' | 'assigned' | 'in_progress' | 'review' | 'quality_review' | 'done'
+  status: 'inbox' | 'assigned' | 'in_progress' | 'review' | 'quality_review' | 'done' | 'cancelled'
   priority: 'low' | 'medium' | 'high' | 'critical' | 'urgent'
   project_id?: number
   project_ticket_no?: number
@@ -266,6 +266,13 @@ export interface ConnectionStatus {
   sseConnected?: boolean
 }
 
+interface UpdateInfo {
+  currentVersion?: string
+  latestVersion: string
+  releaseUrl?: string
+  releaseNotes?: string
+}
+
 interface MissionControlStore {
   // Dashboard Mode (local vs full gateway)
   dashboardMode: 'full' | 'local'
@@ -278,10 +285,14 @@ interface MissionControlStore {
   setSubscription: (sub: { type: string; rateLimitTier?: string } | null) => void
 
   // Update availability
-  updateAvailable: { latestVersion: string; releaseUrl: string; releaseNotes: string } | null
+  updateAvailable: UpdateInfo | null
   updateDismissedVersion: string | null
-  setUpdateAvailable: (info: { latestVersion: string; releaseUrl: string; releaseNotes: string } | null) => void
+  setUpdateAvailable: (info: UpdateInfo | null) => void
   dismissUpdate: (version: string) => void
+  openclawUpdateAvailable: UpdateInfo | null
+  openclawUpdateDismissedVersion: string | null
+  setOpenclawUpdateAvailable: (info: UpdateInfo | null) => void
+  dismissOpenclawUpdate: (version: string) => void
 
   // WebSocket & Connection
   connection: ConnectionStatus
@@ -346,6 +357,7 @@ interface MissionControlStore {
     session?: string
     search?: string
   }
+  setLogs: (logs: LogEntry[]) => void
   addLog: (log: LogEntry) => void
   setLogFilters: (filters: Partial<{
     level?: string
@@ -441,6 +453,16 @@ export const useMissionControl = create<MissionControlStore>()(
       try { localStorage.setItem('mc-update-dismissed-version', version) } catch {}
       set({ updateDismissedVersion: version })
     },
+    openclawUpdateAvailable: null,
+    openclawUpdateDismissedVersion: (() => {
+      if (typeof window === 'undefined') return null
+      try { return localStorage.getItem('mc-openclaw-update-dismissed-version') } catch { return null }
+    })(),
+    setOpenclawUpdateAvailable: (info) => set({ openclawUpdateAvailable: info }),
+    dismissOpenclawUpdate: (version) => {
+      try { localStorage.setItem('mc-openclaw-update-dismissed-version', version) } catch {}
+      set({ openclawUpdateDismissedVersion: version })
+    },
 
     // Connection state
     connection: {
@@ -470,6 +492,7 @@ export const useMissionControl = create<MissionControlStore>()(
     // Logs
     logs: [],
     logFilters: {},
+    setLogs: (logs) => set({ logs }),
     addLog: (log) =>
       set((state) => {
         // Check if log already exists to prevent duplicates

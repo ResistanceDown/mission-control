@@ -6,7 +6,10 @@ import { mutationLimiter } from '@/lib/rate-limit';
 import { logger } from '@/lib/logger';
 import { validateBody, updateTaskSchema } from '@/lib/validation';
 import { resolveMentionRecipients } from '@/lib/mentions';
-import { normalizeTaskUpdateStatus } from '@/lib/task-status';
+import { dispatchTaskAssignment } from '@/lib/task-assignment-dispatch';
+import { habiTaskContractErrorMessage, isHabiTask, parseHabiTaskMetadata, validateHabiTaskContract } from '@/lib/habi-task-contract';
+import { ensureHabiTaskSubscriptions } from '@/lib/habi-task-ops';
+import { prepareHabiTaskExecution } from '@/lib/habi-task-execution';
 
 function formatTicketRef(prefix?: string | null, num?: number | null): string | undefined {
   if (!prefix || typeof num !== 'number' || !Number.isFinite(num) || num <= 0) return undefined
@@ -116,29 +119,18 @@ export async function PUT(
     const {
       title,
       description,
-      status: requestedStatus,
+      status,
       priority,
       project_id,
       assigned_to,
       due_date,
       estimated_hours,
       actual_hours,
-      outcome,
-      error_message,
-      resolution,
-      feedback_rating,
-      feedback_notes,
-      retry_count,
-      completed_at,
       tags,
       metadata
     } = body;
-    const normalizedStatus = normalizeTaskUpdateStatus({
-      currentStatus: currentTask.status,
-      requestedStatus,
-      assignedTo: assigned_to,
-      assignedToProvided: assigned_to !== undefined,
-    })
+    const requestedStatus = status;
+    let persistedStatus = requestedStatus;
     
     const now = Math.floor(Date.now() / 1000);
     const descriptionMentionResolution = description !== undefined
@@ -152,6 +144,41 @@ export async function PUT(
     }
 
     const previousDescriptionMentionRecipients = resolveMentionRecipients(currentTask.description || '', db, workspaceId).recipients;
+    const effectiveAssignedTo = assigned_to !== undefined ? assigned_to : currentTask.assigned_to;
+    let effectiveMetadata = metadata !== undefined ? metadata : (currentTask as any).metadata;
+    const currentMetadata = parseHabiTaskMetadata(currentTask.metadata);
+    const plannedExecutionApproval =
+      requestedStatus === 'in_progress' &&
+      currentTask.status === 'assigned' &&
+      isHabiTask({ assigned_to: effectiveAssignedTo }) &&
+      ['draft_pr', 'audit_only'].includes(String(currentMetadata.execution_mode || '')) &&
+      !currentMetadata.founder_approved_at;
+
+    if (plannedExecutionApproval) {
+      persistedStatus = 'assigned';
+      effectiveMetadata = {
+        ...currentMetadata,
+        ...(typeof metadata === 'object' && metadata ? metadata : {}),
+        founder_approved_for_execution: true,
+        founder_approved_at: new Date(now * 1000).toISOString(),
+        founder_approved_by: auth.user.username,
+      };
+    }
+    const shouldValidateHabiContract =
+      isHabiTask({ assigned_to: effectiveAssignedTo }) &&
+      (persistedStatus === 'done' || assigned_to !== undefined || metadata !== undefined || plannedExecutionApproval);
+    if (shouldValidateHabiContract) {
+      const contract = validateHabiTaskContract({
+        assigned_to: effectiveAssignedTo,
+        metadata: effectiveMetadata as any,
+      });
+      if (!contract.ok) {
+        return NextResponse.json(
+          { error: habiTaskContractErrorMessage(contract.missing, contract.invalidGate) },
+          { status: 400 }
+        );
+      }
+    }
     
     // Build dynamic update query
     const fieldsToUpdate = [];
@@ -166,15 +193,15 @@ export async function PUT(
       fieldsToUpdate.push('description = ?');
       updateParams.push(description);
     }
-    if (normalizedStatus !== undefined) {
-      if (normalizedStatus === 'done' && !hasAegisApproval(db, taskId, workspaceId)) {
+    if (status !== undefined) {
+      if (persistedStatus === 'done' && !hasAegisApproval(db, taskId, workspaceId)) {
         return NextResponse.json(
           { error: 'Aegis approval is required to move task to done.' },
           { status: 403 }
         )
       }
       fieldsToUpdate.push('status = ?');
-      updateParams.push(normalizedStatus);
+      updateParams.push(persistedStatus);
     }
     if (priority !== undefined) {
       fieldsToUpdate.push('priority = ?');
@@ -226,44 +253,13 @@ export async function PUT(
       fieldsToUpdate.push('actual_hours = ?');
       updateParams.push(actual_hours);
     }
-    if (outcome !== undefined) {
-      fieldsToUpdate.push('outcome = ?');
-      updateParams.push(outcome);
-    }
-    if (error_message !== undefined) {
-      fieldsToUpdate.push('error_message = ?');
-      updateParams.push(error_message);
-    }
-    if (resolution !== undefined) {
-      fieldsToUpdate.push('resolution = ?');
-      updateParams.push(resolution);
-    }
-    if (feedback_rating !== undefined) {
-      fieldsToUpdate.push('feedback_rating = ?');
-      updateParams.push(feedback_rating);
-    }
-    if (feedback_notes !== undefined) {
-      fieldsToUpdate.push('feedback_notes = ?');
-      updateParams.push(feedback_notes);
-    }
-    if (retry_count !== undefined) {
-      fieldsToUpdate.push('retry_count = ?');
-      updateParams.push(retry_count);
-    }
-    if (completed_at !== undefined) {
-      fieldsToUpdate.push('completed_at = ?');
-      updateParams.push(completed_at);
-    } else if (normalizedStatus === 'done' && !currentTask.completed_at) {
-      fieldsToUpdate.push('completed_at = ?');
-      updateParams.push(now);
-    }
     if (tags !== undefined) {
       fieldsToUpdate.push('tags = ?');
       updateParams.push(JSON.stringify(tags));
     }
-    if (metadata !== undefined) {
+    if (metadata !== undefined || plannedExecutionApproval) {
       fieldsToUpdate.push('metadata = ?');
-      updateParams.push(JSON.stringify(metadata));
+      updateParams.push(JSON.stringify(effectiveMetadata));
     }
     
     fieldsToUpdate.push('updated_at = ?');
@@ -285,8 +281,8 @@ export async function PUT(
     // Track changes and log activities
     const changes: string[] = [];
     
-    if (normalizedStatus !== undefined && normalizedStatus !== currentTask.status) {
-      changes.push(`status: ${currentTask.status} → ${normalizedStatus}`);
+      if (persistedStatus && persistedStatus !== currentTask.status) {
+      changes.push(`status: ${currentTask.status} → ${persistedStatus}`);
       
       // Create notification for status change if assigned
       if (currentTask.assigned_to) {
@@ -294,7 +290,7 @@ export async function PUT(
           currentTask.assigned_to,
           'status_change',
           'Task Status Updated',
-          `Task "${currentTask.title}" status changed to ${normalizedStatus}`,
+          `Task "${currentTask.title}" status changed to ${persistedStatus}`,
           'task',
           taskId,
           workspaceId
@@ -317,9 +313,175 @@ export async function PUT(
           taskId,
           workspaceId
         );
+
+        const dispatch = await dispatchTaskAssignment({
+          workspaceId,
+          actor: auth.user.username,
+          assignee: assigned_to,
+          taskId,
+          title: title || currentTask.title,
+          priority: String(priority || currentTask.priority),
+          status: String(persistedStatus || currentTask.status),
+        })
+        if (!dispatch.delivered) {
+          logger.warn(
+            { taskId, assignee: assigned_to, reason: dispatch.reason || 'unknown' },
+            'Task updated but assignment dispatch was not delivered'
+          )
+        }
+      }
+    }
+
+    if (isHabiTask({ assigned_to: effectiveAssignedTo })) {
+      ensureHabiTaskSubscriptions(taskId, workspaceId, effectiveAssignedTo, auth.user.username)
+    }
+
+    const shouldDispatchExecutionStart =
+      persistedStatus === 'in_progress' &&
+      isHabiTask({ assigned_to: effectiveAssignedTo }) &&
+      Boolean(effectiveAssignedTo) &&
+      (
+        currentTask.status === 'assigned' ||
+        (currentTask.status === 'in_progress' && currentMetadata.execution_context_ready !== true)
+      )
+
+    if (shouldDispatchExecutionStart) {
+      const preparedExecution = await prepareHabiTaskExecution({
+        taskId,
+        title: title || currentTask.title,
+        assignee: String(effectiveAssignedTo),
+        actor: auth.user.username,
+        metadata: metadata !== undefined ? metadata : currentTask.metadata,
+      })
+
+      db.prepare(`
+        UPDATE tasks
+        SET metadata = ?, updated_at = ?
+        WHERE id = ? AND workspace_id = ?
+      `).run(JSON.stringify(preparedExecution.metadata), now, taskId, workspaceId)
+
+      if (!preparedExecution.ok) {
+        db.prepare(`
+          INSERT INTO comments (task_id, author, content, created_at, parent_id, mentions, workspace_id)
+          VALUES (?, ?, ?, ?, NULL, NULL, ?)
+        `).run(taskId, 'system', preparedExecution.failureComment, now, workspaceId)
+        db_helpers.logActivity(
+          'task_execution_blocked',
+          'task',
+          taskId,
+          auth.user.username,
+          `Execution blocked for ${effectiveAssignedTo}: ${preparedExecution.failureReason}`,
+          {
+            assignee: effectiveAssignedTo,
+            previous_status: currentTask.status,
+            next_status: persistedStatus,
+            reason: preparedExecution.failureReason,
+          },
+          workspaceId
+        )
+      }
+
+      if (!preparedExecution.ok) {
+        logger.warn(
+          { taskId, assignee: effectiveAssignedTo, reason: preparedExecution.failureReason },
+          'Task moved to in_progress but execution context provisioning failed'
+        )
+      } else {
+        const dispatch = await dispatchTaskAssignment({
+          workspaceId,
+          actor: auth.user.username,
+          assignee: String(effectiveAssignedTo),
+          taskId,
+          title: title || currentTask.title,
+          priority: String(priority || currentTask.priority),
+          status: 'in_progress',
+          details: preparedExecution.dispatchDetails,
+        })
+        if (!dispatch.delivered) {
+        logger.warn(
+          { taskId, assignee: effectiveAssignedTo, reason: dispatch.reason || 'unknown' },
+          'Task moved to in_progress but execution-start dispatch was not delivered'
+        )
+        db_helpers.logActivity(
+          'task_dispatch_failed',
+          'task',
+          taskId,
+          auth.user.username,
+          `Execution start dispatch failed for ${effectiveAssignedTo}`,
+          {
+            assignee: effectiveAssignedTo,
+            previous_status: currentTask.status,
+            next_status: persistedStatus,
+            reason: dispatch.reason || 'unknown',
+          },
+          workspaceId
+        )
+        if (preparedExecution.ok) {
+          const dispatchFailureComment = [
+            'Execution blocked',
+            `Task: #${taskId} ${title || currentTask.title}`,
+            `Assignee: ${effectiveAssignedTo}`,
+            `Reason: dispatch failed (${dispatch.reason || 'unknown'})`,
+            'Action: relink the session or retry the task ping before treating this task as active work.',
+          ].join('\n')
+          db.prepare(`
+            INSERT INTO comments (task_id, author, content, created_at, parent_id, mentions, workspace_id)
+            VALUES (?, ?, ?, ?, NULL, NULL, ?)
+          `).run(taskId, 'system', dispatchFailureComment, now, workspaceId)
+        }
+        } else {
+          db.prepare(`
+            INSERT INTO comments (task_id, author, content, created_at, parent_id, mentions, workspace_id)
+            VALUES (?, ?, ?, ?, NULL, NULL, ?)
+          `).run(taskId, 'system', preparedExecution.kickoffComment, now, workspaceId)
+          db_helpers.logActivity(
+            'task_execution_started',
+            'task',
+            taskId,
+            auth.user.username,
+            `Execution start dispatched to ${effectiveAssignedTo}`,
+            {
+              assignee: effectiveAssignedTo,
+              previous_status: currentTask.status,
+              next_status: persistedStatus,
+              session_key: dispatch.sessionKey || null,
+              execution_mode: preparedExecution.metadata.execution_mode || null,
+              worktree_path: preparedExecution.metadata.worktree_path || null,
+              branch_name: preparedExecution.metadata.branch_name || null,
+            },
+            workspaceId
+          )
+        }
       }
     }
     
+    if (plannedExecutionApproval) {
+      changes.push('founder approved for execution');
+      db.prepare(`
+        INSERT INTO comments (task_id, author, content, created_at, parent_id, mentions, workspace_id)
+        VALUES (?, ?, ?, ?, NULL, NULL, ?)
+      `).run(
+        taskId,
+        'jeremy',
+        'Founder approved this task for execution. It is queued for implementation and should not be treated as active work until coding actually starts.',
+        now,
+        workspaceId
+      );
+      db_helpers.logActivity(
+        'task_execution_approved',
+        'task',
+        taskId,
+        auth.user.username,
+        `Founder approved execution for ${currentTask.title}`,
+        {
+          assignee: effectiveAssignedTo,
+          previous_status: currentTask.status,
+          next_status: 'assigned',
+        },
+        workspaceId
+      );
+    }
+
     if (title && title !== currentTask.title) {
       changes.push('title updated');
     }
@@ -330,9 +492,6 @@ export async function PUT(
 
     if (project_id !== undefined && project_id !== currentTask.project_id) {
       changes.push(`project: ${currentTask.project_id || 'none'} → ${project_id}`);
-    }
-    if (outcome !== undefined && outcome !== currentTask.outcome) {
-      changes.push(`outcome: ${currentTask.outcome || 'unset'} → ${outcome || 'unset'}`);
     }
 
     if (descriptionMentionResolution) {
@@ -370,7 +529,7 @@ export async function PUT(
             priority: currentTask.priority,
             assigned_to: currentTask.assigned_to
           },
-          newValues: { title, status: normalizedStatus ?? currentTask.status, priority, assigned_to }
+          newValues: { title, status: persistedStatus, priority, assigned_to }
         },
         workspaceId
       );

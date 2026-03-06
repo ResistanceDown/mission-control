@@ -3,7 +3,6 @@
 import { useCallback, useRef, useEffect } from 'react'
 import { useMissionControl } from '@/store'
 import { normalizeModel } from '@/lib/utils'
-import { buildGatewayWebSocketUrl } from '@/lib/gateway-url'
 import {
   getOrCreateDeviceIdentity,
   signPayload,
@@ -17,12 +16,12 @@ const log = createClientLogger('WebSocket')
 
 // Gateway protocol version (v3 required by OpenClaw 2026.x)
 const PROTOCOL_VERSION = 3
-const DEFAULT_GATEWAY_CLIENT_ID = process.env.NEXT_PUBLIC_GATEWAY_CLIENT_ID || 'openclaw-control-ui'
+const DEFAULT_GATEWAY_CLIENT_ID = process.env.NEXT_PUBLIC_GATEWAY_CLIENT_ID || 'control-ui'
 
 // Heartbeat configuration
 const PING_INTERVAL_MS = 30_000
 const MAX_MISSED_PONGS = 3
-const ERROR_LOG_DEDUPE_MS = 5_000
+const HEARTBEAT_STALE_MS = 120_000
 
 // Gateway message types
 interface GatewayFrame {
@@ -56,13 +55,12 @@ export function useWebSocket() {
   const manualDisconnectRef = useRef<boolean>(false)
   const nonRetryableErrorRef = useRef<string | null>(null)
   const connectRef = useRef<(url: string, token?: string) => void>(() => {})
-  const lastWebSocketErrorRef = useRef<{ message: string; at: number } | null>(null)
 
   // Heartbeat tracking
   const pingCounterRef = useRef<number>(0)
   const pingSentTimestamps = useRef<Map<string, number>>(new Map())
   const missedPongsRef = useRef<number>(0)
-  // Compat flag for gateway versions that may not implement ping RPC.
+  const lastFrameAtRef = useRef<number>(Date.now())
   const gatewaySupportsPingRef = useRef<boolean>(true)
 
   const {
@@ -86,8 +84,6 @@ export function useWebSocket() {
       normalized.includes('origin not allowed') ||
       normalized.includes('device identity required') ||
       normalized.includes('device_auth_signature_invalid') ||
-      normalized.includes('invalid connect params') ||
-      normalized.includes('/client/id') ||
       normalized.includes('auth rate limit') ||
       normalized.includes('rate limited')
     )
@@ -104,9 +100,6 @@ export function useWebSocket() {
     }
     if (normalized.includes('device_auth_signature_invalid')) {
       return 'Gateway rejected device signature. Clear local device identity in the browser and reconnect.'
-    }
-    if (normalized.includes('invalid connect params') || normalized.includes('/client/id')) {
-      return 'Gateway rejected client identity params. Ensure NEXT_PUBLIC_GATEWAY_CLIENT_ID is set to openclaw-control-ui and reconnect.'
     }
     if (normalized.includes('auth rate limit') || normalized.includes('rate limited')) {
       return 'Gateway authentication is rate limited. Wait briefly, then reconnect.'
@@ -126,7 +119,22 @@ export function useWebSocket() {
 
     pingIntervalRef.current = setInterval(() => {
       if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || !handshakeCompleteRef.current) return
+
       if (!gatewaySupportsPingRef.current) return
+
+      const staleForMs = Date.now() - lastFrameAtRef.current
+      if (staleForMs >= HEARTBEAT_STALE_MS) {
+        log.warn(`No gateway frames for ${staleForMs}ms, triggering reconnect`)
+        addLog({
+          id: `heartbeat-stale-${Date.now()}`,
+          timestamp: Date.now(),
+          level: 'warn',
+          source: 'websocket',
+          message: `No gateway traffic for ${Math.round(staleForMs / 1000)}s, reconnecting...`
+        })
+        wsRef.current?.close(4000, 'Heartbeat stale')
+        return
+      }
 
       // Check missed pongs
       if (missedPongsRef.current >= MAX_MISSED_PONGS) {
@@ -507,61 +515,36 @@ export function useWebSocket() {
     getGatewayErrorHelp,
   ])
 
-  const normalizeWebSocketUrl = useCallback((rawUrl: string): string => {
-    const built = buildGatewayWebSocketUrl({
-      host: rawUrl,
-      port: Number(process.env.NEXT_PUBLIC_GATEWAY_PORT || '18789'),
-      browserProtocol: window.location.protocol,
-    })
-
-    const parsed = new URL(built, window.location.origin)
-    parsed.protocol = parsed.protocol === 'https:' ? 'wss:' : parsed.protocol === 'http:' ? 'ws:' : parsed.protocol
-    parsed.pathname = '/'
-    parsed.search = ''
-    parsed.hash = ''
-    return parsed.toString().replace(/\/$/, '')
-  }, [])
-
-  const shouldSuppressWebSocketError = useCallback((message: string): boolean => {
-    const now = Date.now()
-    const previous = lastWebSocketErrorRef.current
-    if (previous && previous.message === message && now - previous.at < ERROR_LOG_DEDUPE_MS) {
-      return true
-    }
-    lastWebSocketErrorRef.current = { message, at: now }
-    return false
-  }, [])
-
   const connect = useCallback((url: string, token?: string) => {
     const state = wsRef.current?.readyState
     if (state === WebSocket.OPEN || state === WebSocket.CONNECTING) {
       return // Already connected or connecting
     }
 
-    let urlToken = ''
-    try {
-      const parsedInput = new URL(url, window.location.origin)
-      urlToken = parsedInput.searchParams.get('token') || ''
-    } catch {
-      urlToken = ''
-    }
+    // Extract token from URL if present
+    const urlObj = new URL(url, window.location.origin)
+    const urlToken = urlObj.searchParams.get('token')
     authTokenRef.current = token || urlToken || ''
 
-    const normalizedUrl = normalizeWebSocketUrl(url)
-    reconnectUrl.current = normalizedUrl
+    // Remove token from URL (we'll send it in handshake)
+    urlObj.searchParams.delete('token')
+
+    reconnectUrl.current = url
     handshakeCompleteRef.current = false
     manualDisconnectRef.current = false
     nonRetryableErrorRef.current = null
+    lastFrameAtRef.current = Date.now()
+    gatewaySupportsPingRef.current = true
 
     try {
-      const ws = new WebSocket(normalizedUrl)
+      const ws = new WebSocket(url.split('?')[0]) // Connect without query params
       wsRef.current = ws
 
       ws.onopen = () => {
-        log.info(`Connected to ${normalizedUrl}`)
+        log.info(`Connected to ${url.split('?')[0]}`)
         // Don't set isConnected yet - wait for handshake
         setConnection({
-          url: normalizedUrl,
+          url: url.split('?')[0],
           reconnectAttempts: 0
         })
         // Wait for connect.challenge from server
@@ -570,6 +553,7 @@ export function useWebSocket() {
 
       ws.onmessage = (event) => {
         try {
+          lastFrameAtRef.current = Date.now()
           const frame = JSON.parse(event.data) as GatewayFrame
           handleGatewayFrame(frame, ws)
         } catch (error) {
@@ -624,33 +608,20 @@ export function useWebSocket() {
 
       ws.onerror = (error) => {
         log.error('WebSocket error:', error)
-        const errorMessage = 'WebSocket error occurred'
-        if (!shouldSuppressWebSocketError(errorMessage)) {
-          addLog({
-            id: `error-${Date.now()}`,
-            timestamp: Date.now(),
-            level: 'error',
-            source: 'websocket',
-            message: errorMessage
-          })
-        }
-      }
-
-    } catch (error) {
-      log.error('Failed to connect to WebSocket:', error)
-      const errorMessage = 'Failed to initialize WebSocket connection'
-      if (!shouldSuppressWebSocketError(errorMessage)) {
         addLog({
           id: `error-${Date.now()}`,
           timestamp: Date.now(),
           level: 'error',
           source: 'websocket',
-          message: errorMessage
+          message: `WebSocket error occurred`
         })
       }
+
+    } catch (error) {
+      log.error('Failed to connect to WebSocket:', error)
       setConnection({ isConnected: false })
     }
-  }, [setConnection, handleGatewayFrame, addLog, stopHeartbeat, normalizeWebSocketUrl, shouldSuppressWebSocketError])
+  }, [setConnection, handleGatewayFrame, addLog, stopHeartbeat])
 
   // Keep ref in sync so onclose always calls the latest version of connect
   useEffect(() => {

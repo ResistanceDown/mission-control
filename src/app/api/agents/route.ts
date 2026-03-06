@@ -8,10 +8,8 @@ import { requireRole } from '@/lib/auth';
 import { mutationLimiter } from '@/lib/rate-limit';
 import { logger } from '@/lib/logger';
 import { validateBody, createAgentSchema } from '@/lib/validation';
-import { runOpenClaw } from '@/lib/command';
-import { config as appConfig } from '@/lib/config';
-import { resolveWithin } from '@/lib/paths';
-import path from 'node:path';
+import { syncAgentSessionLinks } from '@/lib/agent-session-link';
+import { getAgentLiveStatuses } from '@/lib/sessions';
 
 /**
  * GET /api/agents - List all agents with optional filtering
@@ -25,6 +23,8 @@ export async function GET(request: NextRequest) {
     const db = getDatabase();
     const { searchParams } = new URL(request.url);
     const workspaceId = auth.user.workspace_id ?? 1;
+    syncAgentSessionLinks(workspaceId)
+    const liveStatuses = getAgentLiveStatuses()
     
     // Parse query parameters
     const status = searchParams.get('status');
@@ -71,9 +71,14 @@ export async function GET(request: NextRequest) {
 
     const agentsWithStats = agentsWithParsedData.map(agent => {
       const taskStats = taskCountStmt.get(agent.name, workspaceId) as any;
+      const live = liveStatuses.get(agent.name) || liveStatuses.get(agent.name.toLowerCase())
+      const resolvedStatus = live ? (live.status === 'active' ? 'busy' : live.status) : agent.status
+      const resolvedLastSeen = live ? Math.floor(live.lastActivity / 1000) : agent.last_seen
 
       return {
         ...agent,
+        status: resolvedStatus,
+        last_seen: resolvedLastSeen,
         taskStats: {
           total: taskStats.total || 0,
           assigned: taskStats.assigned || 0,
@@ -127,7 +132,6 @@ export async function POST(request: NextRequest) {
 
     const {
       name,
-      openclaw_id,
       role,
       session_key,
       soul_content,
@@ -135,15 +139,8 @@ export async function POST(request: NextRequest) {
       config = {},
       template,
       gateway_config,
-      write_to_gateway,
-      provision_openclaw_workspace,
-      openclaw_workspace_path
+      write_to_gateway
     } = body;
-
-    const openclawId = (openclaw_id || name || 'agent')
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-|-$/g, '');
 
     // Resolve template if specified
     let finalRole = role;
@@ -169,32 +166,6 @@ export async function POST(request: NextRequest) {
       .get(name, workspaceId);
     if (existingAgent) {
       return NextResponse.json({ error: 'Agent name already exists' }, { status: 409 });
-    }
-
-    if (provision_openclaw_workspace) {
-      if (!appConfig.openclawStateDir) {
-        return NextResponse.json(
-          { error: 'OPENCLAW_STATE_DIR is not configured; cannot provision OpenClaw workspace' },
-          { status: 500 }
-        );
-      }
-
-      const workspacePath = openclaw_workspace_path
-        ? path.resolve(openclaw_workspace_path)
-        : resolveWithin(appConfig.openclawStateDir, path.join('workspaces', openclawId));
-
-      try {
-        await runOpenClaw(
-          ['agents', 'add', openclawId, '--name', name, '--workspace', workspacePath, '--non-interactive'],
-          { timeoutMs: 20000 }
-        );
-      } catch (provisionError: any) {
-        logger.error({ err: provisionError, openclawId, workspacePath }, 'OpenClaw workspace provisioning failed');
-        return NextResponse.json(
-          { error: provisionError?.message || 'Failed to provision OpenClaw agent workspace' },
-          { status: 502 }
-        );
-      }
     }
     
     const now = Math.floor(Date.now() / 1000);
@@ -253,6 +224,7 @@ export async function POST(request: NextRequest) {
     // Write to gateway config if requested
     if (write_to_gateway && finalConfig) {
       try {
+        const openclawId = (name || 'agent').toLowerCase().replace(/\s+/g, '-');
         await writeAgentToConfig({
           id: openclawId,
           name,

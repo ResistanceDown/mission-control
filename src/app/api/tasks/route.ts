@@ -6,7 +6,9 @@ import { mutationLimiter } from '@/lib/rate-limit';
 import { logger } from '@/lib/logger';
 import { validateBody, createTaskSchema, bulkUpdateTaskStatusSchema } from '@/lib/validation';
 import { resolveMentionRecipients } from '@/lib/mentions';
-import { normalizeTaskCreateStatus } from '@/lib/task-status';
+import { dispatchTaskAssignment } from '@/lib/task-assignment-dispatch';
+import { habiTaskContractErrorMessage, isHabiTask, validateHabiTaskContract } from '@/lib/habi-task-contract';
+import { ensureHabiTaskSubscriptions } from '@/lib/habi-task-ops';
 
 function formatTicketRef(prefix?: string | null, num?: number | null): string | undefined {
   if (!prefix || typeof num !== 'number' || !Number.isFinite(num) || num <= 0) return undefined
@@ -161,28 +163,29 @@ export async function POST(request: NextRequest) {
     const body = validated.data;
 
     const user = auth.user
-    const actor = user.display_name || user.username || 'system'
+    const actor = user?.display_name || user?.username || 'system'
     const {
       title,
       description,
-      status,
+      status = 'inbox',
       priority = 'medium',
       project_id,
       assigned_to,
       due_date,
       estimated_hours,
-      actual_hours,
-      outcome,
-      error_message,
-      resolution,
-      feedback_rating,
-      feedback_notes,
-      retry_count = 0,
-      completed_at,
       tags = [],
       metadata = {}
     } = body;
-    const normalizedStatus = normalizeTaskCreateStatus(status, assigned_to)
+
+    if (isHabiTask({ assigned_to })) {
+      const contract = validateHabiTaskContract({ assigned_to, metadata });
+      if (!contract.ok) {
+        return NextResponse.json(
+          { error: habiTaskContractErrorMessage(contract.missing, contract.invalidGate) },
+          { status: 400 }
+        );
+      }
+    }
     
     // Check for duplicate title
     const existingTask = db.prepare('SELECT id FROM tasks WHERE title = ? AND workspace_id = ?').get(title, workspaceId);
@@ -198,8 +201,6 @@ export async function POST(request: NextRequest) {
         missing_mentions: mentionResolution.unresolved
       }, { status: 400 });
     }
-
-    const resolvedCompletedAt = completed_at ?? (normalizedStatus === 'done' ? now : null)
 
     const createTaskTx = db.transaction(() => {
       const resolvedProjectId = resolveProjectId(db, workspaceId, project_id)
@@ -217,16 +218,14 @@ export async function POST(request: NextRequest) {
       const insertStmt = db.prepare(`
         INSERT INTO tasks (
           title, description, status, priority, project_id, project_ticket_no, assigned_to, created_by,
-          created_at, updated_at, due_date, estimated_hours, actual_hours,
-          outcome, error_message, resolution, feedback_rating, feedback_notes, retry_count, completed_at,
-          tags, metadata, workspace_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          created_at, updated_at, due_date, estimated_hours, tags, metadata, workspace_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
 
       const dbResult = insertStmt.run(
         title,
         description,
-        normalizedStatus,
+        status,
         priority,
         resolvedProjectId,
         row.ticket_counter,
@@ -236,14 +235,6 @@ export async function POST(request: NextRequest) {
         now,
         due_date,
         estimated_hours,
-        actual_hours,
-        outcome,
-        error_message,
-        resolution,
-        feedback_rating,
-        feedback_notes,
-        retry_count,
-        resolvedCompletedAt,
         JSON.stringify(tags),
         JSON.stringify(metadata),
         workspaceId
@@ -256,10 +247,9 @@ export async function POST(request: NextRequest) {
     // Log activity
     db_helpers.logActivity('task_created', 'task', taskId, actor, `Created task: ${title}`, {
       title,
-      status: normalizedStatus,
+      status,
       priority,
-      assigned_to,
-      ...(outcome ? { outcome } : {})
+      assigned_to
     }, workspaceId);
 
     if (actor) {
@@ -292,6 +282,26 @@ export async function POST(request: NextRequest) {
         taskId,
         workspaceId
       );
+
+      const dispatch = await dispatchTaskAssignment({
+        workspaceId: workspaceId ?? 1,
+        actor,
+        assignee: assigned_to,
+        taskId,
+        title,
+        priority,
+        status,
+      })
+      if (!dispatch.delivered) {
+        logger.warn(
+          { taskId, assignee: assigned_to, reason: dispatch.reason || 'unknown' },
+          'Task created but assignment dispatch was not delivered'
+        )
+      }
+    }
+
+    if (isHabiTask({ assigned_to })) {
+      ensureHabiTaskSubscriptions(taskId, workspaceId, assigned_to, actor)
     }
     
     // Fetch the created task
@@ -338,11 +348,6 @@ export async function PUT(request: NextRequest) {
       SET status = ?, updated_at = ?
       WHERE id = ? AND workspace_id = ?
     `);
-    const updateDoneStmt = db.prepare(`
-      UPDATE tasks
-      SET status = ?, updated_at = ?, completed_at = COALESCE(completed_at, ?)
-      WHERE id = ? AND workspace_id = ?
-    `);
 
     const actor = auth.user.username
 
@@ -355,11 +360,14 @@ export async function PUT(request: NextRequest) {
           throw new Error(`Aegis approval required for task ${task.id}`)
         }
 
-        if (task.status === 'done') {
-          updateDoneStmt.run(task.status, now, now, task.id, workspaceId);
-        } else {
-          updateStmt.run(task.status, now, task.id, workspaceId);
+        if (task.status === 'done' && isHabiTask({ assigned_to: oldTask.assigned_to })) {
+          const contract = validateHabiTaskContract({ assigned_to: oldTask.assigned_to, metadata: oldTask.metadata as any })
+          if (!contract.ok) {
+            throw new Error(`Habi task contract required for task ${task.id}`)
+          }
         }
+
+        updateStmt.run(task.status, now, task.id, workspaceId);
 
         // Log status change if different
         if (oldTask && oldTask.status !== task.status) {
@@ -393,6 +401,9 @@ export async function PUT(request: NextRequest) {
     const message = error instanceof Error ? error.message : 'Failed to update tasks'
     if (message.includes('Aegis approval required')) {
       return NextResponse.json({ error: message }, { status: 403 });
+    }
+    if (message.includes('Habi task contract required')) {
+      return NextResponse.json({ error: message }, { status: 400 });
     }
     return NextResponse.json({ error: 'Failed to update tasks' }, { status: 500 });
   }

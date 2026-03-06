@@ -4,6 +4,7 @@ import { useState, useCallback } from 'react'
 import { useMissionControl } from '@/store'
 import { useNavigateToPanel } from '@/lib/navigation'
 import { useSmartPoll } from '@/lib/use-smart-poll'
+import { FounderSnapshotCard } from '@/components/panels/founder-cockpit-panel'
 
 interface DbStats {
   tasks: { total: number; byStatus: Record<string, number> }
@@ -96,7 +97,13 @@ export function Dashboard() {
   const activeSessions = sessions.filter(s => s.active).length
   const errorCount = logs.filter(l => l.level === 'error').length
   const runningTasks = dbStats?.tasks.byStatus?.in_progress ?? tasks.filter(t => t.status === 'in_progress').length
-  const onlineAgents = dbStats ? (dbStats.agents.total - (dbStats.agents.byStatus?.offline ?? 0)) : agents.filter(a => a.status !== 'offline').length
+  const onlineAgents =
+    systemStats?.agents?.online ??
+    agents.filter(a => a.status === 'busy' || a.status === 'idle').length
+  const totalAgents =
+    systemStats?.agents?.total ??
+    dbStats?.agents.total ??
+    agents.length
 
   if (isLoading) {
     return (
@@ -121,6 +128,8 @@ export function Dashboard() {
 
   return (
     <div className="p-5 space-y-5">
+      <FounderSnapshotCard />
+
       {/* Top Metric Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {isLocal ? (
@@ -176,7 +185,7 @@ export function Dashboard() {
               <MetricCard
                 label="Agents Online"
                 value={onlineAgents}
-                total={dbStats?.agents.total ?? agents.length}
+                total={totalAgents}
                 icon={<AgentIcon />}
                 color="green"
               />

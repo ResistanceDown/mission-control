@@ -107,6 +107,35 @@
   ::-webkit-scrollbar-thumb:hover {
     @apply bg-muted-foreground;
   }
+
+  .task-board-scrollbar {
+    scrollbar-width: none;
+  }
+
+  .task-board-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .floating-task-scrollbar {
+    scrollbar-width: thin;
+  }
+
+  .floating-task-scrollbar::-webkit-scrollbar {
+    height: 5px;
+  }
+
+  .floating-task-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .floating-task-scrollbar::-webkit-scrollbar-thumb {
+    background: hsl(var(--border));
+    border-radius: 9999px;
+  }
+
+  .floating-task-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground));
+  }
 }
 
 @layer utilities {

@@ -5,6 +5,11 @@ import { requireRole } from '@/lib/auth'
 import { validateBody, createMessageSchema } from '@/lib/validation'
 import { mutationLimiter } from '@/lib/rate-limit'
 import { logger } from '@/lib/logger'
+import { resolveSessionKeyForAgent } from '@/lib/agent-session-link'
+
+function buildDispatchParams(sessionKey: string, message: string, idempotencyKey: string) {
+  return JSON.stringify({ sessionKey, message, idempotencyKey })
+}
 
 export async function POST(request: NextRequest) {
   const auth = requireRole(request, 'operator')
@@ -27,23 +32,33 @@ export async function POST(request: NextRequest) {
     if (!agent) {
       return NextResponse.json({ error: 'Recipient agent not found' }, { status: 404 })
     }
-    if (!agent.session_key) {
+    const resolvedSessionKey = agent.session_key || resolveSessionKeyForAgent(to)
+    if (!resolvedSessionKey) {
       return NextResponse.json(
         { error: 'Recipient agent has no session key configured' },
         { status: 400 }
       )
     }
 
+    if (!agent.session_key) {
+      const now = Math.floor(Date.now() / 1000)
+      db.prepare('UPDATE agents SET session_key = ?, last_seen = ?, updated_at = ? WHERE id = ? AND workspace_id = ?')
+        .run(resolvedSessionKey, now, now, agent.id, workspaceId)
+    }
+
     await runOpenClaw(
       [
         'gateway',
-        'sessions_send',
-        '--session',
-        agent.session_key,
-        '--message',
-        `Message from ${from}: ${message}`
+        'call',
+        'chat.send',
+        '--params',
+        buildDispatchParams(
+          resolvedSessionKey,
+          `Message from ${from}: ${message}`,
+          `agent-message-${to.toLowerCase()}-${Date.now()}`
+        )
       ],
-      { timeoutMs: 10000 }
+      { timeoutMs: 12000 }
     )
 
     db_helpers.createNotification(

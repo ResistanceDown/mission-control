@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { usePathname, useRouter } from 'next/navigation'
+import { usePathname } from 'next/navigation'
 import { NavRail } from '@/components/layout/nav-rail'
 import { HeaderBar } from '@/components/layout/header-bar'
 import { LiveFeed } from '@/components/layout/live-feed'
@@ -32,20 +32,18 @@ import { MultiGatewayPanel } from '@/components/panels/multi-gateway-panel'
 import { SuperAdminPanel } from '@/components/panels/super-admin-panel'
 import { OfficePanel } from '@/components/panels/office-panel'
 import { GitHubSyncPanel } from '@/components/panels/github-sync-panel'
-import { DocumentsPanel } from '@/components/panels/documents-panel'
+import { FounderCockpitPanel } from '@/components/panels/founder-cockpit-panel'
 import { ChatPanel } from '@/components/chat/chat-panel'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { LocalModeBanner } from '@/components/layout/local-mode-banner'
 import { UpdateBanner } from '@/components/layout/update-banner'
-import { PromoBanner } from '@/components/layout/promo-banner'
 import { useWebSocket } from '@/lib/websocket'
 import { useServerEvents } from '@/lib/use-server-events'
 import { useMissionControl } from '@/store'
 
 export default function Home() {
-  const router = useRouter()
   const { connect } = useWebSocket()
-  const { activeTab, setActiveTab, setCurrentUser, setDashboardMode, setGatewayAvailable, setSubscription, setUpdateAvailable, liveFeedOpen, toggleLiveFeed } = useMissionControl()
+  const { activeTab, setActiveTab, setCurrentUser, setDashboardMode, setGatewayAvailable, setSubscription, setUpdateAvailable, setOpenclawUpdateAvailable, liveFeedOpen, toggleLiveFeed } = useMissionControl()
 
   // Sync URL → Zustand activeTab
   const pathname = usePathname()
@@ -64,13 +62,7 @@ export default function Home() {
 
     // Fetch current user
     fetch('/api/auth/me')
-      .then(async (res) => {
-        if (res.ok) return res.json()
-        if (res.status === 401) {
-          router.replace(`/login?next=${encodeURIComponent(pathname)}`)
-        }
-        return null
-      })
+      .then(res => res.ok ? res.json() : null)
       .then(data => { if (data?.user) setCurrentUser(data.user) })
       .catch(() => {})
 
@@ -83,6 +75,19 @@ export default function Home() {
             latestVersion: data.latestVersion,
             releaseUrl: data.releaseUrl,
             releaseNotes: data.releaseNotes,
+          })
+        }
+      })
+      .catch(() => {})
+
+    // Check for available OpenClaw core updates
+    fetch('/api/releases/openclaw-check')
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        if (data?.updateAvailable) {
+          setOpenclawUpdateAvailable({
+            currentVersion: data.currentVersion,
+            latestVersion: data.latestVersion,
           })
         }
       })
@@ -113,7 +118,14 @@ export default function Home() {
         const gatewayProto =
           process.env.NEXT_PUBLIC_GATEWAY_PROTOCOL ||
           (window.location.protocol === 'https:' ? 'wss' : 'ws')
-        const wsUrl = explicitWsUrl || `${gatewayProto}://${gatewayHost}:${gatewayPort}`
+        const useProxyPath =
+          window.location.protocol === 'https:' ||
+          window.location.hostname.endsWith('.ts.net')
+        const proxyPath = process.env.NEXT_PUBLIC_GATEWAY_PROXY_PATH || '/gateway'
+        const wsUrl = explicitWsUrl ||
+          (useProxyPath
+            ? `${gatewayProto}://${window.location.host}${proxyPath}`
+            : `${gatewayProto}://${gatewayHost}:${gatewayPort}`)
         connect(wsUrl, wsToken)
       })
       .catch(() => {
@@ -125,10 +137,17 @@ export default function Home() {
         const gatewayProto =
           process.env.NEXT_PUBLIC_GATEWAY_PROTOCOL ||
           (window.location.protocol === 'https:' ? 'wss' : 'ws')
-        const wsUrl = explicitWsUrl || `${gatewayProto}://${gatewayHost}:${gatewayPort}`
+        const useProxyPath =
+          window.location.protocol === 'https:' ||
+          window.location.hostname.endsWith('.ts.net')
+        const proxyPath = process.env.NEXT_PUBLIC_GATEWAY_PROXY_PATH || '/gateway'
+        const wsUrl = explicitWsUrl ||
+          (useProxyPath
+            ? `${gatewayProto}://${window.location.host}${proxyPath}`
+            : `${gatewayProto}://${gatewayHost}:${gatewayPort}`)
         connect(wsUrl, wsToken)
       })
-  }, [connect, pathname, router, setCurrentUser, setDashboardMode, setGatewayAvailable, setSubscription, setUpdateAvailable])
+  }, [connect, setCurrentUser, setDashboardMode, setGatewayAvailable, setSubscription, setUpdateAvailable, setOpenclawUpdateAvailable])
 
   if (!isClient) {
     return (
@@ -159,7 +178,6 @@ export default function Home() {
         <HeaderBar />
         <LocalModeBanner />
         <UpdateBanner />
-        <PromoBanner />
         <main id="main-content" className="flex-1 overflow-auto pb-16 md:pb-0" role="main">
           <div aria-live="polite">
             <ErrorBoundary key={activeTab}>
@@ -211,6 +229,8 @@ function ContentRouter({ tab }: { tab: string }) {
           )}
         </>
       )
+    case 'founder':
+      return <FounderCockpitPanel />
     case 'tasks':
       return <TaskBoardPanel />
     case 'agents':
@@ -267,8 +287,6 @@ function ContentRouter({ tab }: { tab: string }) {
       return <GitHubSyncPanel />
     case 'office':
       return <OfficePanel />
-    case 'documents':
-      return <DocumentsPanel />
     case 'super-admin':
       return <SuperAdminPanel />
     case 'workspaces':

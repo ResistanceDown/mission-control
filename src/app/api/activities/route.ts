@@ -2,6 +2,36 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDatabase, Activity } from '@/lib/db';
 import { requireRole } from '@/lib/auth';
 import { logger } from '@/lib/logger';
+import { getAllGatewaySessions, getAgentLiveStatuses } from '@/lib/sessions';
+import { config } from '@/lib/config';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+
+type ActivityRecord = Omit<Activity, 'data' | 'id'> & {
+  id: number | string;
+  data: any;
+  entity: any;
+};
+
+interface OpenClawCronJob {
+  id: string;
+  agentId: string;
+  name: string;
+  enabled: boolean;
+  schedule?: { expr?: string; tz?: string };
+  payload?: { model?: string };
+  state?: {
+    lastRunAtMs?: number;
+    lastStatus?: string;
+    lastDurationMs?: number;
+    lastError?: string;
+  };
+}
+
+interface OpenClawCronFile {
+  version: number;
+  jobs: OpenClawCronJob[];
+}
 
 /**
  * GET /api/activities - Get activity stream or stats
@@ -35,6 +65,7 @@ async function handleActivitiesRequest(request: NextRequest, workspaceId: number
   try {
     const db = getDatabase();
     const { searchParams } = new URL(request.url);
+    const liveAgentStatuses = getAgentLiveStatuses();
     
     // Parse query parameters
     const type = searchParams.get('type');
@@ -85,7 +116,7 @@ async function handleActivitiesRequest(request: NextRequest, workspaceId: number
     `);
 
     // Parse JSON data field and enhance with related entity data
-    const enhancedActivities = activities.map(activity => {
+    const enhancedActivities: ActivityRecord[] = activities.map(activity => {
       let entityDetails = null;
 
       try {
@@ -100,7 +131,13 @@ async function handleActivitiesRequest(request: NextRequest, workspaceId: number
           case 'agent': {
             const agent = agentDetailStmt.get(activity.entity_id, workspaceId) as any;
             if (agent) {
-              entityDetails = { type: 'agent', ...agent };
+              const live = liveAgentStatuses.get(agent.name) || liveAgentStatuses.get(String(agent.name).toLowerCase())
+              entityDetails = {
+                type: 'agent',
+                ...agent,
+                status: live ? (live.status === 'active' ? 'busy' : live.status) : agent.status,
+                last_seen: live ? Math.floor(live.lastActivity / 1000) : agent.last_seen,
+              };
             }
             break;
           }
@@ -126,6 +163,22 @@ async function handleActivitiesRequest(request: NextRequest, workspaceId: number
         entity: entityDetails
       };
     });
+
+    const includeRuntime = searchParams.get('include_runtime') !== '0';
+    if (actor && includeRuntime) {
+      const runtimeActivities = await buildRuntimeActivities(actor, workspaceId);
+      if (runtimeActivities.length > 0) {
+        const merged = [...enhancedActivities, ...runtimeActivities]
+          .sort((a, b) => b.created_at - a.created_at)
+          .slice(0, limit);
+
+        return NextResponse.json({
+          activities: merged,
+          total: merged.length,
+          hasMore: false
+        });
+      }
+    }
     
     // Get total count for pagination
     let countQuery = 'SELECT COUNT(*) as total FROM activities WHERE workspace_id = ?';
@@ -161,6 +214,115 @@ async function handleActivitiesRequest(request: NextRequest, workspaceId: number
   } catch (error) {
     logger.error({ err: error }, 'GET /api/activities (activities) error');
     return NextResponse.json({ error: 'Failed to fetch activities' }, { status: 500 });
+  }
+}
+
+async function buildRuntimeActivities(actor: string, workspaceId: number): Promise<ActivityRecord[]> {
+  const results: ActivityRecord[] = [];
+  let syntheticId = -1;
+
+  const db = getDatabase();
+  const agent = db
+    .prepare('SELECT id, name, session_key FROM agents WHERE name = ? AND workspace_id = ?')
+    .get(actor, workspaceId) as { id: number; name: string; session_key?: string } | undefined;
+
+  if (!agent) return results;
+
+  try {
+    const sessions = getAllGatewaySessions();
+    const deduped = new Map<string, (typeof sessions)[number]>();
+    for (const session of sessions) {
+      const key = session.sessionId || session.key;
+      const existing = deduped.get(key);
+      if (!existing || session.updatedAt > existing.updatedAt) deduped.set(key, session);
+    }
+
+    for (const session of deduped.values()) {
+      const matchesByAgent = session.agent === actor;
+      const matchesBySession =
+        Boolean(agent.session_key) &&
+        (session.sessionId === agent.session_key || session.key === agent.session_key);
+      if (!matchesByAgent && !matchesBySession) continue;
+
+      results.push({
+        id: syntheticId--,
+        type: 'session_activity',
+        entity_type: 'agent',
+        entity_id: agent.id,
+        actor,
+        description: `Session ${session.chatType || 'chat'} active on ${session.channel || 'unknown channel'} (${session.model || 'model unknown'})`,
+        data: {
+          source: 'gateway_session',
+          session_id: session.sessionId,
+          session_key: session.key,
+          active: session.active,
+          total_tokens: session.totalTokens
+        },
+        created_at: Math.floor(session.updatedAt / 1000),
+        workspace_id: workspaceId,
+        entity: {
+          type: 'agent',
+          id: agent.id,
+          name: agent.name
+        }
+      } as ActivityRecord);
+    }
+  } catch (error) {
+    logger.warn({ err: error, actor }, 'Failed to read gateway sessions for runtime activity');
+  }
+
+  try {
+    const cronJobs = await readOpenClawCronJobs();
+    for (const job of cronJobs) {
+      if (job.agentId !== actor) continue;
+      if (!job.state?.lastRunAtMs) continue;
+
+      const status = job.state.lastStatus || 'unknown';
+      const duration = job.state.lastDurationMs ? ` in ${job.state.lastDurationMs}ms` : '';
+      const errorSuffix = job.state.lastError ? ` (${job.state.lastError})` : '';
+
+      results.push({
+        id: syntheticId--,
+        type: 'cron_job_run',
+        entity_type: 'agent',
+        entity_id: agent.id,
+        actor,
+        description: `Cron ${job.name} ran with status ${status}${duration}${errorSuffix}`,
+        data: {
+          source: 'openclaw_cron',
+          job_id: job.id,
+          job_name: job.name,
+          schedule: job.schedule?.expr || null,
+          timezone: job.schedule?.tz || null,
+          model: job.payload?.model || null,
+          status,
+          error: job.state.lastError || null
+        },
+        created_at: Math.floor(job.state.lastRunAtMs / 1000),
+        workspace_id: workspaceId,
+        entity: {
+          type: 'agent',
+          id: agent.id,
+          name: agent.name
+        }
+      } as ActivityRecord);
+    }
+  } catch (error) {
+    logger.warn({ err: error, actor }, 'Failed to read OpenClaw cron state for runtime activity');
+  }
+
+  return results;
+}
+
+async function readOpenClawCronJobs(): Promise<OpenClawCronJob[]> {
+  if (!config.openclawStateDir) return [];
+  const cronFilePath = path.join(config.openclawStateDir, 'cron', 'jobs.json');
+  try {
+    const raw = await readFile(cronFilePath, 'utf-8');
+    const parsed = JSON.parse(raw) as OpenClawCronFile;
+    return Array.isArray(parsed.jobs) ? parsed.jobs : [];
+  } catch {
+    return [];
   }
 }
 

@@ -29,7 +29,7 @@ export async function validateBody<T>(
 export const createTaskSchema = z.object({
   title: z.string().min(1, 'Title is required').max(500),
   description: z.string().max(5000).optional(),
-  status: z.enum(['inbox', 'assigned', 'in_progress', 'review', 'quality_review', 'done']).default('inbox'),
+  status: z.enum(['inbox', 'assigned', 'in_progress', 'review', 'quality_review', 'done', 'cancelled']).default('inbox'),
   priority: z.enum(['critical', 'high', 'medium', 'low']).default('medium'),
   project_id: z.number().int().positive().optional(),
   assigned_to: z.string().max(100).optional(),
@@ -47,7 +47,20 @@ export const createTaskSchema = z.object({
   metadata: z.record(z.string(), z.unknown()).default({} as Record<string, unknown>),
 })
 
-export const updateTaskSchema = createTaskSchema.partial()
+export const updateTaskSchema = z.object({
+  title: z.string().min(1, 'Title is required').max(500).optional(),
+  description: z.string().max(5000).optional(),
+  status: z.enum(['inbox', 'assigned', 'in_progress', 'review', 'quality_review', 'done', 'cancelled']).optional(),
+  priority: z.enum(['critical', 'high', 'medium', 'low']).optional(),
+  project_id: z.number().int().positive().optional(),
+  assigned_to: z.string().max(100).optional(),
+  created_by: z.string().max(100).optional(),
+  due_date: z.number().optional(),
+  estimated_hours: z.number().min(0).optional(),
+  actual_hours: z.number().min(0).optional(),
+  tags: z.array(z.string()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+})
 
 export const createAgentSchema = z.object({
   name: z.string().min(1, 'Name is required').max(100),
@@ -67,7 +80,7 @@ export const createAgentSchema = z.object({
 export const bulkUpdateTaskStatusSchema = z.object({
   tasks: z.array(z.object({
     id: z.number().int().positive(),
-    status: z.enum(['inbox', 'assigned', 'in_progress', 'review', 'quality_review', 'done']),
+    status: z.enum(['inbox', 'assigned', 'in_progress', 'review', 'quality_review', 'done', 'cancelled']),
   })).min(1, 'At least one task is required').max(100),
 })
 
@@ -151,6 +164,36 @@ export const spawnAgentSchema = z.object({
   model: z.string().min(1, 'Model is required'),
   label: z.string().min(1, 'Label is required'),
   timeoutSeconds: z.number().min(10).max(3600).default(300),
+})
+
+export const habiTaskIngestSchema = z.object({
+  dry_run: z.boolean().default(false),
+  source: z.string().max(200).optional(),
+  items: z.array(
+    z.object({
+      lane: z.enum(['control', 'readiness', 'growth']),
+      source_report: z.string().min(1).max(2000),
+      title: z.string().min(1).max(500),
+      severity: z.enum(['P0', 'P1', 'P2', 'P3']).default('P2'),
+      objective: z.string().min(1).max(2000),
+      scope: z.string().min(1).max(4000),
+      acceptance: z.string().min(1).max(4000),
+      evidence_path: z.string().min(1).max(2000),
+      gate_required: z.enum(['G1', 'G2', 'G3', 'G4']),
+      rollback: z.string().min(1).max(4000),
+      fingerprint: z.string().max(128).optional(),
+      assignee: z.string().max(100).optional(),
+      surface: z.string().min(1).max(100).optional(),
+      execution_mode: z.enum(['audit_only', 'draft_pr']).optional(),
+      branch_name: z.string().max(200).optional(),
+      worktree_path: z.string().max(2000).optional(),
+      validation_commands: z.array(z.string().min(1).max(1000)).max(20).optional(),
+      handoff_artifact: z.string().max(2000).optional(),
+      disposition: z.enum(['execute_now', 'founder_decision_needed', 'defer', 'narrative_only']).optional(),
+      status_hint: z.enum(['blocked', 'active', 'review_ready', 'quality_ready', 'resolved']).optional(),
+      notes: z.string().max(2000).optional(),
+    })
+  ).max(500),
 })
 
 export const createUserSchema = z.object({
