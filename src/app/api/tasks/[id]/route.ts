@@ -39,6 +39,12 @@ function hasAegisApproval(
   return review?.status === 'approved'
 }
 
+function requiresLiveApproval(metadata: Record<string, unknown> | null | undefined): boolean {
+  if (!metadata || typeof metadata !== 'object') return false
+  if (metadata.live_approval_exempt === true) return false
+  return String(metadata.execution_mode || '') === 'draft_pr'
+}
+
 /**
  * GET /api/tasks/[id] - Get a specific task
  */
@@ -214,9 +220,21 @@ export async function PUT(
       updateParams.push(description);
     }
     if (status !== undefined) {
+      const parsedEffectiveMetadata = parseHabiTaskMetadata(effectiveMetadata)
       if (persistedStatus === 'done' && !hasAegisApproval(db, taskId, workspaceId)) {
         return NextResponse.json(
           { error: 'Aegis approval is required to move task to done.' },
+          { status: 403 }
+        )
+      }
+      if (
+        persistedStatus === 'done' &&
+        isHabiTask({ assigned_to: effectiveAssignedTo }) &&
+        requiresLiveApproval(parsedEffectiveMetadata) &&
+        parsedEffectiveMetadata.live_in_main !== true
+      ) {
+        return NextResponse.json(
+          { error: 'Live approval required: this task is still a branch preview and cannot be marked done until it is live in main.' },
           { status: 403 }
         )
       }
