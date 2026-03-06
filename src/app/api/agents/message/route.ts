@@ -7,6 +7,10 @@ import { mutationLimiter } from '@/lib/rate-limit'
 import { logger } from '@/lib/logger'
 import { resolveSessionKeyForAgent } from '@/lib/agent-session-link'
 
+function buildDispatchParams(sessionKey: string, message: string, idempotencyKey: string) {
+  return JSON.stringify({ sessionKey, message, idempotencyKey })
+}
+
 export async function POST(request: NextRequest) {
   const auth = requireRole(request, 'operator')
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status })
@@ -44,13 +48,16 @@ export async function POST(request: NextRequest) {
     await runOpenClaw(
       [
         'gateway',
-        'sessions_send',
-        '--session',
-        resolvedSessionKey,
-        '--message',
-        `Message from ${from}: ${message}`
+        'call',
+        'chat.send',
+        '--params',
+        buildDispatchParams(
+          resolvedSessionKey,
+          `Message from ${from}: ${message}`,
+          `agent-message-${to.toLowerCase()}-${Date.now()}`
+        )
       ],
-      { timeoutMs: 10000 }
+      { timeoutMs: 12000 }
     )
 
     db_helpers.createNotification(

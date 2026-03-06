@@ -34,17 +34,17 @@ function resolveTargetStatus(
   hasEvidence: boolean,
   options?: { executionMode?: string; disposition?: string }
 ): { status: IngestStatus; blockedReason?: string } {
-  let status: IngestStatus = hasEvidence ? 'in_progress' : 'assigned'
   const isPlannedExecution =
     (options?.executionMode === 'draft_pr' || options?.executionMode === 'audit_only') &&
     (options?.disposition === 'execute_now' || options?.disposition === 'founder_decision_needed')
+  let status: IngestStatus = isPlannedExecution ? 'assigned' : (hasEvidence ? 'in_progress' : 'assigned')
 
   switch (statusHint) {
     case 'blocked':
       status = 'in_progress'
       break
     case 'active':
-      status = hasEvidence || !isPlannedExecution ? 'in_progress' : 'assigned'
+      status = isPlannedExecution ? 'assigned' : (hasEvidence ? 'in_progress' : 'assigned')
       break
     case 'review_ready':
       status = 'review'
@@ -66,6 +66,29 @@ function resolveTargetStatus(
     }
   }
   return { status }
+}
+
+function resolveExistingTaskStatus(
+  existingStatus: string,
+  proposedStatus: IngestStatus,
+  options?: { executionMode?: string; disposition?: string; executionContextReady?: boolean }
+): IngestStatus {
+  const isPlannedExecution =
+    (options?.executionMode === 'draft_pr' || options?.executionMode === 'audit_only') &&
+    (options?.disposition === 'execute_now' || options?.disposition === 'founder_decision_needed')
+
+  if (
+    isPlannedExecution &&
+    ['in_progress', 'review', 'quality_review'].includes(existingStatus) &&
+    proposedStatus === 'assigned'
+  ) {
+    if (existingStatus === 'in_progress' && options?.executionContextReady !== true) {
+      return 'assigned'
+    }
+    return existingStatus as IngestStatus
+  }
+
+  return proposedStatus
 }
 
 function addTaskComment(
@@ -316,8 +339,12 @@ export async function POST(request: NextRequest) {
         continue
       }
 
-      const nextStatus = targetStatus.status
       const previousMetadata = mergeHabiMetadata(existingTask.metadata, {})
+      const nextStatus = resolveExistingTaskStatus(existingTask.status, targetStatus.status, {
+        executionMode: item.execution_mode,
+        disposition: item.disposition,
+        executionContextReady: previousMetadata.execution_context_ready === true,
+      })
       const mergedMetadata = mergeHabiMetadata(existingTask.metadata, metadataPatch)
       const contract = validateHabiTaskContract({ assigned_to: assignee, metadata: mergedMetadata })
       if (!contract.ok) {

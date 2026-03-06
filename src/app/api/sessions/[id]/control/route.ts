@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireRole } from '@/lib/auth'
-import { runClawdbot } from '@/lib/command'
+import { runClawdbot, runOpenClaw } from '@/lib/command'
 import { db_helpers } from '@/lib/db'
 import { mutationLimiter } from '@/lib/rate-limit'
 import { logger } from '@/lib/logger'
@@ -46,9 +46,19 @@ export async function POST(
       const message = action === 'monitor'
         ? JSON.stringify({ type: 'control', action: 'monitor' })
         : JSON.stringify({ type: 'control', action: 'pause' })
-      result = await runClawdbot(
-        ['-c', `sessions_send("${id}", ${JSON.stringify(message)})`],
-        { timeoutMs: 10000 }
+      result = await runOpenClaw(
+        [
+          'gateway',
+          'call',
+          'chat.send',
+          '--params',
+          JSON.stringify({
+            sessionKey: id,
+            message,
+            idempotencyKey: `session-control-${action}-${id}-${Date.now()}`,
+          }),
+        ],
+        { timeoutMs: 12000 }
       )
     }
 

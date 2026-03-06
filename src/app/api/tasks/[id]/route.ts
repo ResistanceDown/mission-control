@@ -7,8 +7,9 @@ import { logger } from '@/lib/logger';
 import { validateBody, updateTaskSchema } from '@/lib/validation';
 import { resolveMentionRecipients } from '@/lib/mentions';
 import { dispatchTaskAssignment } from '@/lib/task-assignment-dispatch';
-import { habiTaskContractErrorMessage, isHabiTask, validateHabiTaskContract } from '@/lib/habi-task-contract';
+import { habiTaskContractErrorMessage, isHabiTask, parseHabiTaskMetadata, validateHabiTaskContract } from '@/lib/habi-task-contract';
 import { ensureHabiTaskSubscriptions } from '@/lib/habi-task-ops';
+import { prepareHabiTaskExecution } from '@/lib/habi-task-execution';
 
 function formatTicketRef(prefix?: string | null, num?: number | null): string | undefined {
   if (!prefix || typeof num !== 'number' || !Number.isFinite(num) || num <= 0) return undefined
@@ -143,6 +144,7 @@ export async function PUT(
     const previousDescriptionMentionRecipients = resolveMentionRecipients(currentTask.description || '', db, workspaceId).recipients;
     const effectiveAssignedTo = assigned_to !== undefined ? assigned_to : currentTask.assigned_to;
     const effectiveMetadata = metadata !== undefined ? metadata : (currentTask as any).metadata;
+    const currentMetadata = parseHabiTaskMetadata(currentTask.metadata);
     const shouldValidateHabiContract =
       isHabiTask({ assigned_to: effectiveAssignedTo }) &&
       (status === 'done' || assigned_to !== undefined || metadata !== undefined);
@@ -317,40 +319,120 @@ export async function PUT(
 
     const shouldDispatchExecutionStart =
       status === 'in_progress' &&
-      currentTask.status === 'assigned' &&
       isHabiTask({ assigned_to: effectiveAssignedTo }) &&
-      Boolean(effectiveAssignedTo)
+      Boolean(effectiveAssignedTo) &&
+      (
+        currentTask.status === 'assigned' ||
+        (currentTask.status === 'in_progress' && currentMetadata.execution_context_ready !== true)
+      )
 
     if (shouldDispatchExecutionStart) {
-      const dispatch = await dispatchTaskAssignment({
-        workspaceId,
-        actor: auth.user.username,
-        assignee: String(effectiveAssignedTo),
+      const preparedExecution = await prepareHabiTaskExecution({
         taskId,
         title: title || currentTask.title,
-        priority: String(priority || currentTask.priority),
-        status: 'in_progress',
+        assignee: String(effectiveAssignedTo),
+        actor: auth.user.username,
+        metadata: metadata !== undefined ? metadata : currentTask.metadata,
       })
-      if (!dispatch.delivered) {
-        logger.warn(
-          { taskId, assignee: effectiveAssignedTo, reason: dispatch.reason || 'unknown' },
-          'Task moved to in_progress but execution-start dispatch was not delivered'
-        )
-      } else {
+
+      db.prepare(`
+        UPDATE tasks
+        SET metadata = ?, updated_at = ?
+        WHERE id = ? AND workspace_id = ?
+      `).run(JSON.stringify(preparedExecution.metadata), now, taskId, workspaceId)
+
+      if (!preparedExecution.ok) {
+        db.prepare(`
+          INSERT INTO comments (task_id, author, content, created_at, parent_id, mentions, workspace_id)
+          VALUES (?, ?, ?, ?, NULL, NULL, ?)
+        `).run(taskId, 'system', preparedExecution.failureComment, now, workspaceId)
         db_helpers.logActivity(
-          'task_execution_started',
+          'task_execution_blocked',
           'task',
           taskId,
           auth.user.username,
-          `Execution start dispatched to ${effectiveAssignedTo}`,
+          `Execution blocked for ${effectiveAssignedTo}: ${preparedExecution.failureReason}`,
           {
             assignee: effectiveAssignedTo,
             previous_status: currentTask.status,
             next_status: status,
-            session_key: dispatch.sessionKey || null,
+            reason: preparedExecution.failureReason,
           },
           workspaceId
         )
+      }
+
+      if (!preparedExecution.ok) {
+        logger.warn(
+          { taskId, assignee: effectiveAssignedTo, reason: preparedExecution.failureReason },
+          'Task moved to in_progress but execution context provisioning failed'
+        )
+      } else {
+        const dispatch = await dispatchTaskAssignment({
+          workspaceId,
+          actor: auth.user.username,
+          assignee: String(effectiveAssignedTo),
+          taskId,
+          title: title || currentTask.title,
+          priority: String(priority || currentTask.priority),
+          status: 'in_progress',
+          details: preparedExecution.dispatchDetails,
+        })
+        if (!dispatch.delivered) {
+        logger.warn(
+          { taskId, assignee: effectiveAssignedTo, reason: dispatch.reason || 'unknown' },
+          'Task moved to in_progress but execution-start dispatch was not delivered'
+        )
+        db_helpers.logActivity(
+          'task_dispatch_failed',
+          'task',
+          taskId,
+          auth.user.username,
+          `Execution start dispatch failed for ${effectiveAssignedTo}`,
+          {
+            assignee: effectiveAssignedTo,
+            previous_status: currentTask.status,
+            next_status: status,
+            reason: dispatch.reason || 'unknown',
+          },
+          workspaceId
+        )
+        if (preparedExecution.ok) {
+          const dispatchFailureComment = [
+            'Execution blocked',
+            `Task: #${taskId} ${title || currentTask.title}`,
+            `Assignee: ${effectiveAssignedTo}`,
+            `Reason: dispatch failed (${dispatch.reason || 'unknown'})`,
+            'Action: relink the session or retry the task ping before treating this task as active work.',
+          ].join('\n')
+          db.prepare(`
+            INSERT INTO comments (task_id, author, content, created_at, parent_id, mentions, workspace_id)
+            VALUES (?, ?, ?, ?, NULL, NULL, ?)
+          `).run(taskId, 'system', dispatchFailureComment, now, workspaceId)
+        }
+        } else {
+          db.prepare(`
+            INSERT INTO comments (task_id, author, content, created_at, parent_id, mentions, workspace_id)
+            VALUES (?, ?, ?, ?, NULL, NULL, ?)
+          `).run(taskId, 'system', preparedExecution.kickoffComment, now, workspaceId)
+          db_helpers.logActivity(
+            'task_execution_started',
+            'task',
+            taskId,
+            auth.user.username,
+            `Execution start dispatched to ${effectiveAssignedTo}`,
+            {
+              assignee: effectiveAssignedTo,
+              previous_status: currentTask.status,
+              next_status: status,
+              session_key: dispatch.sessionKey || null,
+              execution_mode: preparedExecution.metadata.execution_mode || null,
+              worktree_path: preparedExecution.metadata.worktree_path || null,
+              branch_name: preparedExecution.metadata.branch_name || null,
+            },
+            workspaceId
+          )
+        }
       }
     }
     

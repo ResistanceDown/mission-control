@@ -12,6 +12,7 @@ interface AssignmentDispatchInput {
   title: string
   priority: string
   status: string
+  details?: string[]
 }
 
 interface TaskMessageDispatchInput {
@@ -44,7 +45,7 @@ export async function dispatchTaskAssignment(input: AssignmentDispatchInput): Pr
   sessionKey?: string
   reason?: string
 }> {
-  const { workspaceId, actor, assignee, taskId, title, priority, status } = input
+  const { workspaceId, actor, assignee, taskId, title, priority, status, details = [] } = input
   const message = [
     'Mission Control assignment',
     `Task: #${taskId} ${title}`,
@@ -52,6 +53,7 @@ export async function dispatchTaskAssignment(input: AssignmentDispatchInput): Pr
     `Priority: ${priority}`,
     `Status: ${status}`,
     `Assigned by: ${actor}`,
+    ...details.filter(Boolean),
   ].join('\n')
   return dispatchTaskMessage({
     workspaceId,
@@ -95,6 +97,7 @@ export async function dispatchTaskMessage(input: TaskMessageDispatchInput): Prom
     await sendViaGatewayChat(sessionKey, message, idempotencyKey)
     return { attempted: true, delivered: true, sessionKey }
   } catch (err) {
+    // Retry once after relinking session keys to reduce false negatives from stale links.
     syncAgentSessionLinks(workspaceId)
     const relinked = resolveSessionKeyForAgent(assignee)
     if (relinked && relinked !== sessionKey) {
@@ -103,7 +106,7 @@ export async function dispatchTaskMessage(input: TaskMessageDispatchInput): Prom
         await sendViaGatewayChat(relinked, message, retryKey)
         return { attempted: true, delivered: true, sessionKey: relinked }
       } catch {
-        // fall through to classified failure below
+        // fallthrough to classified failure response below
       }
     }
 

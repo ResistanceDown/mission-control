@@ -5,6 +5,10 @@ import { requireRole } from '@/lib/auth'
 import { logger } from '@/lib/logger'
 import { resolveSessionKeyForAgent } from '@/lib/agent-session-link'
 
+function buildDispatchParams(sessionKey: string, message: string, idempotencyKey: string) {
+  return JSON.stringify({ sessionKey, message, idempotencyKey })
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -58,13 +62,16 @@ export async function POST(
         await runOpenClaw(
           [
             'gateway',
-            'sessions_send',
-            '--session',
-            sessionKey,
-            '--message',
-            `[Task ${task.id}] ${task.title}\nFrom ${author}: ${message}`
+            'call',
+            'chat.send',
+            '--params',
+            buildDispatchParams(
+              sessionKey,
+              `[Task ${task.id}] ${task.title}\nFrom ${author}: ${message}`,
+              `task-broadcast-${task.id}-${agent.name.toLowerCase()}-${Date.now()}`
+            )
           ],
-          { timeoutMs: 10000 }
+          { timeoutMs: 12000 }
         )
         db_helpers.createNotification(
           agent.name,

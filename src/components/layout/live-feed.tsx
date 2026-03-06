@@ -64,6 +64,19 @@ function formatActivityItem(activity: any): FeedItemShape | null {
     }
   }
 
+  if (type === 'task_execution_blocked' || type === 'task_execution_watchdog') {
+    return {
+      id: `act-${activity.id}`,
+      type: 'activity',
+      level: 'warn',
+      message,
+      source,
+      timestamp: ts,
+      section: 'warnings',
+      critical: true,
+    }
+  }
+
   if (type === 'task_ingested') {
     if (!message.includes('created task')) return null
     return {
