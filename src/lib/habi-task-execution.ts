@@ -106,7 +106,20 @@ function buildKickoffComment(input: {
     `Handoff: ${String(input.metadata.handoff_artifact || 'not set')}`,
     `Validation: ${validation}`,
     `Next update due: ${input.nextUpdateDue}`,
-    'Required updates: Progress update | Execution blocked | Ready for review',
+    '',
+    'Objective',
+    String(input.metadata.objective || 'not set'),
+    '',
+    'Scope',
+    String(input.metadata.scope || 'not set'),
+    '',
+    'Acceptance',
+    String(input.metadata.acceptance || 'not set'),
+    '',
+    'Required updates',
+    '- Progress update',
+    '- Execution blocked',
+    '- Ready for review',
   ].join('\n')
 }
 
@@ -281,15 +294,24 @@ export async function prepareHabiTaskExecution(input: PrepareExecutionInput): Pr
         `Mode: ${executionMode || 'audit_only'}`,
         `Branch: ${String(preparedMetadata.branch_name || 'not set')}`,
         `Worktree: ${String(preparedMetadata.worktree_path || 'not set')}`,
+        `Repo root: ${DEFAULT_HABI_ROOT}`,
         `Evidence: ${String(preparedMetadata.evidence_path || 'not set')}`,
         `Handoff: ${String(preparedMetadata.handoff_artifact || 'not set')}`,
+        `Objective: ${String(preparedMetadata.objective || 'not set')}`,
+        `Scope: ${String(preparedMetadata.scope || 'not set')}`,
+        `Acceptance: ${String(preparedMetadata.acceptance || 'not set')}`,
+        `Rollback: ${String(preparedMetadata.rollback || 'not set')}`,
         `Validation: ${
           Array.isArray(preparedMetadata.validation_commands) && preparedMetadata.validation_commands.length > 0
             ? preparedMetadata.validation_commands.join(' | ')
             : 'not set'
         }`,
         `Next update due: ${nextUpdateDue}`,
-        'Reply with one of: Progress update | Execution blocked | Ready for review',
+        'Execution contract:',
+        '1. Work only in the assigned worktree/branch.',
+        '2. Write evidence updates to the evidence path as you go.',
+        '3. Post a task comment headed exactly one of: Progress update | Execution blocked | Ready for review.',
+        '4. Include what changed, validation run, and the next decision needed.',
       ],
     }
   } catch (error) {
