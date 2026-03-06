@@ -71,11 +71,20 @@ function resolveTargetStatus(
 function resolveExistingTaskStatus(
   existingStatus: string,
   proposedStatus: IngestStatus,
-  options?: { executionMode?: string; disposition?: string; executionContextReady?: boolean }
+  options?: {
+    executionMode?: string
+    disposition?: string
+    executionContextReady?: boolean
+    blockedReason?: string
+  }
 ): IngestStatus {
   const isPlannedExecution =
     (options?.executionMode === 'draft_pr' || options?.executionMode === 'audit_only') &&
     (options?.disposition === 'execute_now' || options?.disposition === 'founder_decision_needed')
+
+  if (options?.blockedReason && proposedStatus === 'assigned') {
+    return 'assigned'
+  }
 
   if (
     isPlannedExecution &&
@@ -448,6 +457,7 @@ export async function POST(request: NextRequest) {
         executionMode: item.execution_mode,
         disposition: item.disposition,
         executionContextReady: previousMetadata.execution_context_ready === true,
+        blockedReason: targetStatus.blockedReason || metadataPatch.blocked_reason,
       })
       const mergedMetadata = mergeHabiMetadata(existingTask.metadata, metadataPatch)
       const contract = validateHabiTaskContract({ assigned_to: assignee, metadata: mergedMetadata })
