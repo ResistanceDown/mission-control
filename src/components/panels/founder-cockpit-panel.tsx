@@ -100,12 +100,30 @@ function useFounderData() {
   return { data, loading, reload: load }
 }
 
-function Metric({ label, value, subtitle }: { label: string; value: string | number; subtitle?: string }) {
+function Metric({
+  label,
+  value,
+  subtitle,
+  color = 'blue',
+}: {
+  label: string
+  value: string | number
+  subtitle?: string
+  color?: 'blue' | 'green' | 'purple' | 'red' | 'amber'
+}) {
+  const colorMap = {
+    blue: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
+    green: 'bg-green-500/10 text-green-400 border-green-500/20',
+    purple: 'bg-purple-500/10 text-purple-400 border-purple-500/20',
+    red: 'bg-red-500/10 text-red-400 border-red-500/20',
+    amber: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
+  }
+
   return (
-    <div className="rounded-xl border border-white/10 bg-surface-2/85 px-3 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
-      <div className="text-2xs uppercase tracking-wide text-muted-foreground">{label}</div>
+    <div className={`rounded-xl border px-3 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] ${colorMap[color]}`}>
+      <div className="text-2xs uppercase tracking-wide opacity-80">{label}</div>
       <div className="mt-1 text-xl font-semibold text-foreground">{value}</div>
-      {subtitle ? <div className="mt-1 text-2xs text-muted-foreground">{subtitle}</div> : null}
+      {subtitle ? <div className="mt-1 text-2xs text-foreground/55">{subtitle}</div> : null}
     </div>
   )
 }
@@ -374,15 +392,15 @@ export function FounderCockpitPanel() {
           </div>
         </div>
         <div className="panel-body space-y-4">
-          <div className="rounded-xl border border-white/10 bg-surface-2/80 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
+          <div className="rounded-xl border border-blue-500/20 bg-gradient-to-br from-blue-500/10 via-surface-2/80 to-surface-2/80 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
             <div className="text-xs font-medium text-foreground">Summary</div>
             <div className="mt-2 text-sm leading-6 text-foreground">{packet.summary}</div>
           </div>
 
-          <details className="rounded-xl border border-white/10 bg-surface-2/80 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]" open>
+          <details className="rounded-xl border border-purple-500/20 bg-gradient-to-br from-purple-500/8 via-surface-2/80 to-surface-2/80 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]" open>
             <summary className="cursor-pointer text-sm font-semibold text-foreground">Founder SOP</summary>
             <div className="mt-4 grid xl:grid-cols-3 gap-3 text-sm text-foreground">
-              <div className="rounded-lg border border-white/10 bg-black/15 p-3">
+              <div className="rounded-lg border border-blue-500/15 bg-black/15 p-3">
                 <div className="font-medium">Morning</div>
                 <div className="mt-2 space-y-2 text-muted-foreground">
                   <div>1. Read this page.</div>
@@ -390,7 +408,7 @@ export function FounderCockpitPanel() {
                   <div>3. Check blockers and approvals.</div>
                 </div>
               </div>
-              <div className="rounded-lg border border-white/10 bg-black/15 p-3">
+              <div className="rounded-lg border border-green-500/15 bg-black/15 p-3">
                 <div className="font-medium">During The Day</div>
                 <div className="mt-2 space-y-2 text-muted-foreground">
                   <div>1. Do 1 real founder action: conversation, outreach, beta follow-up, or reply block.</div>
@@ -398,7 +416,7 @@ export function FounderCockpitPanel() {
                   <div>3. Only step in when a task needs a decision.</div>
                 </div>
               </div>
-              <div className="rounded-lg border border-white/10 bg-black/15 p-3">
+              <div className="rounded-lg border border-amber-500/15 bg-black/15 p-3">
                 <div className="font-medium">Closeout</div>
                 <div className="mt-2 space-y-2 text-muted-foreground">
                   <div>1. Confirm what shipped.</div>
@@ -407,23 +425,23 @@ export function FounderCockpitPanel() {
                 </div>
               </div>
             </div>
-            <div className="mt-4 rounded-lg border border-white/10 bg-black/15 p-3 text-sm text-muted-foreground">
+            <div className="mt-4 rounded-lg border border-purple-500/15 bg-black/15 p-3 text-sm text-muted-foreground">
               Your job is to choose priorities, talk to users, and approve risky or public actions. The bots should do the digging, drafting, evidence collection, and task movement.
             </div>
           </details>
 
           <div className="grid grid-cols-2 xl:grid-cols-6 gap-3">
-            <Metric label="Active Habi Tasks" value={data.tasks.totalActive} subtitle={`${data.tasks.awaitingReview} awaiting approval`} />
-            <Metric label="Approvals Needed" value={data.tasks.readyForFounderDecision} subtitle="Founder-actionable" />
-            <Metric label="App Finish Queue" value={data.tasks.appFinishCounts.active} subtitle="Planned product work" />
-            <Metric label="Blocked By Founder" value={data.tasks.appFinishCounts.blockedByFounder} subtitle="Needs a decision" />
-            <Metric label="Waiting On QC" value={data.tasks.waitingOnQcQueue.length} subtitle="Not ready for you yet" />
-            <Metric label="Founder Conversations" value={data.adoption?.founderConversations ?? 0} subtitle={`Signals ${data.signals.total}`} />
-            <Metric label="Activated Users" value={data.adoption?.activatedUsers ?? 0} subtitle={`${data.adoption?.weeklyActiveUsers ?? 0} weekly active`} />
+            <Metric label="Active Habi Tasks" value={data.tasks.totalActive} subtitle={`${data.tasks.awaitingReview} awaiting approval`} color="blue" />
+            <Metric label="Approvals Needed" value={data.tasks.readyForFounderDecision} subtitle="Founder-actionable" color="green" />
+            <Metric label="App Finish Queue" value={data.tasks.appFinishCounts.active} subtitle="Planned product work" color="purple" />
+            <Metric label="Blocked By Founder" value={data.tasks.appFinishCounts.blockedByFounder} subtitle="Needs a decision" color="red" />
+            <Metric label="Waiting On QC" value={data.tasks.waitingOnQcQueue.length} subtitle="Not ready for you yet" color="amber" />
+            <Metric label="Founder Conversations" value={data.adoption?.founderConversations ?? 0} subtitle={`Signals ${data.signals.total}`} color="blue" />
+            <Metric label="Activated Users" value={data.adoption?.activatedUsers ?? 0} subtitle={`${data.adoption?.weeklyActiveUsers ?? 0} weekly active`} color="green" />
           </div>
 
           <div className="grid items-start xl:grid-cols-[1.15fr_0.85fr] gap-3">
-            <div className="rounded-xl border border-white/10 bg-surface-2/82 p-4 shadow-[0_12px_28px_rgba(0,0,0,0.18)]">
+            <div className="rounded-xl border border-green-500/20 bg-gradient-to-br from-green-500/8 via-surface-2/82 to-surface-2/82 p-4 shadow-[0_12px_28px_rgba(0,0,0,0.18)]">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <h3 className="text-sm font-semibold text-foreground">Needs Your Decision</h3>
@@ -446,7 +464,7 @@ export function FounderCockpitPanel() {
                   {data.tasks.approvalQueue.length ? (
                   <div className="max-h-[34rem] space-y-2 overflow-y-auto pr-1">
                     {data.tasks.approvalQueue.map((task) => (
-                      <div key={task.id} className="rounded-lg border border-white/10 bg-black/15 p-3">
+                      <div key={task.id} className="rounded-lg border border-white/10 bg-black/15 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
@@ -507,7 +525,7 @@ export function FounderCockpitPanel() {
                       </button>
                     </div>
                     {expandedSendBack[task.id] ? (
-                      <div className="mt-3 rounded-lg border border-white/10 bg-black/20 p-3">
+                      <div className="mt-3 rounded-lg border border-red-500/15 bg-black/20 p-3">
                         <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Send Back Reason</div>
                         <div className="mt-1 text-xs text-muted-foreground">
                           This note is required. It will be posted on the task so the assignee knows exactly what to change.
@@ -562,7 +580,7 @@ export function FounderCockpitPanel() {
                     key={task.id}
                     type="button"
                     onClick={() => openTaskReviewItem(task.id)}
-                    className="w-full rounded-lg border border-white/10 bg-black/15 p-3 text-left transition-smooth hover:bg-surface-2"
+                    className="w-full rounded-lg border border-amber-500/15 bg-black/15 p-3 text-left transition-smooth hover:bg-surface-2"
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
@@ -594,7 +612,7 @@ export function FounderCockpitPanel() {
                     key={task.id}
                     type="button"
                     onClick={() => openTaskReviewItem(task.id)}
-                    className="w-full rounded-lg border border-white/10 bg-black/15 p-3 text-left transition-smooth hover:bg-surface-2"
+                    className="w-full rounded-lg border border-purple-500/15 bg-black/15 p-3 text-left transition-smooth hover:bg-surface-2"
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
@@ -615,7 +633,7 @@ export function FounderCockpitPanel() {
             </div>
 
             <div className="space-y-3">
-              <div className="rounded-xl border border-white/10 bg-surface-2/82 p-4 shadow-[0_12px_28px_rgba(0,0,0,0.18)]">
+              <div className="rounded-xl border border-blue-500/20 bg-gradient-to-br from-blue-500/8 via-surface-2/82 to-surface-2/82 p-4 shadow-[0_12px_28px_rgba(0,0,0,0.18)]">
                 <h3 className="text-sm font-semibold text-foreground">Founder Radar</h3>
                 <p className="mt-1 text-xs text-muted-foreground">Only the highest-value context that affects today’s decisions.</p>
                 <div className="mt-4 space-y-4">
@@ -655,7 +673,7 @@ export function FounderCockpitPanel() {
                 </div>
               </div>
 
-              <div className="h-fit self-start rounded-xl border border-white/10 bg-surface-2/82 p-4 shadow-[0_12px_28px_rgba(0,0,0,0.18)]">
+              <div className="h-fit self-start rounded-xl border border-cyan-500/20 bg-gradient-to-br from-cyan-500/8 via-surface-2/82 to-surface-2/82 p-4 shadow-[0_12px_28px_rgba(0,0,0,0.18)]">
                 <button
                   type="button"
                   onClick={() => setSignalExpanded((current) => !current)}
@@ -729,7 +747,7 @@ export function FounderCockpitPanel() {
             </div>
           </div>
 
-          <div className="rounded-xl border border-white/10 bg-surface-2/82 p-4 shadow-[0_12px_28px_rgba(0,0,0,0.18)]">
+          <div className="rounded-xl border border-purple-500/20 bg-gradient-to-br from-purple-500/8 via-surface-2/82 to-surface-2/82 p-4 shadow-[0_12px_28px_rgba(0,0,0,0.18)]">
             <div className="flex items-center justify-between gap-3">
               <div>
                 <h3 className="text-sm font-semibold text-foreground">Founder Reference</h3>
@@ -763,7 +781,7 @@ export function FounderCockpitPanel() {
                   <div className="text-xs text-muted-foreground">{data.signals.total} logged • {data.signals.repeatedPainCount} repeated pain patterns</div>
                   <div className="mt-3 space-y-2 text-sm">
                     {data.signals.latest.length ? data.signals.latest.slice(0, 4).map((signal) => (
-                      <div key={signal.id} className="rounded-lg border border-white/10 bg-black/15 px-3 py-2">
+                      <div key={signal.id} className="rounded-lg border border-blue-500/15 bg-black/15 px-3 py-2">
                         <div className="font-medium text-foreground">{signal.persona}</div>
                         <div className="mt-1 text-muted-foreground">{signal.problem}</div>
                         <div className="mt-1 text-xs text-primary">Next: {signal.nextAction}</div>
@@ -778,7 +796,7 @@ export function FounderCockpitPanel() {
                   <div className="text-xs text-muted-foreground">{data.productProof.total} proof item(s) logged</div>
                   <div className="mt-3 space-y-2 text-sm">
                     {data.productProof.latest.length ? data.productProof.latest.slice(0, 4).map((proof) => (
-                      <div key={proof.id} className="rounded-lg border border-white/10 bg-black/15 px-3 py-2">
+                      <div key={proof.id} className="rounded-lg border border-purple-500/15 bg-black/15 px-3 py-2">
                         <div className="font-medium text-foreground">{proof.title}</div>
                         <div className="mt-1 text-muted-foreground">{proof.publicStoryAngle}</div>
                         <div className="mt-1 text-xs text-primary">{proof.stage}</div>
