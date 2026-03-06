@@ -37,14 +37,14 @@ function resolveTargetStatus(
   const isPlannedExecution =
     (options?.executionMode === 'draft_pr' || options?.executionMode === 'audit_only') &&
     (options?.disposition === 'execute_now' || options?.disposition === 'founder_decision_needed')
-  let status: IngestStatus = isPlannedExecution ? 'assigned' : (hasEvidence ? 'in_progress' : 'assigned')
+  let status: IngestStatus = 'assigned'
 
   switch (statusHint) {
     case 'blocked':
       status = 'in_progress'
       break
     case 'active':
-      status = isPlannedExecution ? 'assigned' : (hasEvidence ? 'in_progress' : 'assigned')
+      status = 'assigned'
       break
     case 'review_ready':
       status = 'review'
@@ -145,6 +145,15 @@ function formatOfflineComment(assignee: string) {
     `${assignee} does not have an active linked session right now.`,
     'Task remains queued. Relink the session if work should resume immediately.',
   ].join('\n')
+}
+
+function shouldSkipCancelledFingerprintReuse(existingTask: any) {
+  const metadata = mergeHabiMetadata(existingTask?.metadata, {})
+  const cancelledReason = String(metadata.cancelled_reason || '').trim().toLowerCase()
+  return (
+    existingTask?.status === 'cancelled' &&
+    ['superseded_by_redesign_cutover', 'reference_only_decision_already_recorded'].includes(cancelledReason)
+  )
 }
 
 function cancelSupersededDuplicates(
@@ -300,6 +309,16 @@ export async function POST(request: NextRequest) {
       `).get(workspaceId, fingerprint) as any
 
       const shouldCreate = !existingTask || existingTask.status === 'done' || existingTask.status === 'cancelled'
+      if (existingTask && shouldSkipCancelledFingerprintReuse(existingTask)) {
+        actionPlan.push({
+          action: 'skip',
+          task_id: existingTask.id,
+          title: item.title,
+          lane: item.lane,
+          reason: `cancelled_reason=${mergeHabiMetadata(existingTask.metadata, {}).cancelled_reason}`,
+        })
+        continue
+      }
       if (shouldCreate) {
         const metadata = metadataPatch
         const contract = validateHabiTaskContract({ assigned_to: assignee, metadata })

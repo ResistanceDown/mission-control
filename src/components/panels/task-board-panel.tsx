@@ -68,6 +68,14 @@ interface ParsedSystemComment {
   tone?: 'neutral' | 'warning' | 'action'
 }
 
+type HarnessSummary = {
+  status?: string
+  scope?: string
+  issue_count?: number
+  blocking_findings?: number
+  audit_json_path?: string
+}
+
 function parseSystemComment(comment: Comment): ParsedSystemComment | null {
   if (comment.author !== 'system') return null
   const content = comment.content.trim()
@@ -955,6 +963,16 @@ function TaskDetailModal({
   const evidencePath = typeof metadata.evidence_path === 'string' ? metadata.evidence_path : ''
   const handoffPath = typeof metadata.handoff_artifact === 'string' ? metadata.handoff_artifact : ''
   const worktreePath = typeof metadata.worktree_path === 'string' ? metadata.worktree_path : ''
+  const harnessArtifact = typeof metadata.harness_artifact === 'string' ? metadata.harness_artifact : ''
+  const harnessSummary = metadata.harness_summary && typeof metadata.harness_summary === 'object' ? metadata.harness_summary as HarnessSummary : null
+  const harnessDiscoverySummary = metadata.harness_discovery_summary && typeof metadata.harness_discovery_summary === 'object' ? metadata.harness_discovery_summary as HarnessSummary : null
+  const harnessStatus = harnessSummary?.status || harnessDiscoverySummary?.status || (metadata.harness_required ? 'required' : '')
+  const harnessScope = String(harnessSummary?.scope || harnessDiscoverySummary?.scope || '')
+  const harnessIssueCount = harnessSummary?.issue_count ?? harnessDiscoverySummary?.issue_count
+  const harnessBlockingCount = harnessSummary?.blocking_findings
+  const harnessDisplay = harnessArtifact
+    ? harnessArtifact
+    : harnessSummary?.audit_json_path || harnessDiscoverySummary?.audit_json_path || 'No harness artifact attached.'
   const reviewStatusLabel = task.status === 'quality_review'
     ? (task.aegisApproved ? 'QC passed. This is ready for your final approval.' : 'QC is still running. This is not ready for founder approval yet.')
     : task.status === 'review'
@@ -1220,6 +1238,14 @@ function TaskDetailModal({
                     <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Validation</div>
                     <div className="mt-1 text-sm text-foreground whitespace-pre-wrap">{validationCommands.length ? validationCommands.join('\n') : 'No validation commands attached.'}</div>
                     {latestReview ? <div className="mt-1 text-xs text-muted-foreground">Latest QC: {latestReview.reviewer} — {latestReview.status}</div> : null}
+                  </div>
+                  <div>
+                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Harness</div>
+                    <div className="mt-1 text-sm text-foreground whitespace-pre-wrap">{harnessDisplay}</div>
+                    {harnessStatus ? <div className="mt-1 text-xs text-muted-foreground">Status: {harnessStatus}</div> : null}
+                    {harnessScope ? <div className="mt-1 text-xs text-muted-foreground">Scope: {harnessScope}</div> : null}
+                    {typeof harnessBlockingCount === 'number' ? <div className="mt-1 text-xs text-muted-foreground">Blocking findings: {harnessBlockingCount}</div> : null}
+                    {typeof harnessIssueCount === 'number' ? <div className="mt-1 text-xs text-muted-foreground">Issue count: {harnessIssueCount}</div> : null}
                   </div>
                 </div>
                 <div>
