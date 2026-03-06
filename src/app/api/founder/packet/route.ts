@@ -223,11 +223,13 @@ function loadTaskSnapshot(workspaceId: number) {
       disposition: String(parsedMetadata.disposition || ''),
       executionMode: String(parsedMetadata.execution_mode || ''),
       waitingOnQc: Boolean(parsedMetadata.waiting_on_qc),
+      liveInMain: parsedMetadata.live_in_main === true,
+      liveApprovalExempt: parsedMetadata.live_approval_exempt === true,
     }
   })
 
   const approvalQueue = approvalCandidates.filter((task) => {
-    if (task.status === 'quality_review') return task.aegisApproved
+    if (task.status === 'quality_review') return task.aegisApproved && (task.liveInMain || task.liveApprovalExempt)
     if (task.status === 'review') return !task.waitingOnQc
     return true
   })

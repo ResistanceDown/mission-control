@@ -54,6 +54,8 @@ interface FounderApiResponse {
       waitingOnQc: boolean
       disposition: string
       executionMode: string
+      liveInMain?: boolean
+      liveApprovalExempt?: boolean
     }>
     waitingOnQcQueue: Array<{
       id: number
@@ -66,6 +68,8 @@ interface FounderApiResponse {
       waitingOnQc: boolean
       disposition: string
       executionMode: string
+      liveInMain?: boolean
+      liveApprovalExempt?: boolean
     }>
     readyForFounderDecision: number
     reviewQueue: Array<{ id: number; title: string; status: string; assigned_to: string | null; priority: string; updated_at: number; aegisApproved: boolean }>
@@ -115,6 +119,23 @@ function isWaitingOnQc(task: { metadata?: Record<string, any> | null } | null | 
   const metadata = task?.metadata
   if (!metadata || typeof metadata !== 'object') return false
   return Boolean(metadata.waiting_on_qc)
+}
+
+function isLiveInMain(task: { metadata?: Record<string, any> | null } | null | undefined) {
+  const metadata = task?.metadata
+  if (!metadata || typeof metadata !== 'object') return false
+  return metadata.live_in_main === true
+}
+
+function isLiveApprovalExempt(task: { metadata?: Record<string, any> | null } | null | undefined) {
+  const metadata = task?.metadata
+  if (!metadata || typeof metadata !== 'object') return false
+  return metadata.live_approval_exempt === true
+}
+
+function canMarkDone(task: { status?: string; aegisApproved?: boolean; metadata?: Record<string, any> | null } | null | undefined) {
+  if (!task || task.status !== 'quality_review' || !task.aegisApproved) return false
+  return isLiveInMain(task) || isLiveApprovalExempt(task)
 }
 
 function useFounderData() {
@@ -574,7 +595,7 @@ export function FounderCockpitPanel() {
                           Waiting on QC
                         </div>
                       ) : null}
-                      {task.status === 'quality_review' && task.aegisApproved ? (
+                      {canMarkDone(task as any) ? (
                         <button
                           onClick={() => updateTaskStatus(task.id, 'done')}
                           disabled={taskActionState[task.id]?.status === 'saving'}
@@ -582,6 +603,11 @@ export function FounderCockpitPanel() {
                         >
                           {taskActionState[task.id]?.status === 'saving' ? 'Updating...' : 'Approve And Mark Done'}
                         </button>
+                      ) : null}
+                      {task.status === 'quality_review' && task.aegisApproved && !canMarkDone(task as any) ? (
+                        <div className="px-3 py-2 rounded-lg bg-amber-500/10 text-amber-300 text-sm font-medium">
+                          Ready, but not live in main yet
+                        </div>
                       ) : null}
                       <button
                         onClick={() => beginSendBack(task.id)}
@@ -956,7 +982,7 @@ export function FounderCockpitPanel() {
                     Waiting on QC
                   </div>
                 ) : null}
-                {selectedTask.status === 'quality_review' && selectedTask.aegisApproved ? (
+                {canMarkDone(selectedTask) ? (
                   <button
                     onClick={() => void updateTaskStatus(selectedTask.id, 'done')}
                     disabled={taskActionState[selectedTask.id]?.status === 'saving'}
@@ -964,6 +990,11 @@ export function FounderCockpitPanel() {
                   >
                     {taskActionState[selectedTask.id]?.status === 'saving' ? 'Updating...' : 'Approve And Mark Done'}
                   </button>
+                ) : null}
+                {selectedTask.status === 'quality_review' && selectedTask.aegisApproved && !canMarkDone(selectedTask) ? (
+                  <div className="px-3 py-2 rounded-lg bg-amber-500/10 text-amber-300 text-sm font-medium">
+                    Ready, but still a branch preview. Merge to main before final approval.
+                  </div>
                 ) : null}
                 <button
                   onClick={() => beginSendBack(selectedTask.id)}
