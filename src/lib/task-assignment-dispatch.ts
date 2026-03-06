@@ -12,6 +12,7 @@ interface AssignmentDispatchInput {
   title: string
   priority: string
   status: string
+  details?: string[]
 }
 
 interface TaskMessageDispatchInput {
@@ -44,7 +45,7 @@ export async function dispatchTaskAssignment(input: AssignmentDispatchInput): Pr
   sessionKey?: string
   reason?: string
 }> {
-  const { workspaceId, actor, assignee, taskId, title, priority, status } = input
+  const { workspaceId, actor, assignee, taskId, title, priority, status, details = [] } = input
   const message = [
     'Mission Control assignment',
     `Task: #${taskId} ${title}`,
@@ -52,6 +53,7 @@ export async function dispatchTaskAssignment(input: AssignmentDispatchInput): Pr
     `Priority: ${priority}`,
     `Status: ${status}`,
     `Assigned by: ${actor}`,
+    ...details.filter(Boolean),
   ].join('\n')
   return dispatchTaskMessage({
     workspaceId,

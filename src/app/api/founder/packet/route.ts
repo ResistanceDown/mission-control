@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import fs from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import path from 'node:path'
 import { requireRole } from '@/lib/auth'
 import { getDatabase } from '@/lib/db'
 import { logger } from '@/lib/logger'
+import { isExecutionProgressComment, isKickoffComment } from '@/lib/habi-task-execution'
 
 const HABI_ROOT = process.env.HABI_ROOT || '/Users/kokoro/Coding/Habi'
 const FOUNDER_PACKET_ROOT = path.join(HABI_ROOT, 'output', 'founder', 'daily')
@@ -217,12 +219,12 @@ function loadTaskSnapshot(workspaceId: number) {
     }
   })
 
-  const appFinishQueue = db.prepare(`
-    SELECT id, title, status, assigned_to, priority, updated_at
+  const appFinishTaskRows = db.prepare(`
+    SELECT id, title, status, assigned_to, priority, updated_at, metadata
     FROM tasks
     WHERE workspace_id = ?
       AND lower(coalesce(assigned_to,'')) LIKE 'habi-%'
-      AND status NOT IN ('review', 'quality_review', 'done', 'cancelled')
+      AND status NOT IN ('done', 'cancelled')
       AND coalesce(json_extract(metadata, '$.origin_lane'), '') != 'growth'
       AND coalesce(json_extract(metadata, '$.execution_mode'), '') IN ('audit_only', 'draft_pr')
     ORDER BY
@@ -234,7 +236,6 @@ function loadTaskSnapshot(workspaceId: number) {
         ELSE 4
       END,
       updated_at DESC
-    LIMIT 8
   `).all(workspaceId) as Array<{
     id: number
     title: string
@@ -242,39 +243,76 @@ function loadTaskSnapshot(workspaceId: number) {
     assigned_to: string | null
     priority: string
     updated_at: number
+    metadata?: string | null
   }>
 
-  const appFinishCounts = db.prepare(`
-    SELECT
-      SUM(CASE
-        WHEN lower(coalesce(assigned_to,'')) LIKE 'habi-%'
-          AND status NOT IN ('done', 'cancelled')
-          AND coalesce(json_extract(metadata, '$.origin_lane'), '') != 'growth'
-          AND coalesce(json_extract(metadata, '$.execution_mode'), '') IN ('audit_only', 'draft_pr')
-        THEN 1 ELSE 0 END
-      ) AS active_count,
-      SUM(CASE
-        WHEN lower(coalesce(assigned_to,'')) LIKE 'habi-%'
-          AND status IN ('review', 'quality_review')
-          AND coalesce(json_extract(metadata, '$.origin_lane'), '') != 'growth'
-          AND coalesce(json_extract(metadata, '$.execution_mode'), '') IN ('audit_only', 'draft_pr')
-        THEN 1 ELSE 0 END
-      ) AS blocked_by_founder,
-      SUM(CASE
-        WHEN lower(coalesce(assigned_to,'')) LIKE 'habi-%'
-          AND status NOT IN ('done', 'cancelled')
-          AND coalesce(json_extract(metadata, '$.origin_lane'), '') != 'growth'
-          AND coalesce(json_extract(metadata, '$.execution_mode'), '') IN ('audit_only', 'draft_pr')
-          AND trim(coalesce(json_extract(metadata, '$.blocked_reason'), '')) != ''
-        THEN 1 ELSE 0 END
-      ) AS blocked_by_evidence
-    FROM tasks
-    WHERE workspace_id = ?
-  `).get(workspaceId) as {
-    active_count?: number
-    blocked_by_founder?: number
-    blocked_by_evidence?: number
+  const appFinishQueue = appFinishTaskRows
+    .filter((task) => !['review', 'quality_review'].includes(task.status))
+    .slice(0, 8)
+    .map(({ metadata: _metadata, ...task }) => task)
+
+  const appFinishTaskIds = appFinishTaskRows.map((task) => task.id)
+  const commentRows = appFinishTaskIds.length
+    ? db.prepare(`
+      SELECT task_id, author, content, created_at
+      FROM comments
+      WHERE workspace_id = ?
+        AND task_id IN (${appFinishTaskIds.map(() => '?').join(',')})
+      ORDER BY created_at DESC
+    `).all(workspaceId, ...appFinishTaskIds) as Array<{
+      task_id: number
+      author: string
+      content: string
+      created_at: number
+    }>
+    : []
+
+  const commentsByTask = new Map<number, Array<{ author: string; content: string; created_at: number }>>()
+  for (const row of commentRows) {
+    const bucket = commentsByTask.get(row.task_id) || []
+    bucket.push(row)
+    commentsByTask.set(row.task_id, bucket)
   }
+
+  const staleCutoff = Math.floor(Date.now() / 1000) - (4 * 60 * 60)
+  const appFinishHealth = appFinishTaskRows.map((task) => {
+    let metadata: Record<string, unknown> = {}
+    try {
+      metadata = task.metadata ? JSON.parse(task.metadata) : {}
+    } catch {
+      metadata = {}
+    }
+    const comments = commentsByTask.get(task.id) || []
+    const kickoffSeen = comments.some((comment) => isKickoffComment(comment.content))
+    const progressSeen = comments.some((comment) => isExecutionProgressComment(comment.content))
+    const evidencePath = String(metadata.evidence_path || '').trim()
+    const worktreePath = String(metadata.worktree_path || '').trim()
+    const executionMode = String(metadata.execution_mode || '').trim()
+    const blockedReason = String(metadata.blocked_reason || '').trim()
+    const evidenceExists = evidencePath ? existsSync(evidencePath) : false
+    const worktreeExists =
+      executionMode === 'draft_pr'
+        ? Boolean(worktreePath) && existsSync(path.join(worktreePath, '.git'))
+        : true
+    const latestCommentAt = comments.reduce((latest, comment) => Math.max(latest, comment.created_at), 0)
+    const stalled =
+      task.status === 'in_progress' &&
+      kickoffSeen &&
+      !blockedReason &&
+      !progressSeen &&
+      Math.max(task.updated_at, latestCommentAt) < staleCutoff
+
+    return {
+      taskId: task.id,
+      status: task.status,
+      blockedReason,
+      kickoffSeen,
+      progressSeen,
+      evidenceExists,
+      worktreeExists,
+      stalled,
+    }
+  })
 
   return {
     totalActive,
@@ -285,9 +323,14 @@ function loadTaskSnapshot(workspaceId: number) {
     approvalQueue,
     appFinishQueue,
     appFinishCounts: {
-      active: Number(appFinishCounts?.active_count || 0),
-      blockedByFounder: Number(appFinishCounts?.blocked_by_founder || 0),
-      blockedByEvidence: Number(appFinishCounts?.blocked_by_evidence || 0),
+      active: appFinishTaskRows.length,
+      blockedByFounder: appFinishHealth.filter((task) => task.status === 'assigned').length,
+      blockedByEvidence: appFinishHealth.filter((task) =>
+        ['in_progress', 'review', 'quality_review'].includes(task.status) &&
+        (task.blockedReason || !task.evidenceExists || !task.worktreeExists)
+      ).length,
+      waitingOnKickoff: appFinishHealth.filter((task) => task.status === 'in_progress' && !task.kickoffSeen).length,
+      stalledInProgress: appFinishHealth.filter((task) => task.stalled).length,
     },
   }
 }

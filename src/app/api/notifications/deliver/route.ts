@@ -4,6 +4,10 @@ import { runOpenClaw } from '@/lib/command';
 import { requireRole } from '@/lib/auth';
 import { logger } from '@/lib/logger';
 
+function buildDispatchParams(sessionKey: string, message: string, idempotencyKey: string) {
+  return JSON.stringify({ sessionKey, message, idempotencyKey })
+}
+
 /**
  * POST /api/notifications/deliver - Notification delivery daemon endpoint
  * 
@@ -79,18 +83,21 @@ export async function POST(request: NextRequest) {
         const message = formatNotificationMessage(notification);
         
         if (!dry_run) {
-          // Send notification via OpenClaw sessions_send
+          // Send notification via gateway chat transport
           try {
             const { stdout, stderr } = await runOpenClaw(
               [
                 'gateway',
-                'sessions_send',
-                '--session',
-                notification.session_key,
-                '--message',
-                message
+                'call',
+                'chat.send',
+                '--params',
+                buildDispatchParams(
+                  notification.session_key,
+                  message,
+                  `notification-${notification.id}-${notification.recipient.toLowerCase()}-${Date.now()}`
+                )
               ],
-              { timeoutMs: 10000 }
+              { timeoutMs: 12000 }
             );
             
             if (stderr && stderr.includes('error')) {

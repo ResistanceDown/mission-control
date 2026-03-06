@@ -6,6 +6,32 @@ import { mutationLimiter } from '@/lib/rate-limit'
 import { dispatchTaskMessage } from '@/lib/task-assignment-dispatch'
 import { syncAgentSessionLinks } from '@/lib/agent-session-link'
 
+const DUPLICATE_COMMENT_WINDOW_SECONDS = 6 * 60 * 60
+
+function recentMatchingCommentExists(
+  db: ReturnType<typeof getDatabase>,
+  taskId: number,
+  workspaceId: number,
+  content: string,
+  now: number
+) {
+  const row = db
+    .prepare(
+      `
+        SELECT id
+        FROM comments
+        WHERE task_id = ?
+          AND workspace_id = ?
+          AND author = 'system'
+          AND content = ?
+          AND created_at >= ?
+        LIMIT 1
+      `
+    )
+    .get(taskId, workspaceId, content, now - DUPLICATE_COMMENT_WINDOW_SECONDS)
+  return Boolean(row)
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -66,10 +92,12 @@ export async function POST(
           : `Assignee ${task.assigned_to} could not be reached right now (reason=${reason}). Action: retry ping; if it repeats, relink/check session in Office/Agents.`
 
       const now = Math.floor(Date.now() / 1000)
-      db.prepare(`
-        INSERT INTO comments (task_id, author, content, created_at, parent_id, mentions, workspace_id)
-        VALUES (?, ?, ?, ?, NULL, NULL, ?)
-      `).run(task.id, 'system', warning, now, workspaceId)
+      if (!recentMatchingCommentExists(db, task.id, workspaceId, warning, now)) {
+        db.prepare(`
+          INSERT INTO comments (task_id, author, content, created_at, parent_id, mentions, workspace_id)
+          VALUES (?, ?, ?, ?, NULL, NULL, ?)
+        `).run(task.id, 'system', warning, now, workspaceId)
+      }
 
       db_helpers.createNotification(
         auth.user.username,
@@ -104,6 +132,22 @@ export async function POST(
       { assignee: task.assigned_to, session_key: dispatch.sessionKey || null },
       workspaceId
     )
+
+    const now = Math.floor(Date.now() / 1000)
+    const deliveredComment = [
+      `Ping delivered to ${task.assigned_to}.`,
+      `Status: ${task.status}`,
+      `Session: ${dispatch.sessionKey || 'unknown'}`,
+      note ? `Operator note: ${note}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n')
+    if (!recentMatchingCommentExists(db, task.id, workspaceId, deliveredComment, now)) {
+      db.prepare(`
+        INSERT INTO comments (task_id, author, content, created_at, parent_id, mentions, workspace_id)
+        VALUES (?, ?, ?, ?, NULL, NULL, ?)
+      `).run(task.id, 'system', deliveredComment, now, workspaceId)
+    }
 
     return NextResponse.json({
       delivered: true,

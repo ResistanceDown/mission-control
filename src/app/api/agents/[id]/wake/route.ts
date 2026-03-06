@@ -4,6 +4,10 @@ import { runOpenClaw } from '@/lib/command'
 import { requireRole } from '@/lib/auth'
 import { logger } from '@/lib/logger'
 
+function buildDispatchParams(sessionKey: string, message: string, idempotencyKey: string) {
+  return JSON.stringify({ sessionKey, message, idempotencyKey })
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -40,8 +44,18 @@ export async function POST(
       `Wake up check-in for ${agent.name}. Please review assigned tasks and notifications.`
 
     const { stdout, stderr } = await runOpenClaw(
-      ['gateway', 'sessions_send', '--session', agent.session_key, '--message', message],
-      { timeoutMs: 10000 }
+      [
+        'gateway',
+        'call',
+        'chat.send',
+        '--params',
+        buildDispatchParams(
+          agent.session_key,
+          message,
+          `agent-wake-${String(agent.name).toLowerCase()}-${Date.now()}`
+        ),
+      ],
+      { timeoutMs: 12000 }
     )
 
     if (stderr && stderr.includes('error')) {
