@@ -31,15 +31,20 @@ function resolveGeneralProjectId(db: ReturnType<typeof getDatabase>, workspaceId
 
 function resolveTargetStatus(
   statusHint: string | undefined,
-  hasEvidence: boolean
+  hasEvidence: boolean,
+  options?: { executionMode?: string; disposition?: string }
 ): { status: IngestStatus; blockedReason?: string } {
   let status: IngestStatus = hasEvidence ? 'in_progress' : 'assigned'
+  const isPlannedExecution =
+    (options?.executionMode === 'draft_pr' || options?.executionMode === 'audit_only') &&
+    (options?.disposition === 'execute_now' || options?.disposition === 'founder_decision_needed')
+
   switch (statusHint) {
     case 'blocked':
       status = 'in_progress'
       break
     case 'active':
-      status = 'in_progress'
+      status = hasEvidence || !isPlannedExecution ? 'in_progress' : 'assigned'
       break
     case 'review_ready':
       status = 'review'
@@ -76,6 +81,49 @@ function addTaskComment(
   `).run(taskId, content, now, workspaceId)
 }
 
+function formatIngestCreatedComment(item: {
+  source_report: string
+  lane: string
+  severity: string
+  surface?: string
+  execution_mode?: string
+  disposition?: string
+}) {
+  return [
+    'Ingest created task',
+    `Source: ${item.source_report}`,
+    `Lane: ${item.lane}`,
+    `Severity: ${item.severity}`,
+    ...(item.surface ? [`Surface: ${item.surface}`] : []),
+    ...(item.execution_mode ? [`Execution mode: ${item.execution_mode}`] : []),
+    ...(item.disposition ? [`Disposition: ${item.disposition}`] : []),
+  ].join('\n')
+}
+
+function formatIngestSyncComment(item: { source_report: string }, changes: string[]) {
+  return [
+    'Ingest sync update',
+    `Source: ${item.source_report}`,
+    ...changes.map((change) => `- ${change}`),
+  ].join('\n')
+}
+
+function formatGuardrailComment(message: string) {
+  return ['Guardrail applied', message].join('\n')
+}
+
+function formatIngestNoteComment(message: string) {
+  return ['Ingest note', message].join('\n')
+}
+
+function formatOfflineComment(assignee: string) {
+  return [
+    'Assignee offline',
+    `${assignee} does not have an active linked session right now.`,
+    'Task remains queued. Relink the session if work should resume immediately.',
+  ].join('\n')
+}
+
 export async function POST(request: NextRequest) {
   const auth = requireRole(request, 'operator')
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status })
@@ -108,7 +156,10 @@ export async function POST(request: NextRequest) {
           scope: item.scope,
         })
       const hasEvidence = existsSync(item.evidence_path)
-      const targetStatus = resolveTargetStatus(item.status_hint, hasEvidence)
+      const targetStatus = resolveTargetStatus(item.status_hint, hasEvidence, {
+        executionMode: item.execution_mode,
+        disposition: item.disposition,
+      })
       const metadataPatch = {
         objective: item.objective,
         scope: item.scope,
@@ -121,6 +172,13 @@ export async function POST(request: NextRequest) {
         last_sync_at: new Date().toISOString(),
         fingerprint,
         quality_owner: 'jeremy',
+        surface: item.surface || '',
+        execution_mode: item.execution_mode || '',
+        branch_name: item.branch_name || '',
+        worktree_path: item.worktree_path || '',
+        validation_commands: item.validation_commands || [],
+        handoff_artifact: item.handoff_artifact || '',
+        disposition: item.disposition || '',
         blocked_reason: targetStatus.blockedReason || (item.status_hint === 'blocked' ? item.notes || 'blocked' : ''),
       }
       const priority = mapSeverityToPriority(item.severity)
@@ -153,6 +211,9 @@ export async function POST(request: NextRequest) {
           status: targetStatus.status,
           priority,
           fingerprint,
+          surface: item.surface || null,
+          execution_mode: item.execution_mode || null,
+          disposition: item.disposition || null,
         })
 
         if (dry_run) continue
@@ -204,13 +265,13 @@ export async function POST(request: NextRequest) {
           db,
           workspaceId,
           createdTask.id,
-          `Ingest created task from ${item.source_report} (lane=${item.lane}, severity=${item.severity}).`
+          formatIngestCreatedComment(item)
         )
         if (targetStatus.blockedReason) {
-          addTaskComment(db, workspaceId, createdTask.id, `Auto-guardrail: ${targetStatus.blockedReason}`)
+          addTaskComment(db, workspaceId, createdTask.id, formatGuardrailComment(targetStatus.blockedReason))
         }
         if (item.notes) {
-          addTaskComment(db, workspaceId, createdTask.id, `Ingest note: ${item.notes}`)
+          addTaskComment(db, workspaceId, createdTask.id, formatIngestNoteComment(item.notes))
         }
         db_helpers.logActivity(
           'task_ingested',
@@ -239,7 +300,7 @@ export async function POST(request: NextRequest) {
               db,
               workspaceId,
               createdTask.id,
-              `Assignee ${assignee} is currently offline. Task is queued and will proceed when session is active.`
+              formatOfflineComment(assignee)
             )
           }
           db_helpers.logActivity(
@@ -256,6 +317,7 @@ export async function POST(request: NextRequest) {
       }
 
       const nextStatus = targetStatus.status
+      const previousMetadata = mergeHabiMetadata(existingTask.metadata, {})
       const mergedMetadata = mergeHabiMetadata(existingTask.metadata, metadataPatch)
       const contract = validateHabiTaskContract({ assigned_to: assignee, metadata: mergedMetadata })
       if (!contract.ok) {
@@ -275,6 +337,9 @@ export async function POST(request: NextRequest) {
         status_to: nextStatus,
         priority_from: existingTask.priority,
         priority_to: priority,
+        surface: item.surface || null,
+        execution_mode: item.execution_mode || null,
+        disposition: item.disposition || null,
       })
 
       if (dry_run) continue
@@ -300,17 +365,24 @@ export async function POST(request: NextRequest) {
       touchedTaskIds.push(existingTask.id)
       ensureHabiTaskSubscriptions(existingTask.id, workspaceId, assignee, source || actor)
 
-      addTaskComment(
-        db,
-        workspaceId,
-        existingTask.id,
-        `Ingest sync from ${item.source_report}: status ${existingTask.status} -> ${nextStatus}, priority ${existingTask.priority} -> ${priority}.`
-      )
-      if (targetStatus.blockedReason) {
-        addTaskComment(db, workspaceId, existingTask.id, `Auto-guardrail: ${targetStatus.blockedReason}`)
+      const syncChanges: string[] = []
+      if (existingTask.status !== nextStatus) syncChanges.push(`Status: ${existingTask.status} -> ${nextStatus}`)
+      if (existingTask.priority !== priority) syncChanges.push(`Priority: ${existingTask.priority} -> ${priority}`)
+      if ((existingTask.assigned_to || '') !== assignee) syncChanges.push(`Assignee: ${existingTask.assigned_to || 'unassigned'} -> ${assignee}`)
+      if (existingTask.title !== item.title) syncChanges.push(`Title updated to: ${item.title}`)
+      if (syncChanges.length > 0) {
+        addTaskComment(
+          db,
+          workspaceId,
+          existingTask.id,
+          formatIngestSyncComment(item, syncChanges)
+        )
       }
-      if (item.notes) {
-        addTaskComment(db, workspaceId, existingTask.id, `Ingest note: ${item.notes}`)
+      if (targetStatus.blockedReason && previousMetadata.blocked_reason !== targetStatus.blockedReason) {
+        addTaskComment(db, workspaceId, existingTask.id, formatGuardrailComment(targetStatus.blockedReason))
+      }
+      if (item.notes && previousMetadata.origin_report !== item.source_report && previousMetadata.blocked_reason !== item.notes) {
+        addTaskComment(db, workspaceId, existingTask.id, formatIngestNoteComment(item.notes))
       }
       db_helpers.logActivity(
         'task_ingested',

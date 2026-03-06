@@ -61,6 +61,72 @@ interface Comment {
   replies?: Comment[]
 }
 
+interface ParsedSystemComment {
+  title: string
+  lines: string[]
+  tone?: 'neutral' | 'warning' | 'action'
+}
+
+function parseSystemComment(comment: Comment): ParsedSystemComment | null {
+  if (comment.author !== 'system') return null
+  const content = comment.content.trim()
+
+  if (content.startsWith('Ingest sync update\n')) {
+    const lines = content.split('\n').slice(1).filter(Boolean)
+    return { title: 'Task Sync Update', lines, tone: 'neutral' }
+  }
+
+  if (content.startsWith('Ingest created task\n')) {
+    const lines = content.split('\n').slice(1).filter(Boolean)
+    return { title: 'Task Created By Ingest', lines, tone: 'action' }
+  }
+
+  if (content.startsWith('Ingest note\n')) {
+    return { title: 'Ingest Note', lines: content.split('\n').slice(1).filter(Boolean), tone: 'neutral' }
+  }
+
+  if (content.startsWith('Guardrail applied\n')) {
+    return { title: 'Guardrail Applied', lines: content.split('\n').slice(1).filter(Boolean), tone: 'warning' }
+  }
+
+  if (content.startsWith('Assignee offline\n')) {
+    return { title: 'Assignee Offline', lines: content.split('\n').slice(1).filter(Boolean), tone: 'warning' }
+  }
+
+  if (content.startsWith('Founder sent this back')) {
+    return { title: 'Founder Sent Back', lines: [content], tone: 'action' }
+  }
+
+  if (content.startsWith('Ingest sync from ')) {
+    const source = content.match(/^Ingest sync from (.*?):/)?.[1] || 'artifact'
+    const details = content.split(': ').slice(1).join(': ')
+    const lines = [
+      `Source: ${source}`,
+      ...details.split(', ').map((part) => part.trim()).filter(Boolean),
+    ]
+    return { title: 'Task Sync Update', lines, tone: 'neutral' }
+  }
+
+  if (content.startsWith('Ingest created task from ')) {
+    const source = content.replace(/^Ingest created task from /, '')
+    return { title: 'Task Created By Ingest', lines: [source], tone: 'action' }
+  }
+
+  if (content.startsWith('Ingest note: ')) {
+    return { title: 'Ingest Note', lines: [content.replace('Ingest note: ', '')], tone: 'neutral' }
+  }
+
+  if (content.startsWith('Auto-guardrail: ')) {
+    return { title: 'Guardrail Applied', lines: [content.replace('Auto-guardrail: ', '')], tone: 'warning' }
+  }
+
+  if (content.includes('currently offline. Task is queued')) {
+    return { title: 'Assignee Offline', lines: [content], tone: 'warning' }
+  }
+
+  return null
+}
+
 interface Project {
   id: number
   name: string
@@ -779,6 +845,7 @@ function TaskDetailModal({
   const [commentText, setCommentText] = useState('')
   const [commentAuthor, setCommentAuthor] = useState('system')
   const [commentError, setCommentError] = useState<string | null>(null)
+  const [commentSortOrder, setCommentSortOrder] = useState<'newest' | 'oldest'>('newest')
   const [broadcastMessage, setBroadcastMessage] = useState('')
   const [broadcastStatus, setBroadcastStatus] = useState<string | null>(null)
   const [pingStatus, setPingStatus] = useState<string | null>(null)
@@ -917,20 +984,50 @@ function TaskDetailModal({
     }
   }
 
-  const renderComment = (comment: Comment, depth: number = 0) => (
-    <div key={comment.id} className={`border-l-2 border-border pl-3 ${depth > 0 ? 'ml-4' : ''}`}>
-      <div className="flex items-center justify-between text-xs text-muted-foreground">
-        <span className="font-medium text-foreground/80">{comment.author}</span>
-        <span>{new Date(comment.created_at * 1000).toLocaleString()}</span>
-      </div>
-      <div className="text-sm text-foreground/90 mt-1 whitespace-pre-wrap">{comment.content}</div>
-      {comment.replies && comment.replies.length > 0 && (
-        <div className="mt-3 space-y-3">
-          {comment.replies.map(reply => renderComment(reply, depth + 1))}
+  const renderComment = (comment: Comment, depth: number = 0) => {
+    const systemComment = parseSystemComment(comment)
+    const systemToneClass = systemComment?.tone === 'warning'
+      ? 'border-amber-500/30 bg-amber-500/10'
+      : systemComment?.tone === 'action'
+        ? 'border-indigo-500/30 bg-indigo-500/10'
+        : 'border-border bg-surface-1/50'
+
+    return (
+      <div key={comment.id} className={`border-l-2 border-border pl-3 ${depth > 0 ? 'ml-4' : ''}`}>
+        <div className="flex items-center justify-between text-xs text-muted-foreground">
+          <span className="font-medium text-foreground/80">{comment.author}</span>
+          <span>{new Date(comment.created_at * 1000).toLocaleString()}</span>
         </div>
-      )}
-    </div>
-  )
+        {systemComment ? (
+          <div className={`mt-2 rounded-lg border px-3 py-2 ${systemToneClass}`}>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{systemComment.title}</div>
+            <div className="mt-2 space-y-1 text-sm text-foreground/90">
+              {systemComment.lines.map((line, index) => (
+                <div key={`${comment.id}-line-${index}`} className="whitespace-pre-wrap">{line}</div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="text-sm text-foreground/90 mt-1 whitespace-pre-wrap">{comment.content}</div>
+        )}
+        {comment.replies && comment.replies.length > 0 && (
+          <div className="mt-3 space-y-3">
+            {comment.replies.map(reply => renderComment(reply, depth + 1))}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  const sortCommentThread = (items: Comment[]): Comment[] => {
+    const direction = commentSortOrder === 'newest' ? -1 : 1
+    return [...items]
+      .sort((a, b) => (a.created_at - b.created_at) * direction)
+      .map((item) => ({
+        ...item,
+        replies: item.replies ? sortCommentThread(item.replies) : []
+      }))
+  }
 
   const dialogRef = useFocusTrap(onClose)
 
@@ -1039,12 +1136,23 @@ function TaskDetailModal({
             <div id="tabpanel-comments" role="tabpanel" aria-label="Comments" className="mt-6">
             <div className="flex items-center justify-between mb-3">
               <h4 className="text-lg font-semibold text-foreground">Comments</h4>
-              <button
-                onClick={fetchComments}
-                className="text-xs text-blue-400 hover:text-blue-300"
-              >
-                Refresh
-              </button>
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-muted-foreground">Sort</label>
+                <select
+                  value={commentSortOrder}
+                  onChange={(e) => setCommentSortOrder(e.target.value as 'newest' | 'oldest')}
+                  className="bg-surface-1 text-foreground border border-border rounded-md px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary/50"
+                >
+                  <option value="newest">Newest first</option>
+                  <option value="oldest">Oldest first</option>
+                </select>
+                <button
+                  onClick={fetchComments}
+                  className="text-xs text-blue-400 hover:text-blue-300"
+                >
+                  Refresh
+                </button>
+              </div>
             </div>
 
             {commentError && (
@@ -1053,15 +1161,17 @@ function TaskDetailModal({
               </div>
             )}
 
-            {loadingComments ? (
-              <div className="text-muted-foreground text-sm">Loading comments...</div>
-            ) : comments.length === 0 ? (
-              <div className="text-muted-foreground/50 text-sm">No comments yet.</div>
-            ) : (
-              <div className="space-y-4">
-                {comments.map(comment => renderComment(comment))}
-              </div>
-            )}
+            <div className="max-h-[26rem] overflow-y-auto border border-border/60 rounded-md p-3 bg-surface-1/30">
+              {loadingComments ? (
+                <div className="text-muted-foreground text-sm">Loading comments...</div>
+              ) : comments.length === 0 ? (
+                <div className="text-muted-foreground/50 text-sm">No comments yet.</div>
+              ) : (
+                <div className="space-y-4">
+                  {sortCommentThread(comments).map(comment => renderComment(comment))}
+                </div>
+              )}
+            </div>
 
             <form onSubmit={handleAddComment} className="mt-4 space-y-3">
               <div>

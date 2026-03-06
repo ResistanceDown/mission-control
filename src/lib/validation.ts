@@ -163,6 +163,13 @@ export const habiTaskIngestSchema = z.object({
       rollback: z.string().min(1).max(4000),
       fingerprint: z.string().max(128).optional(),
       assignee: z.string().max(100).optional(),
+      surface: z.string().min(1).max(100).optional(),
+      execution_mode: z.enum(['audit_only', 'draft_pr']).optional(),
+      branch_name: z.string().max(200).optional(),
+      worktree_path: z.string().max(2000).optional(),
+      validation_commands: z.array(z.string().min(1).max(1000)).max(20).optional(),
+      handoff_artifact: z.string().max(2000).optional(),
+      disposition: z.enum(['execute_now', 'founder_decision_needed', 'defer', 'narrative_only']).optional(),
       status_hint: z.enum(['blocked', 'active', 'review_ready', 'quality_ready', 'resolved']).optional(),
       notes: z.string().max(2000).optional(),
     })
