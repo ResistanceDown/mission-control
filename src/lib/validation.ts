@@ -41,7 +41,20 @@ export const createTaskSchema = z.object({
   metadata: z.record(z.string(), z.unknown()).default({} as Record<string, unknown>),
 })
 
-export const updateTaskSchema = createTaskSchema.partial()
+export const updateTaskSchema = z.object({
+  title: z.string().min(1, 'Title is required').max(500).optional(),
+  description: z.string().max(5000).optional(),
+  status: z.enum(['inbox', 'assigned', 'in_progress', 'review', 'quality_review', 'done', 'cancelled']).optional(),
+  priority: z.enum(['critical', 'high', 'medium', 'low']).optional(),
+  project_id: z.number().int().positive().optional(),
+  assigned_to: z.string().max(100).optional(),
+  created_by: z.string().max(100).optional(),
+  due_date: z.number().optional(),
+  estimated_hours: z.number().min(0).optional(),
+  actual_hours: z.number().min(0).optional(),
+  tags: z.array(z.string()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+})
 
 export const createAgentSchema = z.object({
   name: z.string().min(1, 'Name is required').max(100),

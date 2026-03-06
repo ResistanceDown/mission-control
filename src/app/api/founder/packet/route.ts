@@ -158,6 +158,65 @@ function loadTaskSnapshot(workspaceId: number) {
     aegisApproved: hasAegisApproval(db, task.id, workspaceId),
   }))
 
+  const approvalQueueRows = db.prepare(`
+    SELECT id, title, status, assigned_to, priority, updated_at
+    FROM tasks
+    WHERE workspace_id = ?
+      AND lower(coalesce(assigned_to,'')) LIKE 'habi-%'
+      AND (
+        status IN ('review', 'quality_review')
+        OR (
+          status = 'assigned'
+          AND coalesce(json_extract(metadata, '$.origin_lane'), '') != 'growth'
+          AND coalesce(json_extract(metadata, '$.execution_mode'), '') IN ('audit_only', 'draft_pr')
+          AND coalesce(json_extract(metadata, '$.disposition'), '') IN ('execute_now', 'founder_decision_needed')
+        )
+      )
+    ORDER BY
+      CASE
+        WHEN status = 'quality_review' THEN 0
+        WHEN status = 'review' THEN 1
+        WHEN coalesce(json_extract(metadata, '$.disposition'), '') = 'founder_decision_needed' THEN 2
+        ELSE 3
+      END,
+      CASE priority
+        WHEN 'urgent' THEN 0
+        WHEN 'critical' THEN 1
+        WHEN 'high' THEN 2
+        WHEN 'medium' THEN 3
+        ELSE 4
+      END,
+      updated_at DESC
+    LIMIT 8
+  `).all(workspaceId) as Array<{
+    id: number
+    title: string
+    status: string
+    assigned_to: string | null
+    priority: string
+    updated_at: number
+  }>
+
+  const approvalQueue = approvalQueueRows.map((task) => {
+    const metadata = db.prepare(`
+      SELECT metadata FROM tasks
+      WHERE id = ? AND workspace_id = ?
+      LIMIT 1
+    `).get(task.id, workspaceId) as { metadata?: string } | undefined
+    let parsedMetadata: Record<string, unknown> = {}
+    try {
+      parsedMetadata = metadata?.metadata ? JSON.parse(metadata.metadata) : {}
+    } catch {
+      parsedMetadata = {}
+    }
+    return {
+      ...task,
+      aegisApproved: hasAegisApproval(db, task.id, workspaceId),
+      disposition: String(parsedMetadata.disposition || ''),
+      executionMode: String(parsedMetadata.execution_mode || ''),
+    }
+  })
+
   const appFinishQueue = db.prepare(`
     SELECT id, title, status, assigned_to, priority, updated_at
     FROM tasks
@@ -220,9 +279,10 @@ function loadTaskSnapshot(workspaceId: number) {
   return {
     totalActive,
     byStatus,
-    awaitingReview: (byStatus.review || 0) + (byStatus.quality_review || 0),
+    awaitingReview: approvalQueue.length,
     topActive,
     reviewQueue,
+    approvalQueue,
     appFinishQueue,
     appFinishCounts: {
       active: Number(appFinishCounts?.active_count || 0),

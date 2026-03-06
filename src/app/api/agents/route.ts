@@ -9,6 +9,7 @@ import { mutationLimiter } from '@/lib/rate-limit';
 import { logger } from '@/lib/logger';
 import { validateBody, createAgentSchema } from '@/lib/validation';
 import { syncAgentSessionLinks } from '@/lib/agent-session-link';
+import { getAgentLiveStatuses } from '@/lib/sessions';
 
 /**
  * GET /api/agents - List all agents with optional filtering
@@ -23,6 +24,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const workspaceId = auth.user.workspace_id ?? 1;
     syncAgentSessionLinks(workspaceId)
+    const liveStatuses = getAgentLiveStatuses()
     
     // Parse query parameters
     const status = searchParams.get('status');
@@ -69,9 +71,14 @@ export async function GET(request: NextRequest) {
 
     const agentsWithStats = agentsWithParsedData.map(agent => {
       const taskStats = taskCountStmt.get(agent.name, workspaceId) as any;
+      const live = liveStatuses.get(agent.name) || liveStatuses.get(agent.name.toLowerCase())
+      const resolvedStatus = live ? (live.status === 'active' ? 'busy' : live.status) : agent.status
+      const resolvedLastSeen = live ? Math.floor(live.lastActivity / 1000) : agent.last_seen
 
       return {
         ...agent,
+        status: resolvedStatus,
+        last_seen: resolvedLastSeen,
         taskStats: {
           total: taskStats.total || 0,
           assigned: taskStats.assigned || 0,

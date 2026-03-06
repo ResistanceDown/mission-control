@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getDatabase, Activity } from '@/lib/db';
 import { requireRole } from '@/lib/auth';
 import { logger } from '@/lib/logger';
-import { getAllGatewaySessions } from '@/lib/sessions';
+import { getAllGatewaySessions, getAgentLiveStatuses } from '@/lib/sessions';
 import { config } from '@/lib/config';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -65,6 +65,7 @@ async function handleActivitiesRequest(request: NextRequest, workspaceId: number
   try {
     const db = getDatabase();
     const { searchParams } = new URL(request.url);
+    const liveAgentStatuses = getAgentLiveStatuses();
     
     // Parse query parameters
     const type = searchParams.get('type');
@@ -130,7 +131,13 @@ async function handleActivitiesRequest(request: NextRequest, workspaceId: number
           case 'agent': {
             const agent = agentDetailStmt.get(activity.entity_id, workspaceId) as any;
             if (agent) {
-              entityDetails = { type: 'agent', ...agent };
+              const live = liveAgentStatuses.get(agent.name) || liveAgentStatuses.get(String(agent.name).toLowerCase())
+              entityDetails = {
+                type: 'agent',
+                ...agent,
+                status: live ? (live.status === 'active' ? 'busy' : live.status) : agent.status,
+                last_seen: live ? Math.floor(live.lastActivity / 1000) : agent.last_seen,
+              };
             }
             break;
           }

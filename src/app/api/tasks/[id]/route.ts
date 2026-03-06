@@ -314,6 +314,45 @@ export async function PUT(
     if (isHabiTask({ assigned_to: effectiveAssignedTo })) {
       ensureHabiTaskSubscriptions(taskId, workspaceId, effectiveAssignedTo, auth.user.username)
     }
+
+    const shouldDispatchExecutionStart =
+      status === 'in_progress' &&
+      currentTask.status === 'assigned' &&
+      isHabiTask({ assigned_to: effectiveAssignedTo }) &&
+      Boolean(effectiveAssignedTo)
+
+    if (shouldDispatchExecutionStart) {
+      const dispatch = await dispatchTaskAssignment({
+        workspaceId,
+        actor: auth.user.username,
+        assignee: String(effectiveAssignedTo),
+        taskId,
+        title: title || currentTask.title,
+        priority: String(priority || currentTask.priority),
+        status: 'in_progress',
+      })
+      if (!dispatch.delivered) {
+        logger.warn(
+          { taskId, assignee: effectiveAssignedTo, reason: dispatch.reason || 'unknown' },
+          'Task moved to in_progress but execution-start dispatch was not delivered'
+        )
+      } else {
+        db_helpers.logActivity(
+          'task_execution_started',
+          'task',
+          taskId,
+          auth.user.username,
+          `Execution start dispatched to ${effectiveAssignedTo}`,
+          {
+            assignee: effectiveAssignedTo,
+            previous_status: currentTask.status,
+            next_status: status,
+            session_key: dispatch.sessionKey || null,
+          },
+          workspaceId
+        )
+      }
+    }
     
     if (title && title !== currentTask.title) {
       changes.push('title updated');

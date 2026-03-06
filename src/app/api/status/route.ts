@@ -193,6 +193,7 @@ async function getSystemStatus(workspaceId: number) {
     memory: { total: 0, used: 0, available: 0 },
     disk: { total: 0, used: 0, available: 0 },
     sessions: { total: 0, active: 0 },
+    agents: { total: 0, online: 0, byStatus: {} as Record<string, number> },
     processes: []
   }
 
@@ -289,15 +290,40 @@ async function getSystemStatus(workspaceId: number) {
   try {
     // Read sessions directly from agent session stores on disk
     const gatewaySessions = getAllGatewaySessions()
+    const liveStatuses = getAgentLiveStatuses()
     status.sessions = {
       total: gatewaySessions.length,
       active: gatewaySessions.filter((s) => s.active).length,
     }
 
+    try {
+      const db = getDatabase()
+      const agentRows = db.prepare('SELECT name, status FROM agents WHERE workspace_id = ?').all(workspaceId) as Array<{ name: string; status: string }>
+      const totalAgents = agentRows.length
+      const byStatus: Record<string, number> = {}
+      let online = 0
+      for (const agent of agentRows) {
+        const live =
+          liveStatuses.get(agent.name) ||
+          liveStatuses.get(String(agent.name).toLowerCase())
+        const resolved = live
+          ? (live.status === 'active' ? 'busy' : live.status)
+          : (agent.status || 'offline')
+        byStatus[resolved] = (byStatus[resolved] || 0) + 1
+        if (resolved === 'busy' || resolved === 'idle') online += 1
+      }
+      status.agents = {
+        total: totalAgents,
+        online,
+        byStatus,
+      }
+    } catch (dbErr) {
+      logger.error({ err: dbErr }, 'Error computing live agent counts')
+    }
+
     // Sync agent statuses in DB from live session data
     try {
       const db = getDatabase()
-      const liveStatuses = getAgentLiveStatuses()
       const now = Math.floor(Date.now() / 1000)
       // Match by: exact name, lowercase, or normalized (spaces→hyphens)
       const updateStmt = db.prepare(
