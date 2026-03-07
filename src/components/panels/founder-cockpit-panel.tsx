@@ -43,7 +43,38 @@ interface FounderApiResponse {
     researchBriefPath: string | null
     draftPackPath: string | null
     scorecardPath: string | null
+    researchGeneratedAt?: string | null
+    draftPackGeneratedAt?: string | null
+    externalStatus: string
     researchSignals: string[]
+    strategy: {
+      primaryGoal: string
+      contentMix: string[]
+      engagementTactics: string[]
+      editorialBias: string[]
+      followerGrowthLoop: string[]
+      targetAccountStrategy: string[]
+      whyThisWeek: string[]
+    } | null
+    engagementTargets: {
+      quoteTargets: Array<{ clusterLabel: string; why: string; url: string; text: string; author: string; likes: number; replies: number; followers: number }>
+      replyTargets: Array<{ clusterLabel: string; why: string; url: string; text: string; author: string; likes: number; replies: number; followers: number }>
+    }
+    trendClusters: Array<{
+      id: string
+      label: string
+      confidence: string
+      tweetCount: number
+      repeatedPains: string[]
+      repeatedPhrases: string[]
+      conversationThemes: string[]
+      representativeExample: string | null
+      contrarianTake: string | null
+      fatigueSignal: string | null
+      sampleTweets: string[]
+      whyItMatters: string
+    }>
+    sourceSamples: string[]
     draftCandidates: Array<{
       id: string
       pillar: string
@@ -53,7 +84,47 @@ interface FounderApiResponse {
       text: string
       status: string
       approval: string
+      source_type?: string
+      distribution_type?: string
+      cluster_id?: string | null
+      why_now?: string
+      brand_fit?: string
+      supporting_signals?: string[]
+      follower_growth_score?: number
+      brand_building_score?: number
+      selection_reason?: string
+      source_tweet?: {
+        id?: string
+        text?: string
+        url?: string | null
+      } | null
     }>
+    recommendations?: {
+      bestForFollowerGrowth: string | null
+      bestForBrandBuilding: string | null
+      bestOriginalPost: string | null
+    } | null
+    approvedPosts: Array<{
+      id: string
+      text: string
+      pillar: string
+      angle: string
+      status: string
+      approvedAtPt: string
+      tweetId?: string
+      tweetUrl?: string | null
+    }>
+    resultsSummary?: {
+      postedCount: number
+      winningPillars: string[]
+      strategyNotes: string[]
+      topPosts: Array<{
+        id: string
+        pillar: string
+        tweetUrl: string | null
+        engagementScore: number
+      }>
+    } | null
     scorecard: {
       week?: string
       posts_planned?: number
@@ -306,6 +377,41 @@ export function FounderSnapshotCard() {
   )
 }
 
+
+function GrowthRecommendationCard({
+  title,
+  description,
+  draftId,
+  drafts,
+}: {
+  title: string
+  description: string
+  draftId: string | null
+  drafts: FounderApiResponse['growth']['draftCandidates']
+}) {
+  const draft = draftId ? drafts.find((item) => item.id === draftId) : null
+
+  return (
+    <div className="rounded-lg border border-cyan-500/15 bg-black/15 p-3">
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{title}</div>
+      <div className="mt-1 text-xs text-muted-foreground">{description}</div>
+      {draft ? (
+        <>
+          <div className="mt-3 text-sm font-medium text-foreground">{draft.pillar}: {draft.angle}</div>
+          <div className="mt-1 flex flex-wrap gap-2 text-[11px] text-muted-foreground">
+            {draft.distribution_type ? <span className="rounded-full border border-white/10 px-2 py-0.5">{draft.distribution_type}</span> : null}
+            {typeof draft.follower_growth_score === 'number' ? <span className="rounded-full border border-white/10 px-2 py-0.5">growth {draft.follower_growth_score}</span> : null}
+            {typeof draft.brand_building_score === 'number' ? <span className="rounded-full border border-white/10 px-2 py-0.5">brand {draft.brand_building_score}</span> : null}
+          </div>
+          {draft.selection_reason ? <div className="mt-2 text-xs text-cyan-100/80">{draft.selection_reason}</div> : null}
+        </>
+      ) : (
+        <div className="mt-3 text-sm text-muted-foreground">No candidate selected yet.</div>
+      )}
+    </div>
+  )
+}
+
 export function FounderCockpitPanel() {
   const navigateToPanel = useNavigateToPanel()
   const { data, loading, reload } = useFounderData()
@@ -327,7 +433,6 @@ export function FounderCockpitPanel() {
   const [lastSavedSignal, setLastSavedSignal] = useState<string | null>(null)
   const [selectedTask, setSelectedTask] = useState<FounderTaskDetail | null>(null)
   const [taskDetailState, setTaskDetailState] = useState<{ status: 'idle' | 'loading' | 'error'; message?: string }>({ status: 'idle' })
-  const [growthActionState, setGrowthActionState] = useState<{ status: 'idle' | 'saving' | 'error' | 'saved'; message?: string }>({ status: 'idle' })
 
   if (loading) {
     return <div className="panel"><div className="panel-body"><div className="h-36 rounded-lg shimmer" /></div></div>
@@ -481,33 +586,8 @@ export function FounderCockpitPanel() {
     }
   }
 
-  async function runGrowthAction(action: 'refresh_research' | 'generate_drafts' | 'approve_draft' | 'reject_draft' | 'reset_to_research', draftId?: string) {
-    const growthWeek = data?.growth?.week ?? null
-    setGrowthActionState({ status: 'saving' })
-    try {
-      const response = await fetch('/api/founder/growth', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action, draftId, week: growthWeek }),
-      })
-      const payload = await response.json().catch(() => ({}))
-      if (!response.ok) {
-        setGrowthActionState({ status: 'error', message: payload.error || 'Growth update failed.' })
-        return
-      }
-      await reload()
-      const messageMap: Record<string, string> = {
-        refresh_research: 'Research refreshed.',
-        generate_drafts: 'Draft candidates generated.',
-        approve_draft: 'Draft approved.',
-        reject_draft: 'Draft rejected.',
-        reset_to_research: 'Drafts cleared. Growth is back to research-first state.',
-      }
-      setGrowthActionState({ status: 'saved', message: messageMap[action] || 'Growth updated.' })
-    } catch {
-      setGrowthActionState({ status: 'error', message: 'Growth update failed.' })
-    }
-  }
+
+
 
   return (
     <div className="space-y-4 p-5">
@@ -908,102 +988,110 @@ export function FounderCockpitPanel() {
               <div className="rounded-xl border border-cyan-500/20 bg-gradient-to-br from-cyan-500/8 via-black/15 to-black/10 p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <div className="text-sm font-semibold text-foreground">Growth Review</div>
+                    <div className="text-sm font-semibold text-foreground">Growth</div>
                     <div className="mt-1 text-xs text-muted-foreground">
-                      {data.growth.week ? `${data.growth.week} research-backed draft pack` : 'No growth pack generated yet.'}
+                      {data.growth.week ? `${data.growth.week} research review • ${data.growth.externalStatus}` : 'No growth pack generated yet.'}
                     </div>
                   </div>
-                  <div className="flex flex-wrap justify-end gap-2">
-                    <button
-                      onClick={() => void runGrowthAction('refresh_research')}
-                      disabled={growthActionState.status === 'saving'}
-                      className="rounded-lg border border-cyan-500/20 bg-black/15 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2 disabled:opacity-60"
-                    >
-                      Refresh Research
-                    </button>
-                    {data.growth.draftCandidates.length ? (
-                      <button
-                        onClick={() => void runGrowthAction('reset_to_research')}
-                        disabled={growthActionState.status === 'saving'}
-                        className="rounded-lg border border-amber-500/20 bg-black/15 px-3 py-2 text-xs font-medium text-amber-200 transition-smooth hover:bg-surface-2 disabled:opacity-60"
-                      >
-                        Clear Drafts
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => void runGrowthAction('generate_drafts')}
-                        disabled={growthActionState.status === 'saving'}
-                        className="rounded-lg bg-cyan-500/15 px-3 py-2 text-xs font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/20 disabled:opacity-60"
-                      >
-                        Generate Drafts
-                      </button>
-                    )}
-                  </div>
+                  <button
+                    onClick={() => navigateToPanel('growth')}
+                    className="rounded-lg bg-cyan-500/15 px-3 py-2 text-xs font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/20"
+                  >
+                    Open Growth Review
+                  </button>
                 </div>
-                <div className="mt-2 flex items-center justify-between gap-3">
-                  <div className="text-xs text-muted-foreground">
-                    {data.growth.week
-                      ? `${data.growth.scorecard?.posts_published ?? 0}/${data.growth.scorecard?.posts_planned ?? 0} posts • ${data.growth.scorecard?.replies_completed ?? 0}/${data.growth.scorecard?.replies_target ?? 0} replies`
-                      : 'No growth week is active yet.'}
-                  </div>
-                  <div className={`text-xs ${growthActionState.status === 'error' ? 'text-rose-300' : 'text-muted-foreground'}`}>
-                    {growthActionState.message || 'Research comes first. Generate drafts only after the brief looks right.'}
-                  </div>
+
+                <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  <Metric label="Drafts" value={data.growth.draftCandidates.length} subtitle="Candidates ready" color="blue" />
+                  <Metric label="Approved" value={data.growth.approvedPosts.length} subtitle="Ready to publish" color="green" />
+                  <Metric label="Quote Targets" value={data.growth.engagementTargets.quoteTargets.length} subtitle="Credible sources" color="purple" />
+                  <Metric label="Reply Targets" value={data.growth.engagementTargets.replyTargets.length} subtitle="Live conversations" color="amber" />
                 </div>
+
+                <div className="mt-4 grid gap-3 xl:grid-cols-3">
+                  <GrowthRecommendationCard
+                    title="Best for follower growth"
+                    description="Best candidate if the goal is reach and profile discovery."
+                    draftId={data.growth.recommendations?.bestForFollowerGrowth || null}
+                    drafts={data.growth.draftCandidates}
+                  />
+                  <GrowthRecommendationCard
+                    title="Best for brand building"
+                    description="Best candidate if the goal is sharper positioning."
+                    draftId={data.growth.recommendations?.bestForBrandBuilding || null}
+                    drafts={data.growth.draftCandidates}
+                  />
+                  <GrowthRecommendationCard
+                    title="Best original post"
+                    description="Best standalone post if you do not want to reply or quote first."
+                    draftId={data.growth.recommendations?.bestOriginalPost || null}
+                    drafts={data.growth.draftCandidates}
+                  />
+                </div>
+
                 <div className="mt-4 grid gap-3 xl:grid-cols-[0.9fr_1.1fr]">
-                  <div className="space-y-3">
-                    <div className="rounded-lg border border-cyan-500/15 bg-black/15 px-3 py-3">
-                      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Research signals</div>
-                      <div className="mt-2 space-y-2 text-sm text-foreground">
-                        {data.growth.researchSignals.length ? data.growth.researchSignals.map((signal, index) => (
-                          <div key={`growth-signal-${index}`} className="flex gap-2">
-                            <span className="text-primary">•</span>
-                            <span>{signal}</span>
-                          </div>
-                        )) : <div className="text-muted-foreground">No research signals captured yet.</div>}
-                      </div>
-                    </div>
-                    <div className="rounded-lg border border-cyan-500/15 bg-black/15 px-3 py-3">
-                      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Current week status</div>
-                      <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                        <Metric label="Posts" value={`${data.growth.scorecard?.posts_published ?? 0}/${data.growth.scorecard?.posts_planned ?? 0}`} subtitle="Published / planned" color="blue" />
-                        <Metric label="Replies" value={`${data.growth.scorecard?.replies_completed ?? 0}/${data.growth.scorecard?.replies_target ?? 0}`} subtitle="Completed / target" color="green" />
-                      </div>
-                    </div>
-                  </div>
                   <div className="rounded-lg border border-cyan-500/15 bg-black/15 px-3 py-3">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Draft candidates</div>
-                    <div className="mt-1 text-sm text-foreground">Approve or reject drafts here. Keep the research tight before turning this into a post.</div>
-                    <div className="mt-3 space-y-3">
-                      {data.growth.draftCandidates.length ? data.growth.draftCandidates.map((draft) => (
-                        <div key={draft.id} className="rounded-lg border border-white/10 bg-black/20 p-3">
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="text-sm font-medium text-foreground">{draft.pillar}: {draft.angle}</div>
-                            <span className={`rounded-full border px-2 py-0.5 text-[11px] uppercase tracking-wide ${draft.approval === 'approved' ? 'border-emerald-500/25 text-emerald-300' : draft.approval === 'rejected' ? 'border-rose-500/25 text-rose-300' : 'border-border/70 text-muted-foreground'}`}>
-                              {draft.approval}
-                            </span>
-                          </div>
-                          <div className="mt-1 text-xs text-muted-foreground">Source: {draft.source}</div>
-                          <div className="mt-1 text-xs text-muted-foreground">{draft.rationale}</div>
-                          <div className="mt-2 text-sm text-foreground">{draft.text}</div>
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            <button
-                              onClick={() => void runGrowthAction('approve_draft', draft.id)}
-                              disabled={growthActionState.status === 'saving' || draft.approval === 'approved'}
-                              className="rounded-lg bg-emerald-500/15 px-3 py-2 text-xs font-medium text-emerald-200 transition-smooth hover:bg-emerald-500/20 disabled:opacity-60"
-                            >
-                              Approve Draft
-                            </button>
-                            <button
-                              onClick={() => void runGrowthAction('reject_draft', draft.id)}
-                              disabled={growthActionState.status === 'saving' || draft.approval === 'rejected'}
-                              className="rounded-lg border border-border px-3 py-2 text-xs font-medium text-muted-foreground transition-smooth hover:bg-surface-2 disabled:opacity-60"
-                            >
-                              Reject
-                            </button>
+                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Growth strategy</div>
+                    <div className="mt-2 space-y-2 text-sm text-foreground">
+                      {data.growth.strategy?.primaryGoal ? (
+                        <div className="rounded-lg border border-cyan-500/10 bg-black/20 px-3 py-2">
+                          <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Primary goal</div>
+                          <div className="mt-1">{data.growth.strategy.primaryGoal}</div>
+                        </div>
+                      ) : (
+                        <div className="text-muted-foreground">No explicit growth strategy has been generated yet.</div>
+                      )}
+                      {data.growth.strategy?.targetAccountStrategy?.length ? (
+                        <div>
+                          <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Target account rules</div>
+                          <div className="mt-1 space-y-1 text-xs text-foreground/85">
+                            {data.growth.strategy.targetAccountStrategy.slice(0, 3).map((item, index) => (
+                              <div key={`target-account-rule-${index}`} className="flex gap-2">
+                                <span className="text-cyan-300">•</span>
+                                <span>{item}</span>
+                              </div>
+                            ))}
                           </div>
                         </div>
-                      )) : <div className="text-muted-foreground">Research is ready. Generate a fresh draft pack when you want candidates to review.</div>}
+                      ) : null}
+                      {data.growth.strategy?.followerGrowthLoop?.length ? (
+                        <div>
+                          <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Follower loop</div>
+                          <div className="mt-1 space-y-1 text-xs text-foreground/85">
+                            {data.growth.strategy.followerGrowthLoop.slice(0, 3).map((item, index) => (
+                              <div key={`growth-loop-${index}`} className="flex gap-2">
+                                <span className="text-cyan-300">•</span>
+                                <span>{item}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-cyan-500/15 bg-black/15 px-3 py-3">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Growth snapshot</div>
+                    <div className="mt-2 space-y-2 text-sm text-foreground">
+                      <div className="text-xs text-muted-foreground">
+                        {data.growth.scorecard?.posts_published ?? 0}/{data.growth.scorecard?.posts_planned ?? 0} posts • {data.growth.scorecard?.replies_completed ?? 0}/{data.growth.scorecard?.replies_target ?? 0} replies
+                      </div>
+                      {data.growth.resultsSummary?.postedCount ? (
+                        <div className="space-y-2">
+                          <div className="text-xs text-muted-foreground">{data.growth.resultsSummary.postedCount} published post{data.growth.resultsSummary.postedCount === 1 ? '' : 's'} tracked</div>
+                          {data.growth.resultsSummary.strategyNotes.slice(0, 2).map((note, index) => (
+                            <div key={`strategy-note-${index}`} className="flex gap-2 text-sm">
+                              <span className="text-primary">•</span>
+                              <span>{note}</span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="text-muted-foreground">No published post results yet. Review drafts in the dedicated Growth page and publish one to start the learning loop.</div>
+                      )}
+                      <div className="rounded-lg border border-cyan-500/10 bg-black/20 px-3 py-2 text-xs text-muted-foreground">
+                        Review research, sources, drafts, approvals, and post results on the Growth page. Founder stays focused on company decisions.
+                      </div>
                     </div>
                   </div>
                 </div>

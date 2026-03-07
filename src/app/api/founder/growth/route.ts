@@ -57,7 +57,7 @@ async function writeJson(filePath: string, value: unknown) {
   await fs.writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8')
 }
 
-function buildDraftQueueMarkdown(weekId: string, researchPath: string, drafts: Array<Record<string, string>>) {
+function buildDraftQueueMarkdown(weekId: string, researchPath: string, drafts: Array<Record<string, unknown>>) {
   const lines = [
     '# M92 Draft Queue',
     '',
@@ -68,13 +68,13 @@ function buildDraftQueueMarkdown(weekId: string, researchPath: string, drafts: A
     `- ${researchPath}`,
     '',
     '## Draft Slots',
-    '| Slot | Pillar | Angle | Source | Status | Approval |',
-    '| --- | --- | --- | --- | --- | --- |',
+    '| Slot | Pillar | Angle | Source | Why now | Status | Approval |',
+    '| --- | --- | --- | --- | --- | --- | --- |',
   ]
 
   drafts.forEach((draft, index) => {
     lines.push(
-      `| ${index + 1} | ${draft.pillar || ''} | ${draft.angle || ''} | ${draft.source || ''} | ${draft.status || ''} | ${draft.approval || ''} |`,
+      `| ${index + 1} | ${String(draft.pillar || '')} | ${String(draft.angle || '')} | ${String(draft.source || '')} | ${String(draft.why_now || '')} | ${String(draft.status || '')} | ${String(draft.approval || '')} |`,
     )
   })
 
@@ -87,8 +87,9 @@ function buildDraftQueueMarkdown(weekId: string, researchPath: string, drafts: A
     lines.push('- Research is ready. Generate a draft pack when you want reviewable candidates.')
   } else {
     drafts.forEach((draft, index) => {
-      lines.push(`${index + 1}. ${draft.pillar || 'Draft'}:`)
-      lines.push(`   - ${draft.text || ''}`)
+      lines.push(`${index + 1}. ${String(draft.pillar || 'Draft')}:`)
+      lines.push(`   - ${String(draft.text || '')}`)
+      lines.push(`   - Source basis: ${String(draft.source_type || 'unknown')}${draft.cluster_id ? ` / ${String(draft.cluster_id)}` : ''}`)
     })
   }
 
@@ -109,9 +110,10 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json() as {
-      action?: 'refresh_research' | 'generate_drafts' | 'approve_draft' | 'reject_draft' | 'reset_to_research'
+      action?: 'refresh_research' | 'generate_drafts' | 'approve_draft' | 'reject_draft' | 'archive_draft' | 'reset_to_research'
       week?: string
       draftId?: string
+      feedback?: string
     }
 
     const week = body.week || await findLatestGrowthWeek(GROWTH_WEEKS_ROOT)
@@ -125,10 +127,12 @@ export async function POST(request: NextRequest) {
     const draftPackPath = path.join(weekDir, 'draft-pack.md')
     const draftQueuePath = path.join(weekDir, 'draft-queue.md')
     const approvedPostsPath = path.join(weekDir, 'approved-posts.json')
+    const draftReviewLogPath = path.join(weekDir, 'draft-review-log.json')
 
     switch (body.action) {
       case 'refresh_research': {
         await runGrowthCommand('growth:m92:week-open', week)
+        await runGrowthCommand('growth:m92:results-sync', week)
         await runGrowthCommand('growth:m92:research-brief', week)
         return NextResponse.json({ status: 'ok', action: 'refresh_research', week })
       }
@@ -140,6 +144,7 @@ export async function POST(request: NextRequest) {
         await runGrowthCommand('growth:m92:week-open', week)
         await runGrowthCommand('growth:m92:research-brief', week)
         await writeJson(approvedPostsPath, [])
+        await writeJson(draftReviewLogPath, [])
         await fs.rm(draftPackJsonPath, { force: true })
         await fs.rm(draftPackPath, { force: true })
         await fs.writeFile(
@@ -150,7 +155,8 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ status: 'ok', action: 'reset_to_research', week })
       }
       case 'approve_draft':
-      case 'reject_draft': {
+      case 'reject_draft':
+      case 'archive_draft': {
         const draftId = String(body.draftId || '').trim()
         if (!draftId) {
           return NextResponse.json({ error: 'draftId is required.' }, { status: 400 })
@@ -160,7 +166,7 @@ export async function POST(request: NextRequest) {
           week?: string
           generatedAt?: string
           researchBriefPath?: string
-          drafts?: Array<Record<string, string>>
+          drafts?: Array<Record<string, unknown>>
         }>(draftPackJsonPath)
 
         if (!draftPack?.drafts?.length) {
@@ -172,24 +178,60 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ error: 'Draft not found.' }, { status: 404 })
         }
 
-        const nextApproval = body.action === 'approve_draft' ? 'approved' : 'rejected'
+        const nextApproval =
+          body.action === 'approve_draft'
+            ? 'approved'
+            : body.action === 'archive_draft'
+              ? 'archived'
+              : 'rejected'
+        const feedback = String(body.feedback || '').trim()
         target.approval = nextApproval
         target.status = nextApproval
         target.reviewedAtPt = nowPt()
+        if (feedback) {
+          target.feedback = feedback
+        }
+        const reviewLog = (await readJsonOrNull<Array<Record<string, string>>>(draftReviewLogPath)) || []
+        reviewLog.push({
+          id: draftId,
+          signature: String(target.signature || ''),
+          decision: nextApproval,
+          reviewedAtPt: String(target.reviewedAtPt || ''),
+          angle: String(target.angle || ''),
+          sourceType: String(target.source_type || ''),
+          archetype: String(target.pillar || ''),
+          feedback,
+        })
+        await writeJson(draftReviewLogPath, reviewLog)
 
         if (body.action === 'approve_draft') {
           const approvedPosts = (await readJsonOrNull<Array<Record<string, string>>>(approvedPostsPath)) || []
           if (!approvedPosts.some((entry) => entry.id === draftId)) {
+            const sourceTweet =
+              target.source_tweet && typeof target.source_tweet === 'object'
+                ? target.source_tweet as Record<string, unknown>
+                : null
             approvedPosts.push({
               id: draftId,
               text: String(target.text || ''),
               pillar: String(target.pillar || ''),
               angle: String(target.angle || ''),
+              source_type: String(target.source_type || ''),
+              cluster_id: String(target.cluster_id || ''),
+              source_tweet_url: String(sourceTweet?.url || ''),
+              source_tweet_text: String(sourceTweet?.text || ''),
               status: 'approved',
-              approved_at_pt: target.reviewedAtPt,
+              approved_at_pt: String(target.reviewedAtPt || ''),
+              feedback,
             })
           }
           await writeJson(approvedPostsPath, approvedPosts)
+        } else {
+          const approvedPosts = (await readJsonOrNull<Array<Record<string, string>>>(approvedPostsPath)) || []
+          const filtered = approvedPosts.filter((entry) => entry.id !== draftId)
+          if (filtered.length !== approvedPosts.length) {
+            await writeJson(approvedPostsPath, filtered)
+          }
         }
 
         await writeJson(draftPackJsonPath, draftPack)
