@@ -11,6 +11,19 @@ const execFileAsync = promisify(execFile)
 const HABI_ROOT = process.env.HABI_ROOT || '/Users/kokoro/Coding/Habi'
 const GROWTH_WEEKS_ROOT = path.join(HABI_ROOT, 'output', 'growth', 'weeks')
 
+type GrowthAction =
+  | 'refresh_research'
+  | 'generate_drafts'
+  | 'refresh_research_and_generate'
+  | 'approve_draft'
+  | 'reject_draft'
+  | 'archive_draft'
+  | 'reset_to_research'
+  | 'clear_current_drafts'
+  | 'schedule_draft'
+  | 'mark_published'
+  | 'set_account_target_state'
+
 async function findLatestGrowthWeek(root: string): Promise<string | null> {
   let entries: Array<{ name: string; isDirectory(): boolean }> = []
   try {
@@ -55,6 +68,47 @@ async function readJsonOrNull<T>(filePath: string): Promise<T | null> {
 async function writeJson(filePath: string, value: unknown) {
   await fs.mkdir(path.dirname(filePath), { recursive: true })
   await fs.writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8')
+}
+
+async function updateDraftPackStatus(
+  draftPackJsonPath: string,
+  draftId: string,
+  patch: Record<string, unknown>,
+) {
+  const draftPack = await readJsonOrNull<Record<string, any>>(draftPackJsonPath)
+  if (!draftPack || !Array.isArray(draftPack.drafts)) return
+  const target = draftPack.drafts.find((draft: Record<string, any>) => String(draft?.id || '').trim() === draftId)
+  if (!target) return
+  Object.assign(target, patch)
+  await writeJson(draftPackJsonPath, draftPack)
+}
+
+async function removeDraftFromPack(
+  draftPackJsonPath: string,
+  draftId: string,
+) {
+  const draftPack = await readJsonOrNull<Record<string, any>>(draftPackJsonPath)
+  if (!draftPack || !Array.isArray(draftPack.drafts)) return []
+  const nextDrafts = draftPack.drafts.filter((draft: Record<string, any>) => String(draft?.id || '').trim() !== draftId)
+  draftPack.drafts = nextDrafts
+  await writeJson(draftPackJsonPath, draftPack)
+  return nextDrafts
+}
+
+async function sanitizeDraftPack(
+  draftPackJsonPath: string,
+) {
+  const draftPack = await readJsonOrNull<Record<string, any>>(draftPackJsonPath)
+  if (!draftPack || !Array.isArray(draftPack.drafts)) return []
+  const nextDrafts = draftPack.drafts.filter((draft: Record<string, any>) => {
+    const status = String(draft?.status || '').trim().toLowerCase()
+    const approval = String(draft?.approval || '').trim().toLowerCase()
+    return !['approved', 'scheduled', 'published', 'archived', 'rejected'].includes(status)
+      && !['approved', 'scheduled', 'published', 'archived', 'rejected'].includes(approval)
+  })
+  draftPack.drafts = nextDrafts
+  await writeJson(draftPackJsonPath, draftPack)
+  return nextDrafts
 }
 
 function buildDraftQueueMarkdown(weekId: string, researchPath: string, drafts: Array<Record<string, unknown>>) {
@@ -104,22 +158,263 @@ async function runGrowthCommand(script: string, week: string) {
   return { stdout, stderr }
 }
 
+function toUsername(value: unknown) {
+  return String(value || '').replace(/^@/, '').trim().toLowerCase()
+}
+
+function normalizeFeedbackTags(feedback: string) {
+  return feedback
+    .split('|')
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .slice(0, 8)
+}
+
+function normalizeFeedbackText(value: unknown) {
+  return String(value || '').toLowerCase().replace(/\s+/g, ' ').trim()
+}
+
+function defaultAccountStateNote(accountState: string, username: string) {
+  switch (accountState) {
+    case 'prioritize':
+      return `Prioritize @${username} for higher-quality reply or quote opportunities this week.`
+    case 'mute':
+      return `Mute @${username} from top recommendations until the source quality improves.`
+    case 'engage_this_week':
+      return `Look for a credible opportunity to engage with @${username} this week.`
+    case 'watch':
+    default:
+      return `Watch @${username} for future reply or quote opportunities.`
+  }
+}
+
+function ensureArray<T>(input: unknown): T[] {
+  return Array.isArray(input) ? input as T[] : []
+}
+
+function updateSourceMemoryFromReview(sourceMemory: Record<string, any>, reviewEntry: Record<string, any>) {
+  const next = { ...sourceMemory }
+  const rejectedSources = new Set(ensureArray<string>(next.rejectedSources))
+  const rejectedClusters = new Set(ensureArray<string>(next.rejectedClusters))
+  const rejectedFingerprints = new Set(ensureArray<string>(next.rejectedFingerprints))
+  const rejectedPhrases = new Set(ensureArray<string>(next.rejectedPhrases))
+  const rejectedTerms = new Set(ensureArray<string>(next.rejectedTerms))
+  const preferredArchetypes = { ...(next.preferredArchetypes || {}) }
+  const negativeStyleMarkers = new Set(ensureArray<string>(next.negativeStyleMarkers))
+  const positiveStyleMarkers = new Set(ensureArray<string>(next.positiveStyleMarkers))
+  const recentFeedback = ensureArray<Record<string, any>>(next.recentFeedback)
+
+  const sourceUrl = String(reviewEntry.sourceTweetUrl || '').trim()
+  const clusterId = String(reviewEntry.clusterId || '').trim()
+  const archetype = String(reviewEntry.archetype || '').trim() || 'unknown'
+  const decision = String(reviewEntry.decision || '').trim()
+  const feedback = String(reviewEntry.feedback || '').trim()
+  const feedbackTags = normalizeFeedbackTags(feedback)
+  const rejectedTokenStopwords = new Set([
+    'generic',
+    'source',
+    'product',
+    'producty',
+    'abstract',
+    'wrong',
+    'audience',
+    'prefer',
+    'target',
+    'founder',
+    'theater',
+    'need',
+    'needs',
+    'sharper',
+    'external',
+    'hook',
+    'reply',
+    'quote',
+    'rewrite',
+    'direction',
+    'good',
+    'weak',
+    'slop',
+  ])
+  const fingerprint = [
+    clusterId.toLowerCase(),
+    sourceUrl.toLowerCase(),
+    archetype.toLowerCase(),
+    normalizeFeedbackText(reviewEntry.angle || reviewEntry.title || ''),
+  ].join('::')
+
+  if (decision === 'rejected' || decision === 'archived') {
+    if (sourceUrl) rejectedSources.add(sourceUrl)
+    if (clusterId && !sourceUrl) rejectedClusters.add(clusterId)
+    if (fingerprint) rejectedFingerprints.add(fingerprint)
+    feedbackTags.forEach((tag) => rejectedPhrases.add(tag.toLowerCase()))
+    for (const token of normalizeFeedbackText(feedback).split(/[^a-z0-9]+/).filter((value) => value.length >= 5 && !rejectedTokenStopwords.has(value))) {
+      rejectedTerms.add(token)
+    }
+    preferredArchetypes[archetype] = {
+      ...(preferredArchetypes[archetype] || {}),
+      discouraged: Number(preferredArchetypes[archetype]?.discouraged || 0) + 1,
+    }
+  }
+
+  if (decision === 'approved') {
+    if (sourceUrl) rejectedSources.delete(sourceUrl)
+    if (clusterId) rejectedClusters.delete(clusterId)
+    if (fingerprint) rejectedFingerprints.delete(fingerprint)
+    for (const token of normalizeFeedbackText(feedback).split(/[^a-z0-9]+/).filter((value) => value.length >= 5 && !rejectedTokenStopwords.has(value))) {
+      rejectedTerms.delete(token)
+    }
+    preferredArchetypes[archetype] = {
+      ...(preferredArchetypes[archetype] || {}),
+      encouraged: Number(preferredArchetypes[archetype]?.encouraged || 0) + 1,
+    }
+  }
+
+  for (const tag of feedbackTags) {
+    const lower = tag.toLowerCase()
+    if (['too generic', 'weak source', 'too product-y', 'wrong audience', 'too abstract', 'too founder-theater'].includes(lower)) {
+      negativeStyleMarkers.add(lower)
+    }
+    if (lower.includes('good direction')) {
+      positiveStyleMarkers.add(lower)
+    }
+  }
+
+  recentFeedback.push({
+    reviewedAt: new Date().toISOString(),
+    decision,
+    feedback,
+    archetype,
+    sourceUrl,
+    clusterId,
+  })
+
+  next.updatedAt = new Date().toISOString()
+  next.rejectedSources = [...rejectedSources].slice(-50)
+  next.rejectedClusters = [...rejectedClusters].slice(-50)
+  next.rejectedFingerprints = [...rejectedFingerprints].slice(-80)
+  next.rejectedPhrases = [...rejectedPhrases].slice(-80)
+  next.rejectedTerms = [...rejectedTerms].slice(-80)
+  next.preferredArchetypes = preferredArchetypes
+  next.negativeStyleMarkers = [...negativeStyleMarkers].slice(-30)
+  next.positiveStyleMarkers = [...positiveStyleMarkers].slice(-20)
+  next.recentFeedback = recentFeedback.slice(-40)
+  return next
+}
+
+function appendPublishLog(existing: Array<Record<string, any>>, entry: Record<string, any>) {
+  const next = Array.isArray(existing) ? [...existing] : []
+  next.push(entry)
+  return next.slice(-100)
+}
+
+function buildCandidateIdentity(record: Record<string, any> | null | undefined) {
+  if (!record || typeof record !== 'object') {
+    return {
+      signature: '',
+      sourceTweetUrl: '',
+      clusterId: '',
+      distributionType: '',
+      sourceType: '',
+      text: '',
+    }
+  }
+
+  return {
+    signature: String(record.signature || '').trim(),
+    sourceTweetUrl: String(
+      record.sourceTweetUrl ||
+      record.source_tweet_url ||
+      record.source_url ||
+      record.sourceTweet?.url ||
+      record.source_tweet?.url ||
+      '',
+    ).trim(),
+    clusterId: String(record.clusterId || record.cluster_id || '').trim(),
+    distributionType: String(record.distributionType || record.distribution_type || '').trim(),
+    sourceType: String(record.sourceType || record.source_type || '').trim(),
+    text: String(record.text || '').trim(),
+  }
+}
+
+function extractTweetIdFromUrl(url: unknown) {
+  const normalized = String(url || '').trim()
+  if (!normalized) return ''
+  const match = normalized.match(/status\/(\d+)/)
+  return match?.[1] ? match[1] : ''
+}
+
+function shouldReuseApprovalState(
+  existing: Record<string, any> | undefined,
+  target: Record<string, any>,
+  sourceTweet: Record<string, unknown> | null,
+) {
+  if (!existing) return false
+
+  const existingIdentity = buildCandidateIdentity(existing)
+  const targetIdentity = buildCandidateIdentity({
+    signature: target.signature,
+    source_tweet_url: sourceTweet?.url,
+    cluster_id: target.cluster_id,
+    distribution_type: target.distribution_type,
+    source_type: target.source_type,
+    text: target.text,
+  })
+
+  if (existingIdentity.signature && targetIdentity.signature) {
+    return existingIdentity.signature === targetIdentity.signature
+  }
+
+  if (
+    existingIdentity.sourceTweetUrl &&
+    targetIdentity.sourceTweetUrl &&
+    existingIdentity.distributionType &&
+    targetIdentity.distributionType
+  ) {
+    return (
+      existingIdentity.sourceTweetUrl === targetIdentity.sourceTweetUrl &&
+      existingIdentity.distributionType === targetIdentity.distributionType
+    )
+  }
+
+  if (
+    existingIdentity.text &&
+    targetIdentity.text &&
+    existingIdentity.clusterId &&
+    targetIdentity.clusterId
+  ) {
+    return (
+      existingIdentity.text === targetIdentity.text &&
+      existingIdentity.clusterId === targetIdentity.clusterId
+    )
+  }
+
+  return false
+}
+
 export async function POST(request: NextRequest) {
   const auth = requireRole(request, 'operator')
   if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status })
 
   try {
     const body = await request.json() as {
-      action?: 'refresh_research' | 'generate_drafts' | 'refresh_research_and_generate' | 'approve_draft' | 'reject_draft' | 'archive_draft' | 'reset_to_research' | 'clear_current_drafts'
+      action?: GrowthAction
       week?: string
       draftId?: string
       feedback?: string
+      scheduledAt?: string
+      scheduleNote?: string
+      scheduleSource?: 'machine_suggested' | 'user_selected'
+      accountUsername?: string
+      accountState?: 'watch' | 'prioritize' | 'mute' | 'engage_this_week'
+      tweetUrl?: string
+      tweetId?: string
     }
 
-    const week = body.week || await findLatestGrowthWeek(GROWTH_WEEKS_ROOT)
-    if (!week) {
+    const resolvedWeek = body.week || await findLatestGrowthWeek(GROWTH_WEEKS_ROOT)
+    if (!resolvedWeek) {
       return NextResponse.json({ error: 'No growth week is available yet.' }, { status: 400 })
     }
+    const week = resolvedWeek
 
     const weekDir = path.join(GROWTH_WEEKS_ROOT, week)
     const draftPackJsonPath = path.join(weekDir, 'draft-pack.json')
@@ -128,15 +423,27 @@ export async function POST(request: NextRequest) {
     const approvedPostsPath = path.join(weekDir, 'approved-posts.json')
     const draftReviewLogPath = path.join(weekDir, 'draft-review-log.json')
     const editorialMemoryPath = path.join(weekDir, 'editorial-memory.json')
+    const sourceMemoryPath = path.join(weekDir, 'source-memory.json')
+    const publishLogPath = path.join(weekDir, 'publish-log.json')
+
+    async function writeDraftQueue(drafts: Array<Record<string, unknown>>) {
+      await fs.writeFile(
+        draftQueuePath,
+        buildDraftQueueMarkdown(week, `output/growth/weeks/${week}/research-brief.md`, drafts),
+        'utf8',
+      )
+    }
 
     switch (body.action) {
       case 'refresh_research': {
+        await sanitizeDraftPack(draftPackJsonPath)
         await runGrowthCommand('growth:m92:week-open', week)
         await runGrowthCommand('growth:m92:results-sync', week)
         await runGrowthCommand('growth:m92:research-brief', week)
         return NextResponse.json({ status: 'ok', action: 'refresh_research', week })
       }
       case 'refresh_research_and_generate': {
+        await sanitizeDraftPack(draftPackJsonPath)
         await runGrowthCommand('growth:m92:week-open', week)
         await runGrowthCommand('growth:m92:results-sync', week)
         await runGrowthCommand('growth:m92:research-brief', week)
@@ -144,6 +451,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ status: 'ok', action: 'refresh_research_and_generate', week })
       }
       case 'generate_drafts': {
+        await sanitizeDraftPack(draftPackJsonPath)
         await runGrowthCommand('growth:m92:draft-pack', week)
         return NextResponse.json({ status: 'ok', action: 'generate_drafts', week })
       }
@@ -151,15 +459,42 @@ export async function POST(request: NextRequest) {
       case 'clear_current_drafts': {
         await runGrowthCommand('growth:m92:week-open', week)
         await runGrowthCommand('growth:m92:research-brief', week)
-        await writeJson(approvedPostsPath, [])
+        const approvedPosts = (await readJsonOrNull<Array<Record<string, any>>>(approvedPostsPath)) || []
+        const retainedPosts = approvedPosts.filter((entry) => {
+          const status = String(entry?.status || '').trim()
+          if (status !== 'scheduled' && status !== 'published') return false
+          const tweetId = String(entry?.tweet_id || '').trim()
+          const tweetUrl = String(entry?.tweet_url || '').trim()
+          return status === 'scheduled' || Boolean(tweetId || tweetUrl)
+        })
+        await writeJson(approvedPostsPath, retainedPosts)
         await fs.rm(draftPackJsonPath, { force: true })
         await fs.rm(draftPackPath, { force: true })
-        await fs.writeFile(
-          draftQueuePath,
-          buildDraftQueueMarkdown(week, `output/growth/weeks/${week}/research-brief.md`, []),
-          'utf8',
-        )
+        await writeDraftQueue([])
         return NextResponse.json({ status: 'ok', action: body.action, week })
+      }
+      case 'set_account_target_state': {
+        const username = toUsername(body.accountUsername)
+        const accountState = String(body.accountState || '').trim()
+        if (!username || !['watch', 'prioritize', 'mute', 'engage_this_week'].includes(accountState)) {
+          return NextResponse.json({ error: 'Valid accountUsername and accountState are required.' }, { status: 400 })
+        }
+        const sourceMemory = (await readJsonOrNull<Record<string, any>>(sourceMemoryPath)) || {}
+        const accounts = sourceMemory.accounts && typeof sourceMemory.accounts === 'object' ? { ...sourceMemory.accounts } : {}
+        const note = String(body.feedback || '').trim() || defaultAccountStateNote(accountState, username)
+        accounts[username] = {
+          ...(accounts[username] || {}),
+          state: accountState,
+          updatedAt: new Date().toISOString(),
+          note,
+        }
+        await writeJson(sourceMemoryPath, {
+          ...sourceMemory,
+          week,
+          updatedAt: new Date().toISOString(),
+          accounts,
+        })
+        return NextResponse.json({ status: 'ok', action: body.action, week, username, accountState })
       }
       case 'approve_draft':
       case 'reject_draft':
@@ -185,23 +520,22 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ error: 'Draft not found.' }, { status: 404 })
         }
 
-        const nextApproval =
-          body.action === 'approve_draft'
-            ? 'approved'
-            : body.action === 'archive_draft'
-              ? 'archived'
-              : 'rejected'
+        const nextApproval = body.action === 'approve_draft'
+          ? 'approved'
+          : body.action === 'archive_draft'
+            ? 'archived'
+            : 'rejected'
         const feedback = String(body.feedback || '').trim()
-        const reviewSourceTweet =
-          target.source_tweet && typeof target.source_tweet === 'object'
-            ? target.source_tweet as Record<string, unknown>
-            : null
+        const reviewSourceTweet = target.source_tweet && typeof target.source_tweet === 'object'
+          ? target.source_tweet as Record<string, unknown>
+          : null
         target.approval = nextApproval
         target.status = nextApproval
         target.reviewedAtPt = nowPt()
         if (feedback) {
           target.feedback = feedback
         }
+
         const reviewLog = (await readJsonOrNull<Array<Record<string, string>>>(draftReviewLogPath)) || []
         const reviewEntry = {
           id: draftId,
@@ -218,15 +552,11 @@ export async function POST(request: NextRequest) {
         reviewLog.push(reviewEntry)
         await writeJson(draftReviewLogPath, reviewLog)
 
-        const existingEditorialMemory = (await readJsonOrNull<Record<string, unknown>>(editorialMemoryPath)) || {}
+        const existingEditorialMemory = (await readJsonOrNull<Record<string, any>>(editorialMemoryPath)) || {}
         const recentFeedback = Array.isArray(existingEditorialMemory.recentFeedback)
-          ? [...(existingEditorialMemory.recentFeedback as Array<Record<string, unknown>>)]
+          ? [...existingEditorialMemory.recentFeedback]
           : []
-        recentFeedback.push({
-          ...reviewEntry,
-          reviewedAt: new Date().toISOString(),
-        })
-        const trimmedFeedback = recentFeedback.slice(-25)
+        recentFeedback.push({ ...reviewEntry, reviewedAt: new Date().toISOString() })
         const archetypeStats = { ...(existingEditorialMemory.archetypeStats as Record<string, { approved?: number; rejected?: number; archived?: number }> || {}) }
         const archetypeKey = String(target.pillar || '').trim() || 'unknown'
         const archetypeState = { ...(archetypeStats[archetypeKey] || {}) }
@@ -238,50 +568,146 @@ export async function POST(request: NextRequest) {
           ...existingEditorialMemory,
           week,
           updatedAt: new Date().toISOString(),
-          recentFeedback: trimmedFeedback,
+          recentFeedback: recentFeedback.slice(-40),
           archetypeStats,
         })
 
+        const existingSourceMemory = (await readJsonOrNull<Record<string, any>>(sourceMemoryPath)) || {}
+        await writeJson(sourceMemoryPath, updateSourceMemoryFromReview(existingSourceMemory, reviewEntry))
+
         if (body.action === 'approve_draft') {
-          const approvedPosts = (await readJsonOrNull<Array<Record<string, string>>>(approvedPostsPath)) || []
-          if (!approvedPosts.some((entry) => entry.id === draftId)) {
-            const sourceTweet =
-              target.source_tweet && typeof target.source_tweet === 'object'
-                ? target.source_tweet as Record<string, unknown>
-                : null
-            approvedPosts.push({
-              id: draftId,
-              text: String(target.text || ''),
-              pillar: String(target.pillar || ''),
-              angle: String(target.angle || ''),
-              source_type: String(target.source_type || ''),
-              distribution_type: String(target.distribution_type || ''),
-              cluster_id: String(target.cluster_id || ''),
-              why_now: String(target.why_now || ''),
-              source_tweet_url: String(sourceTweet?.url || ''),
-              source_tweet_text: String(sourceTweet?.text || ''),
-              status: 'approved',
-              approved_at_pt: String(target.reviewedAtPt || ''),
-              feedback,
-            })
+          const approvedPosts = (await readJsonOrNull<Array<Record<string, any>>>(approvedPostsPath)) || []
+          const sourceTweet = reviewSourceTweet
+          const existing = approvedPosts.find((entry) => entry.id === draftId)
+          const reuseApprovalState = shouldReuseApprovalState(existing, target, sourceTweet)
+          const nextPost = {
+            id: draftId,
+            signature: String(target.signature || ''),
+            text: String(target.text || ''),
+            pillar: String(target.pillar || ''),
+            angle: String(target.angle || ''),
+            source_type: String(target.source_type || ''),
+            distribution_type: String(target.distribution_type || ''),
+            cluster_id: String(target.cluster_id || ''),
+            why_now: String(target.why_now || ''),
+            selection_reason: String(target.selection_reason || ''),
+            feedback_applied: Array.isArray(target.feedback_applied) ? target.feedback_applied : [],
+            changed_since_last_run: String(target.changed_since_last_run || ''),
+            source_tweet_url: String(sourceTweet?.url || ''),
+            source_tweet_text: String(sourceTweet?.text || ''),
+            source_metrics: target.source_metrics || sourceTweet?.public_metrics || {},
+            source_author: String((sourceTweet?.author as Record<string, unknown> | undefined)?.username || ''),
+            status: reuseApprovalState
+              ? existing?.status === 'published'
+                ? 'published'
+                : existing?.status === 'scheduled'
+                  ? 'scheduled'
+                  : 'approved'
+              : 'approved',
+            approved_at_pt: String(target.reviewedAtPt || ''),
+            approval_reason: String(target.selection_reason || ''),
+            follower_growth_score: Number(target.follower_growth_score || 0),
+            brand_building_score: Number(target.brand_building_score || 0),
+            timeliness_score: Number(target.timeliness_score || 0),
+            confidence: String(target.confidence || ''),
+            scheduled_at: reuseApprovalState ? existing?.scheduled_at || null : null,
+            scheduled_at_pt: reuseApprovalState ? existing?.scheduled_at_pt || null : null,
+            schedule_source: reuseApprovalState ? existing?.schedule_source || null : null,
+            schedule_note: reuseApprovalState ? existing?.schedule_note || '' : '',
+            tweet_id: reuseApprovalState ? existing?.tweet_id || '' : '',
+            tweet_url: reuseApprovalState ? existing?.tweet_url || '' : '',
+            feedback,
+          }
+          if (existing) {
+            Object.assign(existing, nextPost)
+          } else {
+            approvedPosts.push(nextPost)
           }
           await writeJson(approvedPostsPath, approvedPosts)
+          const remainingDrafts = await removeDraftFromPack(draftPackJsonPath, draftId)
+          await writeDraftQueue(remainingDrafts)
         } else {
           const approvedPosts = (await readJsonOrNull<Array<Record<string, string>>>(approvedPostsPath)) || []
           const filtered = approvedPosts.filter((entry) => entry.id !== draftId)
           if (filtered.length !== approvedPosts.length) {
             await writeJson(approvedPostsPath, filtered)
           }
+          await updateDraftPackStatus(draftPackJsonPath, draftId, {
+            status: nextApproval,
+            approval: nextApproval,
+            feedback,
+            reviewedAtPt: String(target.reviewedAtPt || ''),
+          })
+          const nextDraftPack = await readJsonOrNull<{ drafts?: Array<Record<string, unknown>> }>(draftPackJsonPath)
+          await writeDraftQueue(Array.isArray(nextDraftPack?.drafts) ? nextDraftPack.drafts : [])
         }
 
-        await writeJson(draftPackJsonPath, draftPack)
-        await fs.writeFile(
-          draftQueuePath,
-          buildDraftQueueMarkdown(week, `output/growth/weeks/${week}/research-brief.md`, draftPack.drafts),
-          'utf8',
-        )
-
         return NextResponse.json({ status: 'ok', action: body.action, week, draftId })
+      }
+      case 'schedule_draft': {
+        const draftId = String(body.draftId || '').trim()
+        const scheduledAt = String(body.scheduledAt || '').trim()
+        if (!draftId || !scheduledAt) {
+          return NextResponse.json({ error: 'draftId and scheduledAt are required.' }, { status: 400 })
+        }
+        const approvedPosts = (await readJsonOrNull<Array<Record<string, any>>>(approvedPostsPath)) || []
+        const target = approvedPosts.find((entry) => entry.id === draftId)
+        if (!target) {
+          return NextResponse.json({ error: 'Approved draft not found.' }, { status: 404 })
+        }
+        target.status = 'scheduled'
+        target.scheduled_at = scheduledAt
+        target.schedule_source = body.scheduleSource === 'machine_suggested' ? 'machine_suggested' : 'user_selected'
+        target.schedule_note = String(body.scheduleNote || '').trim()
+        target.scheduled_at_pt = nowPt()
+        await writeJson(approvedPostsPath, approvedPosts)
+        return NextResponse.json({ status: 'ok', action: body.action, week, draftId, scheduledAt })
+      }
+      case 'mark_published': {
+        const draftId = String(body.draftId || '').trim()
+        if (!draftId) {
+          return NextResponse.json({ error: 'draftId is required.' }, { status: 400 })
+        }
+        const approvedPosts = (await readJsonOrNull<Array<Record<string, any>>>(approvedPostsPath)) || []
+        const target = approvedPosts.find((entry) => entry.id === draftId)
+        if (!target) {
+          return NextResponse.json({ error: 'Approved or scheduled draft not found.' }, { status: 404 })
+        }
+        const candidateTweetUrl = String(body.tweetUrl || target.tweet_url || '').trim()
+        const candidateTweetId = String(body.tweetId || target.tweet_id || '').trim() || extractTweetIdFromUrl(candidateTweetUrl)
+        const sourceTweetUrl = String(target.source_tweet_url || target.source_url || '').trim()
+        const sourceTweetId = extractTweetIdFromUrl(sourceTweetUrl)
+
+        if (!candidateTweetUrl && !candidateTweetId) {
+          return NextResponse.json({ error: 'tweetUrl or tweetId is required to mark a post published.' }, { status: 400 })
+        }
+
+        if ((candidateTweetId && sourceTweetId && candidateTweetId === sourceTweetId) || (candidateTweetUrl && sourceTweetUrl && candidateTweetUrl === sourceTweetUrl)) {
+          return NextResponse.json({
+            error: 'Published post must reference Jeremy_Habi’s actual post URL/ID, not the source post you replied to or quoted.',
+          }, { status: 400 })
+        }
+
+        target.status = 'published'
+        target.tweet_url = candidateTweetUrl
+        target.tweet_id = candidateTweetId
+        target.posted_at = new Date().toISOString()
+        target.posted_at_pt = nowPt()
+        await writeJson(approvedPostsPath, approvedPosts)
+        const publishLog = (await readJsonOrNull<Array<Record<string, any>>>(publishLogPath)) || []
+        await writeJson(publishLogPath, appendPublishLog(publishLog, {
+          id: target.id,
+          tweet_id: target.tweet_id || null,
+          tweet_url: target.tweet_url || null,
+          posted_at: target.posted_at,
+          posted_at_pt: target.posted_at_pt,
+          distribution_type: target.distribution_type || '',
+          source_type: target.source_type || '',
+          pillar: target.pillar || '',
+          angle: target.angle || '',
+        }))
+        await runGrowthCommand('growth:m92:results-sync', week)
+        return NextResponse.json({ status: 'ok', action: body.action, week, draftId, tweetId: target.tweet_id || null })
       }
       default:
         return NextResponse.json({ error: 'Unsupported growth action.' }, { status: 400 })
