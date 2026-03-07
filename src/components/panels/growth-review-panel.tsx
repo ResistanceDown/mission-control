@@ -13,6 +13,12 @@ interface GrowthApiResponse {
     researchGeneratedAt?: string | null
     draftPackGeneratedAt?: string | null
     externalStatus: string
+    freshness?: {
+      lastXPullAt?: string | null
+      sampleSize?: number
+      queryCount?: number
+      lowConfidenceClusters?: Array<{ id: string; label: string; tweetCount: number; reason: string }>
+    } | null
     researchSignals: string[]
     strategy: {
       primaryGoal: string
@@ -27,6 +33,9 @@ interface GrowthApiResponse {
       quoteTargets: Array<{ clusterLabel: string; why: string; url: string; text: string; author: string; likes: number; replies: number; followers: number }>
       replyTargets: Array<{ clusterLabel: string; why: string; url: string; text: string; author: string; likes: number; replies: number; followers: number }>
     }
+    sourceCandidates: Array<{ clusterLabel: string; url: string; text: string; author: string; likes: number; replies: number; followers: number; score: number }>
+    accountTargets: Array<{ username: string; followers: number; verified: boolean; why: string; sourceUrl: string; clusterLabel: string }>
+    editorialOpportunities: Array<{ id: string; title: string; archetype: string; sourceType: string; whyNow: string; brandFit: string; supportingSignals: string[] }>
     trendClusters: Array<{
       id: string
       label: string
@@ -60,6 +69,8 @@ interface GrowthApiResponse {
       follower_growth_score?: number
       brand_building_score?: number
       selection_reason?: string
+      feedback_applied?: string[]
+      changed_since_last_run?: string
       source_tweet?: {
         id?: string
         text?: string
@@ -70,6 +81,12 @@ interface GrowthApiResponse {
       bestForFollowerGrowth: string | null
       bestForBrandBuilding: string | null
       bestOriginalPost: string | null
+    } | null
+    changesSummary?: {
+      newCount: number
+      retainedCount: number
+      changedDraftIds: string[]
+      feedbackEffects: string[]
     } | null
     approvedPosts: Array<{
       id: string
@@ -91,6 +108,23 @@ interface GrowthApiResponse {
         tweetUrl: string | null
         engagementScore: number
       }>
+    } | null
+    strategyMemory?: {
+      strategyNotes?: string[]
+      performance?: {
+        postedCount?: number
+        publishAttempts?: number
+      }
+    } | null
+    editorialMemory?: {
+      updatedAt?: string | null
+      recentFeedback: Array<{
+        decision: string
+        feedback: string
+        archetype: string
+        reviewedAtPt: string
+      }>
+      archetypeStats: Record<string, { approved?: number; rejected?: number; archived?: number }>
     } | null
     scorecard: {
       week?: string
@@ -163,7 +197,7 @@ export function GrowthReviewPanel() {
   const [actionState, setActionState] = useState<{ status: 'idle' | 'saving' | 'error' | 'saved'; message?: string }>({ status: 'idle' })
   const [feedbackDrafts, setFeedbackDrafts] = useState<Record<string, string>>({})
 
-  async function runGrowthAction(action: 'refresh_research' | 'generate_drafts' | 'approve_draft' | 'reject_draft' | 'archive_draft' | 'reset_to_research', draftId?: string) {
+  async function runGrowthAction(action: 'refresh_research' | 'generate_drafts' | 'refresh_research_and_generate' | 'approve_draft' | 'reject_draft' | 'archive_draft' | 'clear_current_drafts', draftId?: string) {
     const growthWeek = data?.growth?.week ?? null
     const feedback = draftId ? String(feedbackDrafts[draftId] || '').trim() : ''
     setActionState({ status: 'saving' })
@@ -182,10 +216,11 @@ export function GrowthReviewPanel() {
       const messageMap: Record<string, string> = {
         refresh_research: 'Research refreshed.',
         generate_drafts: 'Draft candidates generated.',
+        refresh_research_and_generate: 'Research refreshed and a new draft pack generated.',
         approve_draft: 'Post approved. It is now ready to publish.',
         reject_draft: 'Draft rejected.',
         archive_draft: 'Draft archived.',
-        reset_to_research: 'Drafts cleared. Growth is back to research-first state.',
+        clear_current_drafts: 'Current drafts cleared. Learning memory was preserved.',
       }
       if (draftId) setFeedbackDrafts((current) => ({ ...current, [draftId]: '' }))
       setActionState({ status: 'saved', message: messageMap[action] || 'Growth updated.' })
@@ -207,6 +242,7 @@ export function GrowthReviewPanel() {
   const bestForFollowerGrowth = growth.recommendations?.bestForFollowerGrowth ? byId.get(growth.recommendations.bestForFollowerGrowth) : undefined
   const bestForBrandBuilding = growth.recommendations?.bestForBrandBuilding ? byId.get(growth.recommendations.bestForBrandBuilding) : undefined
   const bestOriginalPost = growth.recommendations?.bestOriginalPost ? byId.get(growth.recommendations.bestOriginalPost) : undefined
+  const feedbackPresets = ['Too generic', 'Weak source', 'Too product-y', 'Wrong audience', 'Good direction, rewrite']
 
   return (
     <div className="space-y-4 p-5">
@@ -227,7 +263,7 @@ export function GrowthReviewPanel() {
             <Metric label="Approved" value={growth.approvedPosts.length} subtitle="Ready to publish" color="green" />
             <Metric label="Quote Targets" value={growth.engagementTargets.quoteTargets.length} subtitle="Credible posts" color="purple" />
             <Metric label="Reply Targets" value={growth.engagementTargets.replyTargets.length} subtitle="Live conversations" color="amber" />
-            <Metric label="Results" value={growth.resultsSummary?.postedCount ?? 0} subtitle="Posts tracked" color="blue" />
+            <Metric label="Results" value={growth.resultsSummary?.postedCount ?? 0} subtitle={`${growth.freshness?.sampleSize ?? 0} samples`} color="blue" />
           </div>
 
           <div className="rounded-xl border border-cyan-500/20 bg-gradient-to-br from-cyan-500/8 via-surface-2/82 to-surface-2/82 p-4 shadow-[0_12px_28px_rgba(0,0,0,0.18)]">
@@ -237,9 +273,10 @@ export function GrowthReviewPanel() {
                 <div className="mt-1 text-xs text-muted-foreground">Use research first. Generate drafts only after the signal looks worth responding to.</div>
               </div>
               <div className="flex flex-wrap justify-end gap-2">
-                <button onClick={() => void runGrowthAction('refresh_research')} disabled={actionState.status === 'saving'} className="rounded-lg border border-cyan-500/20 bg-black/15 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2 disabled:opacity-60">Refresh Research</button>
+                <button onClick={() => void runGrowthAction('refresh_research_and_generate')} disabled={actionState.status === 'saving'} className="rounded-lg bg-cyan-500/15 px-3 py-2 text-xs font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/20 disabled:opacity-60">Refresh Research + Generate</button>
+                <button onClick={() => void runGrowthAction('refresh_research')} disabled={actionState.status === 'saving'} className="rounded-lg border border-cyan-500/20 bg-black/15 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2 disabled:opacity-60">Refresh Research Only</button>
                 {growth.draftCandidates.length ? (
-                  <button onClick={() => void runGrowthAction('reset_to_research')} disabled={actionState.status === 'saving'} className="rounded-lg border border-amber-500/20 bg-black/15 px-3 py-2 text-xs font-medium text-amber-200 transition-smooth hover:bg-surface-2 disabled:opacity-60">Clear Drafts</button>
+                  <button onClick={() => void runGrowthAction('clear_current_drafts')} disabled={actionState.status === 'saving'} className="rounded-lg border border-amber-500/20 bg-black/15 px-3 py-2 text-xs font-medium text-amber-200 transition-smooth hover:bg-surface-2 disabled:opacity-60">Clear Current Drafts</button>
                 ) : (
                   <button onClick={() => void runGrowthAction('generate_drafts')} disabled={actionState.status === 'saving'} className="rounded-lg bg-cyan-500/15 px-3 py-2 text-xs font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/20 disabled:opacity-60">Generate Drafts</button>
                 )}
@@ -248,6 +285,28 @@ export function GrowthReviewPanel() {
             <div className="mt-3 text-xs text-muted-foreground">
               {actionState.message || 'The system should prefer credible reply and quote opportunities before generic originals on an early account.'}
             </div>
+            <div className="mt-3 flex flex-wrap gap-3 text-[11px] text-muted-foreground">
+              <span>Last X pull: {growth.freshness?.lastXPullAt || growth.researchGeneratedAt || 'n/a'}</span>
+              <span>Queries: {growth.freshness?.queryCount ?? 0}</span>
+              <span>Samples: {growth.freshness?.sampleSize ?? 0}</span>
+              <span>Low confidence clusters: {growth.freshness?.lowConfidenceClusters?.length ?? 0}</span>
+            </div>
+            {growth.changesSummary ? (
+              <div className="mt-3 rounded-lg border border-cyan-500/10 bg-black/20 px-3 py-3">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">What changed since last run</div>
+                <div className="mt-2 flex flex-wrap gap-3 text-xs text-foreground/85">
+                  <span>{growth.changesSummary.newCount} new candidate{growth.changesSummary.newCount === 1 ? '' : 's'}</span>
+                  <span>{growth.changesSummary.retainedCount} retained</span>
+                </div>
+                {growth.changesSummary.feedbackEffects?.length ? (
+                  <div className="mt-2 space-y-1 text-xs text-amber-100/85">
+                    {growth.changesSummary.feedbackEffects.map((effect, index) => (
+                      <div key={`effect-${index}`} className="flex gap-2"><span>•</span><span>{effect}</span></div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
           </div>
 
           <div className="grid gap-3 xl:grid-cols-3">
@@ -287,8 +346,36 @@ export function GrowthReviewPanel() {
               </div>
 
               <div className="rounded-lg border border-cyan-500/15 bg-black/15 px-3 py-3">
+                <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Source candidates</div>
+                <div className="mt-2 space-y-2 text-sm text-foreground">
+                  {growth.sourceCandidates.length ? growth.sourceCandidates.map((candidate, index) => (
+                    <div key={`source-candidate-${index}`} className="rounded-lg border border-cyan-500/10 bg-black/20 px-3 py-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="font-medium text-foreground">{candidate.clusterLabel}</div>
+                        <span className="text-[11px] text-muted-foreground">score {candidate.score}</span>
+                      </div>
+                      <div className="mt-1 text-xs text-muted-foreground">{candidate.author} • {candidate.followers.toLocaleString()} followers • {candidate.likes} likes • {candidate.replies} replies</div>
+                      {candidate.text ? <div className="mt-2 text-xs text-foreground/80">{candidate.text}</div> : null}
+                      <a href={candidate.url} target="_blank" rel="noreferrer" className="mt-2 inline-block text-cyan-200 hover:text-cyan-100 text-xs">Open candidate</a>
+                    </div>
+                  )) : <div className="text-muted-foreground">No source candidates captured yet.</div>}
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-cyan-500/15 bg-black/15 px-3 py-3">
                 <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Strategy memory</div>
                 <div className="mt-2 space-y-2 text-sm text-foreground">
+                  {growth.editorialMemory?.recentFeedback?.length ? (
+                    <>
+                      <div className="text-xs text-muted-foreground">Recent editorial feedback</div>
+                      {growth.editorialMemory.recentFeedback.map((entry, index) => (
+                        <div key={`feedback-${index}`} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+                          <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{entry.decision}{entry.archetype ? ` • ${entry.archetype}` : ''}{entry.reviewedAtPt ? ` • ${entry.reviewedAtPt}` : ''}</div>
+                          <div className="mt-1 text-sm text-foreground">{entry.feedback}</div>
+                        </div>
+                      ))}
+                    </>
+                  ) : null}
                   {growth.resultsSummary?.postedCount ? (
                     <>
                       <div className="text-xs text-muted-foreground">{growth.resultsSummary.postedCount} published post{growth.resultsSummary.postedCount === 1 ? '' : 's'} tracked</div>
@@ -297,11 +384,40 @@ export function GrowthReviewPanel() {
                   ) : (
                     <div className="text-muted-foreground">No published post results yet. The engine can learn from your editorial feedback now, and from real post outcomes once something is live.</div>
                   )}
+                  {growth.accountTargets?.length ? (
+                    <>
+                      <div className="pt-2 text-xs text-muted-foreground">Accounts worth watching</div>
+                      {growth.accountTargets.map((account, index) => (
+                        <div key={`account-${index}`} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+                          <div className="text-sm text-foreground">{account.username}{account.verified ? ' • verified' : ''}</div>
+                          <div className="mt-1 text-xs text-muted-foreground">{account.followers.toLocaleString()} followers • {account.clusterLabel}</div>
+                          <div className="mt-1 text-xs text-foreground/80">{account.why}</div>
+                        </div>
+                      ))}
+                    </>
+                  ) : null}
                 </div>
               </div>
             </div>
 
             <div className="space-y-3">
+              <div className="rounded-lg border border-cyan-500/15 bg-black/15 px-3 py-3">
+                <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Editorial opportunities</div>
+                <div className="mt-2 space-y-2 text-sm text-foreground">
+                  {growth.editorialOpportunities.length ? growth.editorialOpportunities.map((opportunity) => (
+                    <div key={opportunity.id} className="rounded-lg border border-cyan-500/10 bg-black/20 px-3 py-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="font-medium text-foreground">{opportunity.title}</div>
+                        <span className="text-[11px] text-muted-foreground">{opportunity.archetype}</span>
+                      </div>
+                      <div className="mt-1 text-xs text-muted-foreground">{opportunity.sourceType} • brand fit {opportunity.brandFit}</div>
+                      <div className="mt-2 text-xs text-foreground/85">{opportunity.whyNow}</div>
+                      {opportunity.supportingSignals.length ? <div className="mt-2 text-[11px] text-cyan-100/80">Signals: {opportunity.supportingSignals.join(' • ')}</div> : null}
+                    </div>
+                  )) : <div className="text-muted-foreground">No editorial opportunities identified yet.</div>}
+                </div>
+              </div>
+
               <div className="rounded-lg border border-cyan-500/15 bg-black/15 px-3 py-3">
                 <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Draft candidates</div>
                 <div className="mt-1 text-sm text-foreground">Review the exact post text here. Approval moves it to Ready to publish.</div>
@@ -321,6 +437,8 @@ export function GrowthReviewPanel() {
                       <div className="mt-2 text-xs text-muted-foreground">{draft.rationale}</div>
                       {draft.selection_reason ? <div className="mt-1 text-xs text-cyan-100/80">{draft.selection_reason}</div> : null}
                       {draft.why_now ? <div className="mt-1 text-xs text-cyan-100/80">Why now: {draft.why_now}</div> : null}
+                      {draft.changed_since_last_run ? <div className="mt-1 text-xs text-emerald-200/80">Changed since last run: {draft.changed_since_last_run}</div> : null}
+                      {draft.feedback_applied?.length ? <div className="mt-1 text-xs text-amber-200/80">Feedback applied: {draft.feedback_applied.join(' • ')}</div> : null}
                       {draft.source_tweet?.url ? (
                         <div className="mt-2 rounded-lg border border-cyan-500/10 bg-black/20 px-3 py-2 text-xs text-muted-foreground">
                           <div className="font-medium text-foreground">Source post</div>
@@ -331,6 +449,25 @@ export function GrowthReviewPanel() {
                       <div className="mt-3 rounded-lg border border-cyan-500/15 bg-[#0e1520] px-3 py-3 text-sm leading-6 text-foreground whitespace-pre-wrap">{draft.text}</div>
                       <div className="mt-3 space-y-1">
                         <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Feedback for next pass</div>
+                        <div className="flex flex-wrap gap-2">
+                          {feedbackPresets.map((preset) => (
+                            <button
+                              key={`${draft.id}-${preset}`}
+                              type="button"
+                              className="rounded-full border border-white/10 px-2 py-1 text-[11px] text-muted-foreground transition-smooth hover:bg-surface-2"
+                              onClick={() => setFeedbackDrafts((current) => ({
+                                ...current,
+                                [draft.id]: current[draft.id]
+                                  ? current[draft.id].includes(preset)
+                                    ? current[draft.id]
+                                    : `${current[draft.id]} | ${preset}`
+                                  : preset,
+                              }))}
+                            >
+                              {preset}
+                            </button>
+                          ))}
+                        </div>
                         <textarea className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm min-h-20" placeholder="Examples: too generic, weak source, better as a reply, stronger hook, too much product, not enough edge." value={feedbackDrafts[draft.id] || ''} onChange={(event) => setFeedbackDrafts((current) => ({ ...current, [draft.id]: event.target.value }))} />
                       </div>
                       <div className="mt-3 flex flex-wrap gap-2">

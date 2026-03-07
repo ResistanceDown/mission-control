@@ -110,7 +110,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json() as {
-      action?: 'refresh_research' | 'generate_drafts' | 'approve_draft' | 'reject_draft' | 'archive_draft' | 'reset_to_research'
+      action?: 'refresh_research' | 'generate_drafts' | 'refresh_research_and_generate' | 'approve_draft' | 'reject_draft' | 'archive_draft' | 'reset_to_research' | 'clear_current_drafts'
       week?: string
       draftId?: string
       feedback?: string
@@ -122,12 +122,12 @@ export async function POST(request: NextRequest) {
     }
 
     const weekDir = path.join(GROWTH_WEEKS_ROOT, week)
-    const researchBriefPath = path.join(weekDir, 'research-brief.md')
     const draftPackJsonPath = path.join(weekDir, 'draft-pack.json')
     const draftPackPath = path.join(weekDir, 'draft-pack.md')
     const draftQueuePath = path.join(weekDir, 'draft-queue.md')
     const approvedPostsPath = path.join(weekDir, 'approved-posts.json')
     const draftReviewLogPath = path.join(weekDir, 'draft-review-log.json')
+    const editorialMemoryPath = path.join(weekDir, 'editorial-memory.json')
 
     switch (body.action) {
       case 'refresh_research': {
@@ -136,15 +136,22 @@ export async function POST(request: NextRequest) {
         await runGrowthCommand('growth:m92:research-brief', week)
         return NextResponse.json({ status: 'ok', action: 'refresh_research', week })
       }
+      case 'refresh_research_and_generate': {
+        await runGrowthCommand('growth:m92:week-open', week)
+        await runGrowthCommand('growth:m92:results-sync', week)
+        await runGrowthCommand('growth:m92:research-brief', week)
+        await runGrowthCommand('growth:m92:draft-pack', week)
+        return NextResponse.json({ status: 'ok', action: 'refresh_research_and_generate', week })
+      }
       case 'generate_drafts': {
         await runGrowthCommand('growth:m92:draft-pack', week)
         return NextResponse.json({ status: 'ok', action: 'generate_drafts', week })
       }
-      case 'reset_to_research': {
+      case 'reset_to_research':
+      case 'clear_current_drafts': {
         await runGrowthCommand('growth:m92:week-open', week)
         await runGrowthCommand('growth:m92:research-brief', week)
         await writeJson(approvedPostsPath, [])
-        await writeJson(draftReviewLogPath, [])
         await fs.rm(draftPackJsonPath, { force: true })
         await fs.rm(draftPackPath, { force: true })
         await fs.writeFile(
@@ -152,7 +159,7 @@ export async function POST(request: NextRequest) {
           buildDraftQueueMarkdown(week, `output/growth/weeks/${week}/research-brief.md`, []),
           'utf8',
         )
-        return NextResponse.json({ status: 'ok', action: 'reset_to_research', week })
+        return NextResponse.json({ status: 'ok', action: body.action, week })
       }
       case 'approve_draft':
       case 'reject_draft':
@@ -185,6 +192,10 @@ export async function POST(request: NextRequest) {
               ? 'archived'
               : 'rejected'
         const feedback = String(body.feedback || '').trim()
+        const reviewSourceTweet =
+          target.source_tweet && typeof target.source_tweet === 'object'
+            ? target.source_tweet as Record<string, unknown>
+            : null
         target.approval = nextApproval
         target.status = nextApproval
         target.reviewedAtPt = nowPt()
@@ -192,7 +203,7 @@ export async function POST(request: NextRequest) {
           target.feedback = feedback
         }
         const reviewLog = (await readJsonOrNull<Array<Record<string, string>>>(draftReviewLogPath)) || []
-        reviewLog.push({
+        const reviewEntry = {
           id: draftId,
           signature: String(target.signature || ''),
           decision: nextApproval,
@@ -200,9 +211,36 @@ export async function POST(request: NextRequest) {
           angle: String(target.angle || ''),
           sourceType: String(target.source_type || ''),
           archetype: String(target.pillar || ''),
+          clusterId: String(target.cluster_id || ''),
+          sourceTweetUrl: String(reviewSourceTweet?.url || ''),
           feedback,
-        })
+        }
+        reviewLog.push(reviewEntry)
         await writeJson(draftReviewLogPath, reviewLog)
+
+        const existingEditorialMemory = (await readJsonOrNull<Record<string, unknown>>(editorialMemoryPath)) || {}
+        const recentFeedback = Array.isArray(existingEditorialMemory.recentFeedback)
+          ? [...(existingEditorialMemory.recentFeedback as Array<Record<string, unknown>>)]
+          : []
+        recentFeedback.push({
+          ...reviewEntry,
+          reviewedAt: new Date().toISOString(),
+        })
+        const trimmedFeedback = recentFeedback.slice(-25)
+        const archetypeStats = { ...(existingEditorialMemory.archetypeStats as Record<string, { approved?: number; rejected?: number; archived?: number }> || {}) }
+        const archetypeKey = String(target.pillar || '').trim() || 'unknown'
+        const archetypeState = { ...(archetypeStats[archetypeKey] || {}) }
+        if (nextApproval === 'approved') archetypeState.approved = Number(archetypeState.approved || 0) + 1
+        if (nextApproval === 'rejected') archetypeState.rejected = Number(archetypeState.rejected || 0) + 1
+        if (nextApproval === 'archived') archetypeState.archived = Number(archetypeState.archived || 0) + 1
+        archetypeStats[archetypeKey] = archetypeState
+        await writeJson(editorialMemoryPath, {
+          ...existingEditorialMemory,
+          week,
+          updatedAt: new Date().toISOString(),
+          recentFeedback: trimmedFeedback,
+          archetypeStats,
+        })
 
         if (body.action === 'approve_draft') {
           const approvedPosts = (await readJsonOrNull<Array<Record<string, string>>>(approvedPostsPath)) || []
@@ -217,7 +255,9 @@ export async function POST(request: NextRequest) {
               pillar: String(target.pillar || ''),
               angle: String(target.angle || ''),
               source_type: String(target.source_type || ''),
+              distribution_type: String(target.distribution_type || ''),
               cluster_id: String(target.cluster_id || ''),
+              why_now: String(target.why_now || ''),
               source_tweet_url: String(sourceTweet?.url || ''),
               source_tweet_text: String(sourceTweet?.text || ''),
               status: 'approved',
