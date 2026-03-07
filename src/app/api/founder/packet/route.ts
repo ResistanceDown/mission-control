@@ -108,6 +108,260 @@ function normalizeGrowthResearchSignals(input: unknown): string[] {
     .slice(0, 3)
 }
 
+function normalizeTrendClusters(input: unknown): Array<{
+  id: string
+  label: string
+  confidence: string
+  tweetCount: number
+  repeatedPains: string[]
+  repeatedPhrases: string[]
+  conversationThemes: string[]
+  representativeExample: string | null
+  contrarianTake: string | null
+  fatigueSignal: string | null
+  sampleTweets: string[]
+  whyItMatters: string
+}> {
+  if (!Array.isArray(input)) return []
+  const normalized = (input
+    .map((entry) => {
+      if (!entry || typeof entry !== 'object') return null
+      const record = entry as Record<string, any>
+      const repeatedPhrases = Array.isArray(record.repeatedPhrases)
+        ? record.repeatedPhrases
+            .map((phrase: any) => typeof phrase?.phrase === 'string' ? phrase.phrase : '')
+            .filter(Boolean)
+            .slice(0, 3)
+        : []
+      const repeatedPains = Array.isArray(record.repeatedPains)
+        ? record.repeatedPains.map((value: unknown) => String(value || '').trim()).filter(Boolean).slice(0, 3)
+        : []
+      const conversationThemes = Array.isArray(record.conversationThemes)
+        ? record.conversationThemes.map((value: unknown) => String(value || '').trim()).filter(Boolean).slice(0, 3)
+        : []
+      const representativeExample = String(record.representativeExample || '').trim() || null
+      const contrarianTake = String(record.contrarianTake || '').trim() || null
+      const fatigueSignal = String(record.fatigueSignal || '').trim() || null
+      const sampleTweets = Array.isArray(record.sampleTweets)
+        ? record.sampleTweets.map((value: unknown) => String(value || '').trim()).filter(Boolean).slice(0, 3)
+        : []
+      return {
+        id: String(record.id || '').trim(),
+        label: String(record.label || '').trim(),
+        confidence: String(record.confidence || 'unknown').trim(),
+        tweetCount: Number(record.tweetCount || 0),
+        repeatedPains,
+        repeatedPhrases,
+        conversationThemes,
+        representativeExample,
+        contrarianTake,
+        fatigueSignal,
+        sampleTweets,
+        whyItMatters: conversationThemes[0]
+          ? conversationThemes[0]
+          : repeatedPains[0]
+            ? `Repeated pain around ${repeatedPains[0]}.`
+            : repeatedPhrases[0]
+              ? `Repeated language around ${repeatedPhrases[0]}.`
+              : 'Directional external signal only.',
+      }
+    })
+    .filter(Boolean)
+  ) as Array<{
+      id: string
+      label: string
+      confidence: string
+      tweetCount: number
+      repeatedPains: string[]
+      repeatedPhrases: string[]
+      conversationThemes: string[]
+      representativeExample: string | null
+      contrarianTake: string | null
+      fatigueSignal: string | null
+      sampleTweets: string[]
+      whyItMatters: string
+    }>
+
+  const strong = normalized.filter((cluster) =>
+    cluster.confidence !== 'low' &&
+    (cluster.sampleTweets.length > 0 || cluster.conversationThemes.length > 0)
+  )
+
+  return (strong.length ? strong : normalized).slice(0, 3)
+}
+
+function normalizeSourceSamples(input: unknown, trendClusters?: unknown): string[] {
+  if (Array.isArray(trendClusters)) {
+    const curated: string[] = []
+    for (const cluster of trendClusters) {
+      if (!cluster || typeof cluster !== 'object') continue
+      const sampleTweets = Array.isArray((cluster as Record<string, any>).sampleTweets)
+        ? (cluster as Record<string, any>).sampleTweets
+        : []
+      for (const tweet of sampleTweets.slice(0, 2)) {
+        const text = String(tweet || '').trim()
+        if (text && !curated.includes(text)) curated.push(text)
+        if (curated.length >= 4) return curated
+      }
+    }
+    if (curated.length) return curated
+  }
+
+  if (!Array.isArray(input)) return []
+  const samples: string[] = []
+  for (const zone of input) {
+    if (!zone || typeof zone !== 'object') continue
+    const queries = Array.isArray((zone as Record<string, any>).queries) ? (zone as Record<string, any>).queries : []
+    for (const query of queries) {
+      if (!query || typeof query !== 'object') continue
+      const tweets = Array.isArray((query as Record<string, any>).tweets) ? (query as Record<string, any>).tweets : []
+      for (const tweet of tweets.slice(0, 2)) {
+        if (!tweet || typeof tweet !== 'object') continue
+        const text = String((tweet as Record<string, any>).text || '').trim()
+        if (text) samples.push(text)
+        if (samples.length >= 4) return samples
+      }
+    }
+  }
+  return samples
+}
+
+function normalizeGrowthStrategy(input: unknown): {
+  primaryGoal: string
+  contentMix: string[]
+  engagementTactics: string[]
+  editorialBias: string[]
+  followerGrowthLoop: string[]
+  targetAccountStrategy: string[]
+  whyThisWeek: string[]
+} | null {
+  if (!input || typeof input !== 'object') return null
+  const record = input as Record<string, unknown>
+  return {
+    primaryGoal: String(record.primaryGoal || '').trim(),
+    contentMix: Array.isArray(record.contentMix) ? record.contentMix.map((v) => String(v).trim()).filter(Boolean).slice(0, 4) : [],
+    engagementTactics: Array.isArray(record.engagementTactics) ? record.engagementTactics.map((v) => String(v).trim()).filter(Boolean).slice(0, 4) : [],
+    editorialBias: Array.isArray(record.editorialBias) ? record.editorialBias.map((v) => String(v).trim()).filter(Boolean).slice(0, 4) : [],
+    followerGrowthLoop: Array.isArray(record.followerGrowthLoop) ? record.followerGrowthLoop.map((v) => String(v).trim()).filter(Boolean).slice(0, 4) : [],
+    targetAccountStrategy: Array.isArray(record.targetAccountStrategy) ? record.targetAccountStrategy.map((v) => String(v).trim()).filter(Boolean).slice(0, 4) : [],
+    whyThisWeek: Array.isArray(record.whyThisWeek) ? record.whyThisWeek.map((v) => String(v).trim()).filter(Boolean).slice(0, 3) : [],
+  }
+}
+
+function normalizeGrowthTargets(input: unknown): {
+  quoteTargets: Array<{ clusterLabel: string; why: string; url: string; text: string; author: string; likes: number; replies: number; followers: number }>
+  replyTargets: Array<{ clusterLabel: string; why: string; url: string; text: string; author: string; likes: number; replies: number; followers: number }>
+} {
+  const normalizeList = (items: unknown) => {
+    if (!Array.isArray(items)) return []
+    return items
+      .map((entry) => {
+        if (!entry || typeof entry !== 'object') return null
+        const record = entry as Record<string, any>
+        const source = record.source && typeof record.source === 'object' ? record.source as Record<string, any> : null
+        const author = source?.author && typeof source.author === 'object' ? source.author as Record<string, any> : null
+        const url = String(source?.url || '').trim()
+        if (!url) return null
+        return {
+          clusterLabel: String(record.clusterLabel || '').trim(),
+          why: String(record.why || '').trim(),
+          url,
+          text: String(source?.text || '').trim(),
+          author: author?.username ? `@${String(author.username).trim()}` : String(author?.name || '').trim(),
+          likes: Number(source?.public_metrics?.like_count || 0),
+          replies: Number(source?.public_metrics?.reply_count || 0),
+          followers: Number(author?.public_metrics?.followers_count || 0),
+        }
+      })
+      .filter(Boolean)
+      .slice(0, 4) as Array<{ clusterLabel: string; why: string; url: string; text: string; author: string; likes: number; replies: number; followers: number }>
+  }
+
+  const record = input && typeof input === 'object' ? input as Record<string, unknown> : {}
+  return {
+    quoteTargets: normalizeList(record.quoteTargets),
+    replyTargets: normalizeList(record.replyTargets),
+  }
+}
+
+function normalizeGrowthRecommendations(input: unknown): {
+  bestForFollowerGrowth: string | null
+  bestForBrandBuilding: string | null
+  bestOriginalPost: string | null
+} | null {
+  if (!input || typeof input !== 'object') return null
+  const record = input as Record<string, unknown>
+  return {
+    bestForFollowerGrowth: record.bestForFollowerGrowth ? String(record.bestForFollowerGrowth) : null,
+    bestForBrandBuilding: record.bestForBrandBuilding ? String(record.bestForBrandBuilding) : null,
+    bestOriginalPost: record.bestOriginalPost ? String(record.bestOriginalPost) : null,
+  }
+}
+
+function normalizeApprovedPosts(input: unknown): Array<{
+  id: string
+  text: string
+  pillar: string
+  angle: string
+  status: string
+  approvedAtPt: string
+  tweetId?: string
+  tweetUrl?: string | null
+}> {
+  if (!Array.isArray(input)) return []
+  return input
+    .map((entry) => {
+      if (!entry || typeof entry !== 'object') return null
+      const record = entry as Record<string, unknown>
+      const text = String(record.text || '').trim()
+      if (!text) return null
+      return {
+        id: String(record.id || '').trim(),
+        text,
+        pillar: String(record.pillar || '').trim(),
+        angle: String(record.angle || '').trim(),
+        status: String(record.status || 'approved').trim(),
+        approvedAtPt: String(record.approved_at_pt || '').trim(),
+        tweetId: String(record.tweet_id || '').trim(),
+        tweetUrl: record.tweet_id ? `https://x.com/i/web/status/${record.tweet_id}` : null,
+      }
+    })
+    .filter(Boolean)
+    .slice(0, 5) as Array<{
+      id: string
+      text: string
+      pillar: string
+      angle: string
+      status: string
+      approvedAtPt: string
+      tweetId?: string
+      tweetUrl?: string | null
+    }>
+}
+
+function normalizeResultsSummary(input: unknown): {
+  postedCount: number
+  winningPillars: string[]
+  strategyNotes: string[]
+  topPosts: Array<{ id: string; pillar: string; tweetUrl: string | null; engagementScore: number }>
+} | null {
+  if (!input || typeof input !== 'object') return null
+  const record = input as Record<string, any>
+  return {
+    postedCount: Number(record.postedCount || 0),
+    winningPillars: Array.isArray(record.winningPillars) ? record.winningPillars.map((v: unknown) => String(v)).filter(Boolean) : [],
+    strategyNotes: Array.isArray(record.strategyNotes) ? record.strategyNotes.map((v: unknown) => String(v)).filter(Boolean) : [],
+    topPosts: Array.isArray(record.topPosts)
+      ? record.topPosts.slice(0, 3).map((post: any) => ({
+          id: String(post.id || ''),
+          pillar: String(post.pillar || ''),
+          tweetUrl: post.tweet_url || null,
+          engagementScore: Number(post.engagementScore || 0),
+        }))
+      : [],
+  }
+}
+
 function summarizeRepeatedPains(entries: Array<{ problem?: string }>): string[] {
   const counts = new Map<string, number>()
   for (const entry of entries) {
@@ -455,11 +709,15 @@ export async function GET(request: NextRequest) {
           researchBriefPath: path.join(GROWTH_WEEKS_ROOT, latestGrowthWeek, 'research-brief.json'),
           draftPackPath: path.join(GROWTH_WEEKS_ROOT, latestGrowthWeek, 'draft-pack.json'),
           scorecardPath: path.join(GROWTH_WEEKS_ROOT, latestGrowthWeek, 'scorecard.json'),
+          approvedPostsPath: path.join(GROWTH_WEEKS_ROOT, latestGrowthWeek, 'approved-posts.json'),
+          resultsSummaryPath: path.join(GROWTH_WEEKS_ROOT, latestGrowthWeek, 'results-summary.json'),
         }
       : null
     const growthResearch = growthPaths ? await readJsonOrNull<any>(growthPaths.researchBriefPath) : null
     const growthDraftPack = growthPaths ? await readJsonOrNull<any>(growthPaths.draftPackPath) : null
     const growthScorecard = growthPaths ? await readJsonOrNull<any>(growthPaths.scorecardPath) : null
+    const growthApprovedPosts = growthPaths ? await readJsonOrNull<any>(growthPaths.approvedPostsPath) : null
+    const growthResultsSummary = growthPaths ? await readJsonOrNull<any>(growthPaths.resultsSummaryPath) : null
     const repeatedPains = summarizeRepeatedPains(signalLedger)
     const workspaceId = auth.user.workspace_id ?? 1
 
@@ -485,8 +743,18 @@ export async function GET(request: NextRequest) {
         researchBriefPath: growthPaths?.researchBriefPath ?? null,
         draftPackPath: growthPaths?.draftPackPath ?? null,
         scorecardPath: growthPaths?.scorecardPath ?? null,
+        researchGeneratedAt: growthResearch?.generatedAt ?? null,
+        draftPackGeneratedAt: growthDraftPack?.generatedAt ?? null,
+        externalStatus: String(growthResearch?.externalStatus || 'missing'),
         researchSignals: normalizeGrowthResearchSignals(growthResearch?.signals),
+        strategy: normalizeGrowthStrategy(growthResearch?.growthStrategy),
+        engagementTargets: normalizeGrowthTargets(growthResearch?.engagementTargets),
+        trendClusters: normalizeTrendClusters(growthResearch?.trendClusters),
+        sourceSamples: normalizeSourceSamples(growthResearch?.sourceSamples, growthResearch?.trendClusters),
         draftCandidates: Array.isArray(growthDraftPack?.drafts) ? growthDraftPack.drafts.slice(0, 3) : [],
+        recommendations: normalizeGrowthRecommendations(growthDraftPack?.recommendations),
+        approvedPosts: normalizeApprovedPosts(growthApprovedPosts),
+        resultsSummary: normalizeResultsSummary(growthResultsSummary),
         scorecard: growthScorecard,
       },
       tasks: loadTaskSnapshot(workspaceId),

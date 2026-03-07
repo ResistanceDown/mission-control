@@ -27,6 +27,7 @@ export function HeaderBar() {
   const tabLabels: Record<string, string> = {
     overview: 'Overview',
     founder: 'Founder Cockpit',
+    growth: 'Growth Review',
     agents: 'Agent Squad',
     tasks: 'Task Board',
     sessions: 'Sessions',
