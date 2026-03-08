@@ -7,6 +7,7 @@ type GrowthAction =
   | 'refresh_research'
   | 'generate_drafts'
   | 'refresh_research_and_generate'
+  | 'expand_family_variants'
   | 'rewrite_draft'
   | 'update_draft_text'
   | 'approve_draft'
@@ -170,8 +171,7 @@ interface GrowthApiResponse {
       selectionReason?: string
       tweetId?: string
       tweetUrl?: string | null
-      publishStatus?: string
-      publishError?: string
+      publishError?: string | null
     }>
     publishLog?: Array<{ id?: string; tweet_url?: string | null; posted_at_pt?: string; distribution_type?: string; source_type?: string; pillar?: string; angle?: string }>
     resultsSummary?: {
@@ -544,6 +544,7 @@ function SourceVariantGroup({
   feedbackDrafts,
   onFeedbackChange,
   onAction,
+  onExpandFamily,
   saving,
   defaultOpen,
 }: {
@@ -553,6 +554,7 @@ function SourceVariantGroup({
   feedbackDrafts: Record<string, string>
   onFeedbackChange: (draftId: string, value: string) => void
   onAction: (action: GrowthAction, draftId: string, extra?: Record<string, unknown>) => void
+  onExpandFamily: (draftId: string) => void
   saving: boolean
   defaultOpen?: boolean
 }) {
@@ -583,6 +585,18 @@ function SourceVariantGroup({
           {sourceReplies ? <FieldChip>{sourceReplies} replies</FieldChip> : null}
           {sourceReposts ? <FieldChip>{sourceReposts} reposts</FieldChip> : null}
           {sourceFollowers ? <FieldChip>{sourceFollowers.toLocaleString()} followers</FieldChip> : null}
+          <button
+            type="button"
+            onClick={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+              onExpandFamily(leader.id)
+            }}
+            disabled={saving}
+            className="rounded-lg border border-cyan-500/25 bg-cyan-500/10 px-2.5 py-1.5 text-[11px] font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/20 disabled:opacity-60"
+          >
+            Generate More Options
+          </button>
           <span className="rounded-full border border-white/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
             Expand
           </span>
@@ -663,7 +677,7 @@ export function GrowthReviewPanel() {
     ? byId.get(growth.recommendations.bestOriginalPost) || sortedOriginals[0]
     : sortedOriginals[0]
   const approvedPosts = growth?.approvedPosts || []
-  const readyPosts = approvedPosts.filter((post) => post.status === 'approved')
+  const readyPosts = approvedPosts.filter((post) => post.status === 'approved' || post.status === 'failed')
   const scheduledPosts = approvedPosts.filter((post) => post.status === 'scheduled')
   const publishedPosts = approvedPosts.filter((post) => post.status === 'published')
 
@@ -749,6 +763,7 @@ export function GrowthReviewPanel() {
         refresh_research: 'Research refreshed.',
         generate_drafts: 'Draft candidates generated.',
         refresh_research_and_generate: 'Research refreshed and a new candidate pack generated.',
+        expand_family_variants: 'Added more options for this source family.',
         rewrite_draft: 'Draft rewritten from the current research snapshot.',
         update_draft_text: 'Draft text saved.',
         approve_draft: 'Post approved and moved to Ready to schedule.',
@@ -815,7 +830,7 @@ export function GrowthReviewPanel() {
         <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
           <MetricCard label="Research" value={growth.externalStatus} subtitle={formatPacificTime(growth.freshness?.lastXPullAt || growth.researchGeneratedAt || null)} accent="cyan" />
           <MetricCard label="Candidates" value={candidateCount} subtitle="Current review pack" accent="violet" />
-          <MetricCard label="Ready to schedule" value={readyToSchedule} subtitle="Approved exact posts" accent="emerald" />
+          <MetricCard label="Ready to schedule" value={readyToSchedule} subtitle="Approved + failed retries" accent="emerald" />
           <MetricCard label="Reply opportunities" value={topReplyCount} subtitle="Best for follower growth" accent="amber" />
           <MetricCard label="Published" value={publishedCount} subtitle={growth.strategy?.accountStage || 'Tracked in results loop'} accent={publishedCount ? 'emerald' : lowConfidenceCount ? 'rose' : 'cyan'} />
         </div>
@@ -979,6 +994,7 @@ export function GrowthReviewPanel() {
                       feedbackDrafts={feedbackDrafts}
                       onFeedbackChange={(draftId, value) => setFeedbackDrafts((current) => ({ ...current, [draftId]: value }))}
                       onAction={(action, draftId, extra) => void runGrowthAction(action, draftId, extra || {})}
+                      onExpandFamily={(draftId) => void runGrowthAction('expand_family_variants', draftId, { feedback: feedbackDrafts[draftId] || '' })}
                       saving={actionState.status === 'saving'}
                     />
                   )
@@ -998,7 +1014,7 @@ export function GrowthReviewPanel() {
             </div>
           </CollapsibleSection>
 
-          <CollapsibleSection title="Ready to schedule" subtitle="Approved exact posts stay here until you assign a publish time." defaultOpen>
+          <CollapsibleSection title="Ready to schedule" subtitle="Approved and failed posts stay here until you schedule them." defaultOpen>
             <div className="space-y-3">
               {readyPosts.length ? readyPosts.map((post) => {
                 const suggested = buildSuggestedSchedule(post)
@@ -1014,12 +1030,17 @@ export function GrowthReviewPanel() {
                           {post.distributionType ? <FieldChip>{post.distributionType}</FieldChip> : null}
                           {post.sourceType ? <FieldChip>{post.sourceType}</FieldChip> : null}
                           {post.approvedAtPt ? <FieldChip>approved {formatPacificTime(post.approvedAtPt)}</FieldChip> : null}
-                        {post.scheduledAtPt ? <FieldChip>scheduled {formatPacificTime(post.scheduledAtPt)}</FieldChip> : post.scheduledAt ? <FieldChip>scheduled {formatPacificTime(post.scheduledAt)}</FieldChip> : null}
+                          {post.publishError ? <FieldChip>failed publish</FieldChip> : null}
                         </div>
                       </div>
                     </div>
                     <div className="mt-4 rounded-xl border border-emerald-500/15 bg-black/20 px-4 py-4 text-[15px] leading-7 text-foreground whitespace-pre-wrap">{post.text}</div>
                     {post.selectionReason ? <div className="mt-3 text-sm text-foreground/80">{post.selectionReason}</div> : null}
+                    {post.publishError ? (
+                      <div className="mt-3 rounded-lg border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-100">
+                        Last auto-publish failure: {post.publishError}
+                      </div>
+                    ) : null}
                     <div className="mt-4 grid gap-3 xl:grid-cols-2">
                       <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
                         <div className="flex items-start justify-between gap-3">
@@ -1063,10 +1084,10 @@ export function GrowthReviewPanel() {
                           ) : null}
                         </div>
                       </div>
-                      <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
-                        <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Mark published</div>
-                        <div className="mt-1 text-xs text-foreground/75">
-                          After you manually post on X, record the live tweet here so results sync can learn from the actual outcome.
+                      <details className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
+                        <summary className="cursor-pointer list-none text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Manual fallback: mark published</summary>
+                        <div className="mt-2 text-xs text-foreground/75">
+                          Use this only if scheduler publishing fails or you posted outside Mission Control.
                         </div>
                         <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_1fr]">
                           <label className="text-xs text-muted-foreground">Tweet URL
@@ -1079,70 +1100,31 @@ export function GrowthReviewPanel() {
                         <div className="mt-3 flex flex-wrap gap-2">
                           <button onClick={() => void runGrowthAction('mark_published', post.id, { tweetUrl: publishState.tweetUrl, tweetId: publishState.tweetId })} disabled={actionState.status === 'saving' || (!publishState.tweetUrl && !publishState.tweetId)} className="rounded-lg bg-cyan-500/15 px-3 py-2 text-xs font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/20 disabled:opacity-60">Mark Published</button>
                         </div>
-                      </div>
+                      </details>
                     </div>
                   </div>
                 )
-              }) : <div className="rounded-xl border border-white/10 bg-[#10161f] px-4 py-4 text-sm text-muted-foreground">No approved posts are waiting for scheduling right now.</div>}
+              }) : <div className="rounded-xl border border-white/10 bg-[#10161f] px-4 py-4 text-sm text-muted-foreground">No approved or failed posts are waiting for scheduling right now.</div>}
             </div>
           </CollapsibleSection>
 
-          <CollapsibleSection title="Scheduled" subtitle="Due posts auto-publish on schedule. Use manual publish tracking only as fallback." defaultOpen>
+          <CollapsibleSection title="Scheduled" subtitle="Auto-publish runs every 15 minutes between 6:00 AM and 9:00 PM PT." defaultOpen>
             <div className="space-y-3">
-              {scheduledPosts.length ? scheduledPosts.map((post) => {
-                const publishState = publishDrafts[post.id] || { tweetUrl: post.tweetUrl || '', tweetId: post.tweetId || '' }
-                return (
-                  <div key={`scheduled-${post.id}`} className="rounded-2xl border border-cyan-500/15 bg-[#10161f] p-4 shadow-[0_16px_36px_rgba(0,0,0,0.24)]">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="text-sm font-semibold text-foreground">{post.pillar || 'Scheduled post'}{post.angle ? `: ${post.angle}` : ''}</div>
-                        <div className="mt-1 flex flex-wrap gap-2">
-                          <FieldChip>{post.status}</FieldChip>
-                          {post.distributionType ? <FieldChip>{post.distributionType}</FieldChip> : null}
-                          {post.sourceType ? <FieldChip>{post.sourceType}</FieldChip> : null}
-                          {post.scheduledAtPt ? <FieldChip>scheduled {formatPacificTime(post.scheduledAtPt)}</FieldChip> : post.scheduledAt ? <FieldChip>scheduled {formatPacificTime(post.scheduledAt)}</FieldChip> : null}
-                          {post.publishStatus ? <FieldChip>{post.publishStatus}</FieldChip> : null}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="mt-4 rounded-xl border border-cyan-500/15 bg-black/20 px-4 py-4 text-[15px] leading-7 text-foreground whitespace-pre-wrap">{post.text}</div>
-                    {post.selectionReason ? <div className="mt-3 text-sm text-foreground/80">{post.selectionReason}</div> : null}
-                    {post.publishError ? (
-                      <div className="mt-3 rounded-lg border border-rose-500/25 bg-rose-500/10 px-3 py-2 text-xs text-rose-100">
-                        Auto publish failed: {post.publishError}
-                      </div>
-                    ) : null}
-                    <div className="mt-4 grid gap-3 xl:grid-cols-2">
-                      <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
-                        <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Scheduling controls</div>
-                        <div className="mt-1 text-xs text-foreground/75">
-                          This post stays in the auto-publish queue until due time or until you unschedule it.
-                        </div>
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          <button onClick={() => void runGrowthAction('unschedule_draft', post.id)} disabled={actionState.status === 'saving'} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2 disabled:opacity-60">Unschedule</button>
-                        </div>
-                      </div>
-                      <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
-                        <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Manual publish fallback</div>
-                        <div className="mt-1 text-xs text-foreground/75">
-                          Use this only if you posted manually outside the scheduler and need results sync to track the live post.
-                        </div>
-                        <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_1fr]">
-                          <label className="text-xs text-muted-foreground">Tweet URL
-                            <input value={publishState.tweetUrl} onChange={(event) => setPublishDrafts((current) => ({ ...current, [post.id]: { ...publishState, tweetUrl: event.target.value } }))} className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground" placeholder="https://x.com/.../status/..." />
-                          </label>
-                          <label className="text-xs text-muted-foreground">Tweet ID
-                            <input value={publishState.tweetId} onChange={(event) => setPublishDrafts((current) => ({ ...current, [post.id]: { ...publishState, tweetId: event.target.value } }))} className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground" placeholder="optional if URL is present" />
-                          </label>
-                        </div>
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          <button onClick={() => void runGrowthAction('mark_published', post.id, { tweetUrl: publishState.tweetUrl, tweetId: publishState.tweetId })} disabled={actionState.status === 'saving' || (!publishState.tweetUrl && !publishState.tweetId)} className="rounded-lg bg-cyan-500/15 px-3 py-2 text-xs font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/20 disabled:opacity-60">Mark Published</button>
-                        </div>
-                      </div>
-                    </div>
+              {scheduledPosts.length ? scheduledPosts.map((post) => (
+                <div key={`scheduled-${post.id}`} className="rounded-2xl border border-amber-500/15 bg-[#10161f] p-4 shadow-[0_16px_36px_rgba(0,0,0,0.24)]">
+                  <div className="flex flex-wrap gap-2">
+                    <FieldChip>scheduled</FieldChip>
+                    <FieldChip>auto-publish active</FieldChip>
+                    {post.distributionType ? <FieldChip>{post.distributionType}</FieldChip> : null}
+                    {post.sourceType ? <FieldChip>{post.sourceType}</FieldChip> : null}
+                    {post.scheduledAtPt ? <FieldChip>due {formatPacificTime(post.scheduledAtPt)}</FieldChip> : post.scheduledAt ? <FieldChip>due {formatPacificTime(post.scheduledAt)}</FieldChip> : null}
                   </div>
-                )
-              }) : <div className="rounded-xl border border-white/10 bg-[#10161f] px-4 py-4 text-sm text-muted-foreground">No scheduled posts right now.</div>}
+                  <div className="mt-4 rounded-xl border border-amber-500/15 bg-black/20 px-4 py-4 text-[15px] leading-7 text-foreground whitespace-pre-wrap">{post.text}</div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button onClick={() => void runGrowthAction('unschedule_draft', post.id)} disabled={actionState.status === 'saving'} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2 disabled:opacity-60">Unschedule</button>
+                  </div>
+                </div>
+              )) : <div className="rounded-xl border border-white/10 bg-[#10161f] px-4 py-4 text-sm text-muted-foreground">No scheduled posts right now.</div>}
             </div>
           </CollapsibleSection>
 
