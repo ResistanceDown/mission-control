@@ -1,18 +1,22 @@
 'use client'
 
-import { useCallback, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useSmartPoll } from '@/lib/use-smart-poll'
 
 type GrowthAction =
   | 'refresh_research'
   | 'generate_drafts'
   | 'refresh_research_and_generate'
+  | 'rewrite_draft'
+  | 'update_draft_text'
   | 'approve_draft'
   | 'reject_draft'
   | 'archive_draft'
   | 'clear_current_drafts'
   | 'schedule_draft'
+  | 'unschedule_draft'
   | 'mark_published'
+  | 'reopen_published'
   | 'set_account_target_state'
 
 interface GrowthApiResponse {
@@ -118,6 +122,11 @@ interface GrowthApiResponse {
       confidence?: string
       source_metrics?: Record<string, unknown>
       source_quality_note?: string
+      variant_family_id?: string
+      variant_group_label?: string
+      variant_label?: string
+      variant_position?: number
+      variant_count?: number
       source_tweet?: {
         id?: string
         text?: string
@@ -210,6 +219,25 @@ interface GrowthApiResponse {
       accounts: Array<{ username: string; state: string; updatedAt: string | null; note: string }>
     } | null
   }
+}
+
+const PT_DATE_TIME = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'America/Los_Angeles',
+  month: 'numeric',
+  day: 'numeric',
+  year: 'numeric',
+  hour: 'numeric',
+  minute: '2-digit',
+  hour12: true,
+})
+
+function formatPacificTime(value?: string | null) {
+  const raw = String(value || '').trim()
+  if (!raw) return 'n/a'
+  if (/\bPT\b/.test(raw)) return raw
+  const parsed = new Date(raw)
+  if (Number.isNaN(parsed.getTime())) return raw
+  return `${PT_DATE_TIME.format(parsed)} PT`
 }
 
 function useGrowthData() {
@@ -332,10 +360,18 @@ function DraftCard({
   draft: GrowthApiResponse['growth']['draftCandidates'][number]
   feedbackValue: string
   onFeedbackChange: (value: string) => void
-  onAction: (action: GrowthAction, draftId: string) => void
+  onAction: (action: GrowthAction, draftId: string, extra?: Record<string, unknown>) => void
   saving: boolean
 }) {
   const feedbackPresets = ['Too generic', 'Weak source', 'Too product-y', 'Wrong audience', 'Too abstract', 'Too founder-theater', 'Good direction, rewrite']
+  const [draftText, setDraftText] = useState(draft.text)
+  const [dirty, setDirty] = useState(false)
+
+  useEffect(() => {
+    setDraftText(draft.text)
+    setDirty(false)
+  }, [draft.id, draft.text])
+
   return (
     <article className="rounded-2xl border border-white/10 bg-[#10161f] p-4 shadow-[0_20px_40px_rgba(0,0,0,0.28)]">
       <div className="flex items-start justify-between gap-3">
@@ -360,8 +396,35 @@ function DraftCard({
         )}>{draft.approval || 'candidate'}</span>
       </div>
 
-      <div className="mt-4 rounded-xl border border-cyan-500/15 bg-[#0c1219] px-4 py-4 text-[15px] leading-7 text-foreground whitespace-pre-wrap">
-        {draft.text}
+      <div className="mt-4 rounded-xl border border-cyan-500/15 bg-[#0c1219] px-4 py-4">
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <div className="text-[11px] uppercase tracking-[0.12em] text-cyan-100/70">Exact post text</div>
+          {dirty ? <FieldChip>Edited locally</FieldChip> : null}
+        </div>
+        <textarea
+          className="min-h-36 w-full resize-y rounded-xl border border-white/8 bg-black/15 px-4 py-4 text-[15px] leading-7 text-foreground outline-none transition-smooth focus:border-cyan-500/30"
+          value={draftText}
+          onChange={(event) => {
+            setDraftText(event.target.value)
+            setDirty(event.target.value !== draft.text)
+          }}
+        />
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            onClick={() => onAction('update_draft_text', draft.id, { draftText })}
+            disabled={saving || !dirty || !draftText.trim()}
+            className="rounded-lg border border-white/10 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2 disabled:opacity-60"
+          >
+            Save Edit
+          </button>
+          <button
+            onClick={() => onAction('rewrite_draft', draft.id)}
+            disabled={saving}
+            className="rounded-lg border border-cyan-500/20 px-3 py-2 text-xs font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/10 disabled:opacity-60"
+          >
+            Rewrite From Feedback
+          </button>
+        </div>
       </div>
 
       <div className="mt-4 grid gap-3 lg:grid-cols-[1.2fr_0.8fr]">
@@ -446,11 +509,91 @@ function DraftCard({
       </div>
 
       <div className="mt-4 flex flex-wrap gap-2">
-        <button onClick={() => onAction('approve_draft', draft.id)} disabled={saving || draft.approval === 'approved'} className="rounded-lg bg-emerald-500/15 px-3 py-2 text-xs font-medium text-emerald-200 transition-smooth hover:bg-emerald-500/20 disabled:opacity-60">Approve This Post</button>
+        <button onClick={() => onAction('approve_draft', draft.id)} disabled={saving || dirty || draft.approval === 'approved'} className="rounded-lg bg-emerald-500/15 px-3 py-2 text-xs font-medium text-emerald-200 transition-smooth hover:bg-emerald-500/20 disabled:opacity-60">Approve This Post</button>
         <button onClick={() => onAction('reject_draft', draft.id)} disabled={saving || draft.approval === 'rejected'} className="rounded-lg border border-white/10 px-3 py-2 text-xs font-medium text-muted-foreground transition-smooth hover:bg-surface-2 disabled:opacity-60">Reject</button>
         <button onClick={() => onAction('archive_draft', draft.id)} disabled={saving || draft.approval === 'archived'} className="rounded-lg border border-amber-500/20 px-3 py-2 text-xs font-medium text-amber-200 transition-smooth hover:bg-amber-500/10 disabled:opacity-60">Archive Angle</button>
       </div>
     </article>
+  )
+}
+
+function SourceVariantGroup({
+  familyLabel,
+  sourceLabel,
+  drafts,
+  feedbackDrafts,
+  onFeedbackChange,
+  onAction,
+  saving,
+  defaultOpen,
+}: {
+  familyLabel: string
+  sourceLabel: string
+  drafts: GrowthApiResponse['growth']['draftCandidates']
+  feedbackDrafts: Record<string, string>
+  onFeedbackChange: (draftId: string, value: string) => void
+  onAction: (action: GrowthAction, draftId: string, extra?: Record<string, unknown>) => void
+  saving: boolean
+  defaultOpen?: boolean
+}) {
+  if (!drafts.length) return null
+  const leader = drafts[0]
+  const sourceLikes = getSourceMetric(leader, 'like_count')
+  const sourceReplies = getSourceMetric(leader, 'reply_count')
+  const sourceReposts = getSourceMetric(leader, 'retweet_count')
+  const sourceFollowers = getSourceAuthorFollowers(leader)
+  return (
+    <details
+      open={defaultOpen}
+      className="rounded-2xl border border-cyan-500/15 bg-[#0f151d] p-4 shadow-[0_18px_40px_rgba(0,0,0,0.26)] group"
+    >
+      <summary className="flex cursor-pointer list-none flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <div className="text-[11px] uppercase tracking-[0.14em] text-cyan-100/70">{familyLabel}</div>
+          <div className="mt-1 text-sm font-semibold text-foreground">{sourceLabel}</div>
+          <div className="mt-1 text-xs text-muted-foreground">
+            {drafts.length} variants from the same live source. Expand to compare angles, refine one, and approve the exact text.
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {leader.distribution_type ? <FieldChip>{leader.distribution_type}</FieldChip> : null}
+          {leader.source_account ? <FieldChip>{leader.source_account}</FieldChip> : null}
+          {leader.source_tweet?.url ? <FieldChip>live source</FieldChip> : null}
+          {sourceLikes ? <FieldChip>{sourceLikes} likes</FieldChip> : null}
+          {sourceReplies ? <FieldChip>{sourceReplies} replies</FieldChip> : null}
+          {sourceReposts ? <FieldChip>{sourceReposts} reposts</FieldChip> : null}
+          {sourceFollowers ? <FieldChip>{sourceFollowers.toLocaleString()} followers</FieldChip> : null}
+          <span className="rounded-full border border-white/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+            Expand
+          </span>
+        </div>
+      </summary>
+      {leader.source_quality_note ? (
+        <div className="mt-3 rounded-lg border border-white/8 bg-black/20 px-3 py-2 text-xs text-foreground/80">
+          {leader.source_quality_note}
+        </div>
+      ) : null}
+      {leader.why_now ? (
+        <div className="mt-4 rounded-xl border border-white/8 bg-black/20 px-3 py-3">
+          <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Why this source matters now</div>
+          <div className="mt-1 text-sm text-foreground/85">{leader.why_now}</div>
+        </div>
+      ) : null}
+      <div className="mt-4 space-y-4">
+        {drafts.map((draft) => (
+          <div key={draft.id} className="rounded-2xl border border-white/8 bg-black/15 p-3">
+            {draft.variant_label ? <div className="mb-3 text-[11px] uppercase tracking-[0.12em] text-muted-foreground">{draft.variant_label}</div> : null}
+            <DraftCard
+              draft={draft}
+              feedbackValue={feedbackDrafts[draft.id] || ''}
+              onFeedbackChange={(value) => onFeedbackChange(draft.id, value)}
+              onAction={onAction}
+              saving={saving}
+            />
+          </div>
+        ))}
+      </div>
+    </details>
   )
 }
 
@@ -479,6 +622,17 @@ export function GrowthReviewPanel() {
     () => [...originalCandidates].sort((left, right) => Number(right.timeliness_score || 0) - Number(left.timeliness_score || 0)),
     [originalCandidates],
   )
+  const groupedDraftCandidates = useMemo(() => {
+    const groups = new Map<string, GrowthApiResponse['growth']['draftCandidates']>()
+    for (const draft of growth?.draftCandidates || []) {
+      const key = String(draft.variant_family_id || draft.id || '').trim()
+      if (!groups.has(key)) groups.set(key, [])
+      groups.get(key)!.push(draft)
+    }
+    return Array.from(groups.values()).map((group) =>
+      [...group].sort((left, right) => Number(left.variant_position || 999) - Number(right.variant_position || 999)),
+    )
+  }, [growth?.draftCandidates])
   const bestForFollowerGrowth = growth?.recommendations?.bestForFollowerGrowth
     ? byId.get(growth.recommendations.bestForFollowerGrowth) || sortedForGrowth[0]
     : sortedForGrowth[0]
@@ -574,12 +728,16 @@ export function GrowthReviewPanel() {
         refresh_research: 'Research refreshed.',
         generate_drafts: 'Draft candidates generated.',
         refresh_research_and_generate: 'Research refreshed and a new candidate pack generated.',
+        rewrite_draft: 'Draft rewritten from the current research snapshot.',
+        update_draft_text: 'Draft text saved.',
         approve_draft: 'Post approved and moved to Ready to schedule.',
         reject_draft: 'Draft rejected. The system will learn from that.',
         archive_draft: 'Angle archived without poisoning the whole source family.',
         clear_current_drafts: 'Current drafts cleared. Learning memory was preserved.',
         schedule_draft: 'Post scheduled in the editorial desk.',
+        unschedule_draft: 'Post moved back to Ready to schedule without a publish time.',
         mark_published: 'Post marked published and the results loop was triggered.',
+        reopen_published: 'Published state cleared and the post moved back into the scheduling lane.',
         set_account_target_state: 'Account target updated.',
       }
       if (draftId) {
@@ -633,7 +791,7 @@ export function GrowthReviewPanel() {
         </div>
 
         <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-          <MetricCard label="Research" value={growth.externalStatus} subtitle={growth.freshness?.lastXPullAt || growth.researchGeneratedAt || 'No pull yet'} accent="cyan" />
+          <MetricCard label="Research" value={growth.externalStatus} subtitle={formatPacificTime(growth.freshness?.lastXPullAt || growth.researchGeneratedAt || null)} accent="cyan" />
           <MetricCard label="Candidates" value={candidateCount} subtitle="Current review pack" accent="violet" />
           <MetricCard label="Ready to schedule" value={readyToSchedule} subtitle="Approved exact posts" accent="emerald" />
           <MetricCard label="Reply opportunities" value={topReplyCount} subtitle="Best for follower growth" accent="amber" />
@@ -758,16 +916,40 @@ export function GrowthReviewPanel() {
 
           <CollapsibleSection title="Draft candidates" subtitle="Review exact post text, source basis, and why the system selected it." defaultOpen>
             <div className="space-y-4">
-              {growth.draftCandidates.length ? growth.draftCandidates.map((draft) => (
-                <DraftCard
-                  key={draft.id}
-                  draft={draft}
-                  feedbackValue={feedbackDrafts[draft.id] || ''}
-                  onFeedbackChange={(value) => setFeedbackDrafts((current) => ({ ...current, [draft.id]: value }))}
-                  onAction={(action, draftId) => void runGrowthAction(action, draftId)}
-                  saving={actionState.status === 'saving'}
-                />
-              )) : <div className="rounded-xl border border-white/10 bg-[#10161f] px-4 py-4 text-sm text-muted-foreground">Research is ready. Generate a fresh candidate pack when you want posts to review.</div>}
+              {groupedDraftCandidates.length ? groupedDraftCandidates.map((group, groupIndex) => {
+                const leader = group[0]
+                const familyLabel = leader.variant_group_label || 'Candidate set'
+                const sourceLabel =
+                  leader.source_account && leader.source_tweet?.url
+                    ? `${leader.source_account} • ${leader.angle}`
+                    : leader.angle || leader.pillar
+                if (group.length > 1 && leader.source_tweet?.url) {
+                  return (
+                    <SourceVariantGroup
+                      key={leader.variant_family_id || leader.id}
+                      familyLabel={familyLabel}
+                      sourceLabel={sourceLabel}
+                      drafts={group}
+                      defaultOpen={groupIndex === 0}
+                      feedbackDrafts={feedbackDrafts}
+                      onFeedbackChange={(draftId, value) => setFeedbackDrafts((current) => ({ ...current, [draftId]: value }))}
+                      onAction={(action, draftId, extra) => void runGrowthAction(action, draftId, extra || {})}
+                      saving={actionState.status === 'saving'}
+                    />
+                  )
+                }
+                const draft = leader
+                return (
+                  <DraftCard
+                    key={draft.id}
+                    draft={draft}
+                    feedbackValue={feedbackDrafts[draft.id] || ''}
+                    onFeedbackChange={(value) => setFeedbackDrafts((current) => ({ ...current, [draft.id]: value }))}
+                    onAction={(action, draftId, extra) => void runGrowthAction(action, draftId, extra || {})}
+                    saving={actionState.status === 'saving'}
+                  />
+                )
+              }) : <div className="rounded-xl border border-white/10 bg-[#10161f] px-4 py-4 text-sm text-muted-foreground">Research is ready. Generate a fresh candidate pack when you want posts to review.</div>}
             </div>
           </CollapsibleSection>
 
@@ -786,8 +968,8 @@ export function GrowthReviewPanel() {
                           <FieldChip>{post.status}</FieldChip>
                           {post.distributionType ? <FieldChip>{post.distributionType}</FieldChip> : null}
                           {post.sourceType ? <FieldChip>{post.sourceType}</FieldChip> : null}
-                          {post.approvedAtPt ? <FieldChip>approved {post.approvedAtPt}</FieldChip> : null}
-                          {post.scheduledAt ? <FieldChip>scheduled {post.scheduledAt}</FieldChip> : null}
+                          {post.approvedAtPt ? <FieldChip>approved {formatPacificTime(post.approvedAtPt)}</FieldChip> : null}
+                        {post.scheduledAtPt ? <FieldChip>scheduled {formatPacificTime(post.scheduledAtPt)}</FieldChip> : post.scheduledAt ? <FieldChip>scheduled {formatPacificTime(post.scheduledAt)}</FieldChip> : null}
                         </div>
                       </div>
                     </div>
@@ -813,6 +995,9 @@ export function GrowthReviewPanel() {
                         </div>
                         <div className="mt-3 flex flex-wrap gap-2">
                           <button onClick={() => void runGrowthAction('schedule_draft', post.id, { scheduledAt: scheduleState.when, scheduleNote: scheduleState.note, scheduleSource: scheduleState.when === suggested.when ? 'machine_suggested' : 'user_selected' })} disabled={actionState.status === 'saving' || !scheduleState.when} className="rounded-lg bg-emerald-500/15 px-3 py-2 text-xs font-medium text-emerald-200 transition-smooth hover:bg-emerald-500/20 disabled:opacity-60">Schedule</button>
+                          {post.status === 'scheduled' ? (
+                            <button onClick={() => void runGrowthAction('unschedule_draft', post.id)} disabled={actionState.status === 'saving'} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2 disabled:opacity-60">Unschedule</button>
+                          ) : null}
                         </div>
                       </div>
                       <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
@@ -874,14 +1059,23 @@ export function GrowthReviewPanel() {
                         <FieldChip>{post.status}</FieldChip>
                         {post.distributionType ? <FieldChip>{post.distributionType}</FieldChip> : null}
                         {post.sourceType ? <FieldChip>{post.sourceType}</FieldChip> : null}
-                        {post.scheduledAtPt ? <FieldChip>scheduled {post.scheduledAtPt}</FieldChip> : null}
+                        {post.scheduledAtPt ? <FieldChip>scheduled {formatPacificTime(post.scheduledAtPt)}</FieldChip> : null}
                       </div>
                       <div className="mt-4 rounded-xl border border-cyan-500/15 bg-black/20 px-4 py-4 text-[15px] leading-7 text-foreground whitespace-pre-wrap">{post.text}</div>
                       <div className="mt-3 flex flex-wrap gap-3 text-xs text-muted-foreground">
                         {post.selectionReason ? <span>{post.selectionReason}</span> : null}
                         {post.tweetId ? <span>tweet {post.tweetId}</span> : null}
                       </div>
-                      {post.tweetUrl ? <a href={post.tweetUrl} target="_blank" rel="noreferrer" className="mt-3 inline-block text-xs text-cyan-200 hover:text-cyan-100">Open published post</a> : null}
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {post.tweetUrl ? <a href={post.tweetUrl} target="_blank" rel="noreferrer" className="inline-block text-xs text-cyan-200 hover:text-cyan-100">Open published post</a> : null}
+                        <button
+                          onClick={() => void runGrowthAction('reopen_published', post.id)}
+                          disabled={actionState.status === 'saving'}
+                          className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2 disabled:opacity-60"
+                        >
+                          Reopen
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -893,7 +1087,7 @@ export function GrowthReviewPanel() {
                       <div className="flex flex-wrap gap-2 text-[11px] text-muted-foreground">
                         {entry.pillar ? <FieldChip>{String(entry.pillar)}</FieldChip> : null}
                         {entry.distribution_type ? <FieldChip>{String(entry.distribution_type)}</FieldChip> : null}
-                        {entry.posted_at_pt ? <FieldChip>{String(entry.posted_at_pt)}</FieldChip> : null}
+                        {entry.posted_at_pt ? <FieldChip>{formatPacificTime(String(entry.posted_at_pt))}</FieldChip> : null}
                       </div>
                       {entry.tweet_url ? <a href={String(entry.tweet_url)} target="_blank" rel="noreferrer" className="mt-2 inline-block text-xs text-cyan-200 hover:text-cyan-100">Open published post</a> : null}
                     </div>
@@ -909,7 +1103,7 @@ export function GrowthReviewPanel() {
             <div className="space-y-3">
               <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3 text-sm text-foreground/85">
                 <div><strong className="text-foreground">Primary goal:</strong> {growth.strategy?.primaryGoal || 'No strategy generated yet.'}</div>
-                <div className="mt-2 text-xs text-muted-foreground">Last pull {growth.freshness?.lastXPullAt || growth.researchGeneratedAt || 'n/a'} • {growth.freshness?.queryCount ?? 0} queries • {growth.freshness?.sampleSize ?? 0} samples</div>
+                <div className="mt-2 text-xs text-muted-foreground">Last pull {formatPacificTime(growth.freshness?.lastXPullAt || growth.researchGeneratedAt || null)} • {growth.freshness?.queryCount ?? 0} queries • {growth.freshness?.sampleSize ?? 0} samples</div>
               </div>
               {growth.trendClusters.length ? growth.trendClusters.map((cluster) => (
                 <div key={cluster.id} className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
@@ -1027,7 +1221,7 @@ export function GrowthReviewPanel() {
                   <div className="mt-2 space-y-2">
                     {growth.editorialMemory.recentFeedback.map((entry, index) => (
                       <div key={`feedback-${index}`} className="rounded-lg border border-white/8 bg-black/15 px-3 py-2">
-                        <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">{entry.decision} • {entry.archetype || 'unknown'} • {entry.reviewedAtPt}</div>
+                        <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">{entry.decision} • {entry.archetype || 'unknown'} • {formatPacificTime(entry.reviewedAtPt)}</div>
                         <div className="mt-1 text-sm text-foreground/85">{entry.feedback}</div>
                       </div>
                     ))}
