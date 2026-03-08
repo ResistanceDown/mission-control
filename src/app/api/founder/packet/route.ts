@@ -13,6 +13,8 @@ const SIGNAL_LEDGER_PATH = path.join(HABI_ROOT, 'output', 'founder', 'customer-s
 const PRODUCT_PROOF_PATH = path.join(HABI_ROOT, 'output', 'founder', 'product-proof-ledger.json')
 const ADOPTION_SCORECARD_PATH = path.join(HABI_ROOT, 'output', 'revenue', 'revenue-escape-scorecard.json')
 const GROWTH_WEEKS_ROOT = path.join(HABI_ROOT, 'output', 'growth', 'weeks')
+const REPORTS_ROOT = path.join(process.env.HOME || '/Users/kokoro', '.openclaw', 'reports')
+const PRODUCTION_FRESHNESS_WINDOW_SEC = 12 * 60 * 60
 
 async function readJsonOrNull<T>(filePath: string): Promise<T | null> {
   try {
@@ -75,6 +77,180 @@ async function findLatestGrowthWeek(root: string): Promise<string | null> {
     })
 
   return weekNames[0] ?? null
+}
+
+type ProductionCheckInfo = {
+  label: string
+  path: string | null
+  generatedAt: string | null
+  ageSeconds: number | null
+  stale: boolean
+}
+
+function parseTaskMetadata(raw: string | null | undefined): Record<string, unknown> {
+  if (!raw) return {}
+  try {
+    return JSON.parse(raw) as Record<string, unknown>
+  } catch {
+    return {}
+  }
+}
+
+function taskStatusPriority(status: string) {
+  switch (status) {
+    case 'quality_review':
+      return 5
+    case 'review':
+      return 4
+    case 'in_progress':
+      return 3
+    case 'assigned':
+      return 2
+    case 'inbox':
+      return 1
+    default:
+      return 0
+  }
+}
+
+function buildCanonicalVisibleTaskIds(
+  rows: Array<{ id: number; status: string; updated_at: number; metadata?: string | null }>,
+) {
+  const groups = new Map<string, Array<{ id: number; status: string; updated_at: number; metadata: Record<string, unknown> }>>()
+  const visibleIds = new Set<number>()
+  let duplicateFingerprintCount = 0
+
+  for (const row of rows) {
+    const metadata = parseTaskMetadata(row.metadata)
+    const fingerprint = String(metadata.fingerprint || '').trim()
+    if (!fingerprint) {
+      visibleIds.add(row.id)
+      continue
+    }
+    const bucket = groups.get(fingerprint) || []
+    bucket.push({
+      id: row.id,
+      status: row.status,
+      updated_at: row.updated_at,
+      metadata,
+    })
+    groups.set(fingerprint, bucket)
+  }
+
+  for (const [, bucket] of groups) {
+    if (bucket.length === 1) {
+      visibleIds.add(bucket[0].id)
+      continue
+    }
+    duplicateFingerprintCount += bucket.length - 1
+    bucket.sort((left, right) => {
+      const leftSuperseded = Number(left.metadata.superseded_by_task_id || 0) > 0 ? 1 : 0
+      const rightSuperseded = Number(right.metadata.superseded_by_task_id || 0) > 0 ? 1 : 0
+      if (leftSuperseded !== rightSuperseded) return leftSuperseded - rightSuperseded
+      const leftCanonical = Number(left.metadata.canonical_task_id || 0) === left.id ? 1 : 0
+      const rightCanonical = Number(right.metadata.canonical_task_id || 0) === right.id ? 1 : 0
+      if (leftCanonical !== rightCanonical) return rightCanonical - leftCanonical
+      const statusDelta = taskStatusPriority(right.status) - taskStatusPriority(left.status)
+      if (statusDelta !== 0) return statusDelta
+      if (left.updated_at !== right.updated_at) return right.updated_at - left.updated_at
+      return left.id - right.id
+    })
+    visibleIds.add(bucket[0].id)
+  }
+
+  return {
+    visibleIds,
+    duplicateFingerprintCount,
+  }
+}
+
+async function findLatestReportPath(namePattern: RegExp, root = REPORTS_ROOT): Promise<string | null> {
+  let entries: string[] = []
+  try {
+    entries = await fs.readdir(root)
+  } catch {
+    return null
+  }
+  const matches = entries.filter((entry) => namePattern.test(entry)).sort()
+  if (!matches.length) return null
+  const latestDir = path.join(root, matches[matches.length - 1])
+  try {
+    const stat = await fs.stat(latestDir)
+    if (stat.isFile()) return latestDir
+  } catch {
+    return null
+  }
+  return latestDir
+}
+
+async function buildProductionCheck(label: string, targetPath: string | null): Promise<ProductionCheckInfo> {
+  if (!targetPath) {
+    return { label, path: null, generatedAt: null, ageSeconds: null, stale: true }
+  }
+  try {
+    const stat = await fs.stat(targetPath)
+    const ageSeconds = Math.max(0, Math.floor((Date.now() - stat.mtimeMs) / 1000))
+    return {
+      label,
+      path: targetPath,
+      generatedAt: new Date(stat.mtimeMs).toISOString(),
+      ageSeconds,
+      stale: ageSeconds > PRODUCTION_FRESHNESS_WINDOW_SEC,
+    }
+  } catch {
+    return { label, path: targetPath, generatedAt: null, ageSeconds: null, stale: true }
+  }
+}
+
+async function loadProductionTruth(workspaceId: number) {
+  const db = getDatabase()
+  const activeRows = db.prepare(`
+    SELECT id, status, metadata
+    FROM tasks
+    WHERE workspace_id = ?
+      AND lower(coalesce(assigned_to,'')) LIKE 'habi-%'
+      AND status NOT IN ('done', 'cancelled')
+  `).all(workspaceId) as Array<{ id: number; status: string; metadata?: string | null }>
+
+  const fingerprintCounts = new Map<string, number>()
+  for (const row of activeRows) {
+    const metadata = parseTaskMetadata(row.metadata)
+    const fingerprint = String(metadata.fingerprint || '').trim()
+    if (!fingerprint) continue
+    fingerprintCounts.set(fingerprint, (fingerprintCounts.get(fingerprint) || 0) + 1)
+  }
+  const unresolvedDuplicateFingerprints = [...fingerprintCounts.values()].filter((count) => count > 1).length
+
+  const criticalAgents = ['habi-control', 'habi-foreman', 'habi-readiness', 'habi-qc', 'habi-growth', 'ops-heartbeat']
+  const offlineCriticalAgentCount = db.prepare(`
+    SELECT COUNT(*) as count
+    FROM agents
+    WHERE workspace_id = ?
+      AND id IN (${criticalAgents.map(() => '?').join(',')})
+      AND status = 'offline'
+  `).get(workspaceId, ...criticalAgents) as { count: number }
+
+  const latestFounderPacket = await findLatestFounderPacketPath(FOUNDER_PACKET_ROOT)
+  const latestDoctorDir = await findLatestReportPath(/^founder-os-doctor-\d{8}-\d{6}$/)
+  const latestE2eDir = await findLatestReportPath(/^habi-e2e-shakedown-\d{8}-\d{6}$/)
+  const latestCronDriftPath = await findLatestReportPath(/^cron-drift-\d{8}-\d{6}\.md$/)
+  const latestCronQualityPath = await findLatestReportPath(/^cron-run-quality-\d{8}-\d{6}\.md$/)
+
+  const checks = [
+    await buildProductionCheck('Founder doctor', latestDoctorDir ? path.join(latestDoctorDir, 'report.json') : null),
+    await buildProductionCheck('E2E shakedown', latestE2eDir ? path.join(latestE2eDir, 'system-packet.md') : null),
+    await buildProductionCheck('Cron drift', latestCronDriftPath),
+    await buildProductionCheck('Cron quality', latestCronQualityPath),
+    await buildProductionCheck('Founder packet', latestFounderPacket),
+  ]
+  const staleReportCount = checks.filter((check) => check.stale).length
+
+  return {
+    duplicateFingerprintCount: unresolvedDuplicateFingerprints,
+    staleReportCount,
+    criticalOfflineAgentCount: Number(offlineCriticalAgentCount.count || 0),
+    latestChecks: checks,
+  }
 }
 
 function normalizeGrowthResearchSignals(input: unknown): string[] {
@@ -395,46 +571,55 @@ function hasAegisApproval(
 
 function loadTaskSnapshot(workspaceId: number) {
   const db = getDatabase()
-  const statusRows = db.prepare(`
-    SELECT status, COUNT(*) as count
+  const activeTaskRows = db.prepare(`
+    SELECT id, title, status, assigned_to, priority, updated_at, metadata
     FROM tasks
     WHERE workspace_id = ?
       AND lower(coalesce(assigned_to,'')) LIKE 'habi-%'
       AND status NOT IN ('done', 'cancelled')
-    GROUP BY status
-  `).all(workspaceId) as Array<{ status: string; count: number }>
-
-  const byStatus: Record<string, number> = {}
-  let totalActive = 0
-  for (const row of statusRows) {
-    byStatus[row.status] = row.count
-    totalActive += row.count
-  }
-
-  const topActive = db.prepare(`
-    SELECT id, title, status, assigned_to, priority, updated_at
-    FROM tasks
-    WHERE workspace_id = ?
-      AND lower(coalesce(assigned_to,'')) LIKE 'habi-%'
-      AND status NOT IN ('done', 'cancelled')
-    ORDER BY
-      CASE priority
-        WHEN 'urgent' THEN 0
-        WHEN 'critical' THEN 1
-        WHEN 'high' THEN 2
-        WHEN 'medium' THEN 3
-        ELSE 4
-      END,
-      updated_at DESC
-    LIMIT 6
   `).all(workspaceId) as Array<{
     id: number
     title: string
     status: string
     assigned_to: string | null
     priority: string
-      updated_at: number
+    updated_at: number
+    metadata?: string | null
   }>
+  const { visibleIds, duplicateFingerprintCount } = buildCanonicalVisibleTaskIds(activeTaskRows)
+  const byStatus: Record<string, number> = {}
+  let totalActive = 0
+  for (const row of activeTaskRows) {
+    if (!visibleIds.has(row.id)) continue
+    byStatus[row.status] = (byStatus[row.status] || 0) + 1
+    totalActive += 1
+  }
+
+  const topActive = activeTaskRows
+    .filter((task) => visibleIds.has(task.id))
+    .sort((left, right) => {
+      const priorityOrder = (value: string) => {
+        switch (value) {
+          case 'urgent': return 0
+          case 'critical': return 1
+          case 'high': return 2
+          case 'medium': return 3
+          default: return 4
+        }
+      }
+      const priorityDelta = priorityOrder(left.priority) - priorityOrder(right.priority)
+      if (priorityDelta !== 0) return priorityDelta
+      return right.updated_at - left.updated_at
+    })
+    .slice(0, 6)
+    .map(({ id, title, status, assigned_to, priority, updated_at }) => ({
+      id,
+      title,
+      status,
+      assigned_to,
+      priority,
+      updated_at,
+    }))
 
   const reviewQueueRows = db.prepare(`
     SELECT id, title, status, assigned_to, priority, updated_at
@@ -465,7 +650,9 @@ function loadTaskSnapshot(workspaceId: number) {
     updated_at: number
   }>
 
-  const reviewQueue = reviewQueueRows.map((task) => ({
+  const reviewQueue = reviewQueueRows
+    .filter((task) => visibleIds.has(task.id))
+    .map((task) => ({
     ...task,
     aegisApproved: hasAegisApproval(db, task.id, workspaceId),
   }))
@@ -511,7 +698,9 @@ function loadTaskSnapshot(workspaceId: number) {
     updated_at: number
   }>
 
-  const approvalCandidates = approvalQueueRows.map((task) => {
+  const approvalCandidates = approvalQueueRows
+    .filter((task) => visibleIds.has(task.id))
+    .map((task) => {
     const metadata = db.prepare(`
       SELECT metadata FROM tasks
       WHERE id = ? AND workspace_id = ?
@@ -571,8 +760,9 @@ function loadTaskSnapshot(workspaceId: number) {
     updated_at: number
     metadata?: string | null
   }>
+  const canonicalAppFinishTaskRows = appFinishTaskRows.filter((task) => visibleIds.has(task.id))
 
-  const appFinishQueue = appFinishTaskRows
+  const appFinishQueue = canonicalAppFinishTaskRows
     .filter((task) => !['review', 'quality_review'].includes(task.status))
     .slice(0, 8)
     .map((task) => {
@@ -593,7 +783,7 @@ function loadTaskSnapshot(workspaceId: number) {
       }
     })
 
-  const appFinishTaskIds = appFinishTaskRows.map((task) => task.id)
+  const appFinishTaskIds = canonicalAppFinishTaskRows.map((task) => task.id)
   const commentRows = appFinishTaskIds.length
     ? db.prepare(`
       SELECT task_id, author, content, created_at
@@ -617,7 +807,7 @@ function loadTaskSnapshot(workspaceId: number) {
   }
 
   const staleCutoff = Math.floor(Date.now() / 1000) - (4 * 60 * 60)
-  const appFinishHealth = appFinishTaskRows.map((task) => {
+  const appFinishHealth = canonicalAppFinishTaskRows.map((task) => {
     let metadata: Record<string, unknown> = {}
     try {
       metadata = task.metadata ? JSON.parse(task.metadata) : {}
@@ -676,8 +866,9 @@ function loadTaskSnapshot(workspaceId: number) {
     approvalQueue,
     waitingOnQcQueue,
     appFinishQueue,
+    duplicateFingerprintCount,
     appFinishCounts: {
-      active: appFinishTaskRows.length,
+      active: canonicalAppFinishTaskRows.length,
       blockedByFounder: appFinishHealth.filter((task) => task.status === 'assigned' && !task.founderApproved).length,
       blockedByEvidence: appFinishHealth.filter((task) =>
         ['in_progress', 'review', 'quality_review'].includes(task.status) &&
@@ -720,6 +911,8 @@ export async function GET(request: NextRequest) {
     const growthResultsSummary = growthPaths ? await readJsonOrNull<any>(growthPaths.resultsSummaryPath) : null
     const repeatedPains = summarizeRepeatedPains(signalLedger)
     const workspaceId = auth.user.workspace_id ?? 1
+    const taskSnapshot = loadTaskSnapshot(workspaceId)
+    const productionTruth = await loadProductionTruth(workspaceId)
 
     return NextResponse.json({
       hasPacket: Boolean(packet),
@@ -757,7 +950,10 @@ export async function GET(request: NextRequest) {
         resultsSummary: normalizeResultsSummary(growthResultsSummary),
         scorecard: growthScorecard,
       },
-      tasks: loadTaskSnapshot(workspaceId),
+      tasks: {
+        ...taskSnapshot,
+        productionTruth,
+      },
     })
   } catch (error) {
     logger.error({ err: error }, 'Founder packet API error')
