@@ -350,6 +350,24 @@ function buildSuggestedSchedule(post: GrowthApiResponse['growth']['approvedPosts
   }
 }
 
+function QueueBadge({ label, value, tone = 'neutral' }: { label: string; value: string; tone?: 'neutral' | 'urgent' | 'ready' | 'active' }) {
+  const toneClass =
+    tone === 'urgent'
+      ? 'border-rose-500/20 bg-rose-500/8 text-rose-100'
+      : tone === 'ready'
+        ? 'border-emerald-500/20 bg-emerald-500/8 text-emerald-100'
+        : tone === 'active'
+          ? 'border-cyan-500/20 bg-cyan-500/8 text-cyan-100'
+          : 'border-white/10 bg-black/20 text-foreground/80'
+
+  return (
+    <div className={cx('rounded-xl border px-3 py-3', toneClass)}>
+      <div className="text-[11px] uppercase tracking-[0.12em] text-current/70">{label}</div>
+      <div className="mt-1 text-sm font-medium text-foreground">{value}</div>
+    </div>
+  )
+}
+
 function DraftCard({
   draft,
   feedbackValue,
@@ -759,6 +777,7 @@ export function GrowthReviewPanel() {
 
   const candidateCount = growth.draftCandidates.length
   const readyToSchedule = readyPosts.length
+  const scheduledCount = approvedPosts.filter((post) => post.status === 'scheduled').length
   const lowConfidenceCount = growth.freshness?.lowConfidenceClusters?.length ?? 0
   const topReplyCount = growth.engagementTargets.replyTargets.length
   const publishedCount = publishedPosts.length || growth.resultsSummary?.postedCount || 0
@@ -796,6 +815,29 @@ export function GrowthReviewPanel() {
           <MetricCard label="Ready to schedule" value={readyToSchedule} subtitle="Approved exact posts" accent="emerald" />
           <MetricCard label="Reply opportunities" value={topReplyCount} subtitle="Best for follower growth" accent="amber" />
           <MetricCard label="Published" value={publishedCount} subtitle={growth.strategy?.accountStage || 'Tracked in results loop'} accent={publishedCount ? 'emerald' : lowConfidenceCount ? 'rose' : 'cyan'} />
+        </div>
+
+        <div className="mt-4 grid gap-3 lg:grid-cols-4">
+          <QueueBadge
+            label="Waiting on you"
+            value={readyToSchedule ? `${readyToSchedule} approved post${readyToSchedule === 1 ? '' : 's'} ready to schedule` : candidateCount ? `${candidateCount} candidate${candidateCount === 1 ? '' : 's'} ready for review` : 'Refresh research or generate a new pack'}
+            tone={readyToSchedule ? 'ready' : candidateCount ? 'active' : 'neutral'}
+          />
+          <QueueBadge
+            label="Best next move"
+            value={todayBestMove?.primaryAction || (bestForFollowerGrowth ? `Review the top ${String(bestForFollowerGrowth.distribution_type || 'candidate')}` : 'No recommendation yet')}
+            tone="active"
+          />
+          <QueueBadge
+            label="Scheduling lane"
+            value={scheduledCount ? `${scheduledCount} post${scheduledCount === 1 ? '' : 's'} scheduled` : 'Nothing scheduled yet'}
+            tone={scheduledCount ? 'ready' : 'neutral'}
+          />
+          <QueueBadge
+            label="Research risk"
+            value={lowConfidenceCount ? `${lowConfidenceCount} low-confidence cluster${lowConfidenceCount === 1 ? '' : 's'}` : 'No major confidence warnings'}
+            tone={lowConfidenceCount ? 'urgent' : 'neutral'}
+          />
         </div>
 
         <div className="mt-4 rounded-xl border border-cyan-500/15 bg-gradient-to-br from-cyan-500/8 via-surface-2/80 to-surface-2/80 p-4">
@@ -977,7 +1019,28 @@ export function GrowthReviewPanel() {
                     {post.selectionReason ? <div className="mt-3 text-sm text-foreground/80">{post.selectionReason}</div> : null}
                     <div className="mt-4 grid gap-3 xl:grid-cols-2">
                       <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
-                        <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Schedule</div>
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Schedule</div>
+                            <div className="mt-1 text-xs text-foreground/75">
+                              {post.distributionType === 'reply'
+                                ? 'The system prefers a warm-window reply.'
+                                : post.distributionType === 'quote'
+                                  ? 'The system prefers a quote window with active traction.'
+                                  : 'The system prefers a calmer standalone slot.'}
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => setScheduleDrafts((current) => ({
+                              ...current,
+                              [post.id]: { when: suggested.when, note: suggested.note },
+                            }))}
+                            type="button"
+                            className="rounded-lg border border-white/10 px-2.5 py-1.5 text-[11px] text-foreground/80 transition-smooth hover:bg-surface-2"
+                          >
+                            Use suggested time
+                          </button>
+                        </div>
                         <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_1fr]">
                           <label className="text-xs text-muted-foreground">When
                             <input type="datetime-local" value={scheduleState.when} onChange={(event) => setScheduleDrafts((current) => ({ ...current, [post.id]: { ...scheduleState, when: event.target.value } }))} className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground" />
@@ -986,12 +1049,9 @@ export function GrowthReviewPanel() {
                             <input value={scheduleState.note} onChange={(event) => setScheduleDrafts((current) => ({ ...current, [post.id]: { ...scheduleState, note: event.target.value } }))} className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground" placeholder="optional schedule note" />
                           </label>
                         </div>
-                        <div className="mt-2 text-xs text-muted-foreground">
-                          {post.distributionType === 'reply'
-                            ? 'Suggested while the conversation is still warm.'
-                            : post.distributionType === 'quote'
-                              ? 'Suggested after the source has traction but before the thread cools.'
-                              : 'Suggested for a calmer standalone slot.'}
+                        <div className="mt-2 rounded-lg border border-emerald-500/15 bg-emerald-500/5 px-3 py-2 text-xs text-foreground/80">
+                          Suggested: <span className="text-foreground">{formatPacificTime(suggested.when)}</span>
+                          {suggested.note ? <span className="text-muted-foreground"> • {suggested.note}</span> : null}
                         </div>
                         <div className="mt-3 flex flex-wrap gap-2">
                           <button onClick={() => void runGrowthAction('schedule_draft', post.id, { scheduledAt: scheduleState.when, scheduleNote: scheduleState.note, scheduleSource: scheduleState.when === suggested.when ? 'machine_suggested' : 'user_selected' })} disabled={actionState.status === 'saving' || !scheduleState.when} className="rounded-lg bg-emerald-500/15 px-3 py-2 text-xs font-medium text-emerald-200 transition-smooth hover:bg-emerald-500/20 disabled:opacity-60">Schedule</button>
@@ -1002,6 +1062,9 @@ export function GrowthReviewPanel() {
                       </div>
                       <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
                         <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Mark published</div>
+                        <div className="mt-1 text-xs text-foreground/75">
+                          After you manually post on X, record the live tweet here so results sync can learn from the actual outcome.
+                        </div>
                         <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_1fr]">
                           <label className="text-xs text-muted-foreground">Tweet URL
                             <input value={publishState.tweetUrl} onChange={(event) => setPublishDrafts((current) => ({ ...current, [post.id]: { ...publishState, tweetUrl: event.target.value } }))} className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground" placeholder="https://x.com/.../status/..." />
@@ -1047,6 +1110,14 @@ export function GrowthReviewPanel() {
                     <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Strategy notes</div>
                     <div className="mt-2 space-y-1 text-sm text-foreground/90">
                       {growth.resultsSummary.strategyNotes.map((note, index) => <div key={`result-note-${index}`} className="flex gap-2"><span>•</span><span>{note}</span></div>)}
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-cyan-500/15 bg-cyan-500/5 px-3 py-3">
+                    <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Operator takeaway</div>
+                    <div className="mt-2 text-sm text-foreground/90">
+                      {syncedPublishedCount
+                        ? 'Use this section to see which source types, formats, and timing patterns are actually winning. The next pack should reflect these outcomes.'
+                        : 'Once the first live post has synced results, this lane will start showing what the system is promoting or demoting based on performance.'}
                     </div>
                   </div>
                 </div>
