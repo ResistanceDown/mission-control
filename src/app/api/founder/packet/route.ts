@@ -864,6 +864,8 @@ function normalizeApprovedPosts(input: unknown): Array<{
   selectionReason?: string
   tweetId?: string
   tweetUrl?: string | null
+  publishStatus?: string
+  publishError?: string
 }> {
   if (!Array.isArray(input)) return []
   return input
@@ -888,6 +890,8 @@ function normalizeApprovedPosts(input: unknown): Array<{
         selectionReason: String(record.selection_reason || '').trim() || undefined,
         tweetId: String(record.tweet_id || '').trim(),
         tweetUrl: String(record.tweet_url || '').trim() || (record.tweet_id ? `https://x.com/i/web/status/${record.tweet_id}` : null),
+        publishStatus: String(record.publish_status || '').trim() || undefined,
+        publishError: String(record.publish_error || '').trim() || undefined,
       }
     })
     .filter(Boolean)
@@ -907,6 +911,8 @@ function normalizeApprovedPosts(input: unknown): Array<{
       selectionReason?: string
       tweetId?: string
       tweetUrl?: string | null
+      publishStatus?: string
+      publishError?: string
     }>
 }
 

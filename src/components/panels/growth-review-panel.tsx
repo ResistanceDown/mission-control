@@ -170,6 +170,8 @@ interface GrowthApiResponse {
       selectionReason?: string
       tweetId?: string
       tweetUrl?: string | null
+      publishStatus?: string
+      publishError?: string
     }>
     publishLog?: Array<{ id?: string; tweet_url?: string | null; posted_at_pt?: string; distribution_type?: string; source_type?: string; pillar?: string; angle?: string }>
     resultsSummary?: {
@@ -661,7 +663,8 @@ export function GrowthReviewPanel() {
     ? byId.get(growth.recommendations.bestOriginalPost) || sortedOriginals[0]
     : sortedOriginals[0]
   const approvedPosts = growth?.approvedPosts || []
-  const readyPosts = approvedPosts.filter((post) => post.status !== 'published')
+  const readyPosts = approvedPosts.filter((post) => post.status === 'approved')
+  const scheduledPosts = approvedPosts.filter((post) => post.status === 'scheduled')
   const publishedPosts = approvedPosts.filter((post) => post.status === 'published')
 
   const patchAccountTargetState = useCallback((usernameInput: string, nextState: 'watch' | 'prioritize' | 'mute' | 'engage_this_week', note: string) => {
@@ -777,7 +780,7 @@ export function GrowthReviewPanel() {
 
   const candidateCount = growth.draftCandidates.length
   const readyToSchedule = readyPosts.length
-  const scheduledCount = approvedPosts.filter((post) => post.status === 'scheduled').length
+  const scheduledCount = scheduledPosts.length
   const lowConfidenceCount = growth.freshness?.lowConfidenceClusters?.length ?? 0
   const topReplyCount = growth.engagementTargets.replyTargets.length
   const publishedCount = publishedPosts.length || growth.resultsSummary?.postedCount || 0
@@ -995,7 +998,7 @@ export function GrowthReviewPanel() {
             </div>
           </CollapsibleSection>
 
-          <CollapsibleSection title="Ready to schedule" subtitle="Approved exact posts stay here until you schedule them or mark them published." defaultOpen>
+          <CollapsibleSection title="Ready to schedule" subtitle="Approved exact posts stay here until you assign a publish time." defaultOpen>
             <div className="space-y-3">
               {readyPosts.length ? readyPosts.map((post) => {
                 const suggested = buildSuggestedSchedule(post)
@@ -1081,6 +1084,65 @@ export function GrowthReviewPanel() {
                   </div>
                 )
               }) : <div className="rounded-xl border border-white/10 bg-[#10161f] px-4 py-4 text-sm text-muted-foreground">No approved posts are waiting for scheduling right now.</div>}
+            </div>
+          </CollapsibleSection>
+
+          <CollapsibleSection title="Scheduled" subtitle="Due posts auto-publish on schedule. Use manual publish tracking only as fallback." defaultOpen>
+            <div className="space-y-3">
+              {scheduledPosts.length ? scheduledPosts.map((post) => {
+                const publishState = publishDrafts[post.id] || { tweetUrl: post.tweetUrl || '', tweetId: post.tweetId || '' }
+                return (
+                  <div key={`scheduled-${post.id}`} className="rounded-2xl border border-cyan-500/15 bg-[#10161f] p-4 shadow-[0_16px_36px_rgba(0,0,0,0.24)]">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-semibold text-foreground">{post.pillar || 'Scheduled post'}{post.angle ? `: ${post.angle}` : ''}</div>
+                        <div className="mt-1 flex flex-wrap gap-2">
+                          <FieldChip>{post.status}</FieldChip>
+                          {post.distributionType ? <FieldChip>{post.distributionType}</FieldChip> : null}
+                          {post.sourceType ? <FieldChip>{post.sourceType}</FieldChip> : null}
+                          {post.scheduledAtPt ? <FieldChip>scheduled {formatPacificTime(post.scheduledAtPt)}</FieldChip> : post.scheduledAt ? <FieldChip>scheduled {formatPacificTime(post.scheduledAt)}</FieldChip> : null}
+                          {post.publishStatus ? <FieldChip>{post.publishStatus}</FieldChip> : null}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="mt-4 rounded-xl border border-cyan-500/15 bg-black/20 px-4 py-4 text-[15px] leading-7 text-foreground whitespace-pre-wrap">{post.text}</div>
+                    {post.selectionReason ? <div className="mt-3 text-sm text-foreground/80">{post.selectionReason}</div> : null}
+                    {post.publishError ? (
+                      <div className="mt-3 rounded-lg border border-rose-500/25 bg-rose-500/10 px-3 py-2 text-xs text-rose-100">
+                        Auto publish failed: {post.publishError}
+                      </div>
+                    ) : null}
+                    <div className="mt-4 grid gap-3 xl:grid-cols-2">
+                      <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
+                        <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Scheduling controls</div>
+                        <div className="mt-1 text-xs text-foreground/75">
+                          This post stays in the auto-publish queue until due time or until you unschedule it.
+                        </div>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <button onClick={() => void runGrowthAction('unschedule_draft', post.id)} disabled={actionState.status === 'saving'} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2 disabled:opacity-60">Unschedule</button>
+                        </div>
+                      </div>
+                      <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
+                        <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Manual publish fallback</div>
+                        <div className="mt-1 text-xs text-foreground/75">
+                          Use this only if you posted manually outside the scheduler and need results sync to track the live post.
+                        </div>
+                        <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_1fr]">
+                          <label className="text-xs text-muted-foreground">Tweet URL
+                            <input value={publishState.tweetUrl} onChange={(event) => setPublishDrafts((current) => ({ ...current, [post.id]: { ...publishState, tweetUrl: event.target.value } }))} className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground" placeholder="https://x.com/.../status/..." />
+                          </label>
+                          <label className="text-xs text-muted-foreground">Tweet ID
+                            <input value={publishState.tweetId} onChange={(event) => setPublishDrafts((current) => ({ ...current, [post.id]: { ...publishState, tweetId: event.target.value } }))} className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground" placeholder="optional if URL is present" />
+                          </label>
+                        </div>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <button onClick={() => void runGrowthAction('mark_published', post.id, { tweetUrl: publishState.tweetUrl, tweetId: publishState.tweetId })} disabled={actionState.status === 'saving' || (!publishState.tweetUrl && !publishState.tweetId)} className="rounded-lg bg-cyan-500/15 px-3 py-2 text-xs font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/20 disabled:opacity-60">Mark Published</button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )
+              }) : <div className="rounded-xl border border-white/10 bg-[#10161f] px-4 py-4 text-sm text-muted-foreground">No scheduled posts right now.</div>}
             </div>
           </CollapsibleSection>
 
