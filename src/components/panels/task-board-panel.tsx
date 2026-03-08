@@ -982,6 +982,10 @@ export function TaskDetailModal({
   const harnessDisplay = harnessArtifact
     ? harnessArtifact
     : harnessSummary?.audit_json_path || harnessDiscoverySummary?.audit_json_path || 'No harness artifact attached.'
+  const canonicalTaskId = Number(metadata.canonical_task_id || 0)
+  const supersededByTaskId = Number(metadata.superseded_by_task_id || 0)
+  const reopenedAt = typeof metadata.reopened_at === 'string' ? metadata.reopened_at : ''
+  const reopenedReason = typeof metadata.reopened_reason === 'string' ? metadata.reopened_reason : ''
   const deliveryState: DeliveryState = (() => {
     const liveInMain = metadata.live_in_main === true
     const liveInMainAt = typeof metadata.live_in_main_at === 'string' ? metadata.live_in_main_at : ''
@@ -1258,6 +1262,34 @@ export function TaskDetailModal({
                   <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Review Summary</div>
                   <div className="mt-2 text-sm text-foreground">{reviewStatusLabel}</div>
                 </div>
+                {(supersededByTaskId || (canonicalTaskId && canonicalTaskId !== task.id) || reopenedAt) ? (
+                  <div className="space-y-3">
+                    {supersededByTaskId ? (
+                      <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 p-3">
+                        <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Superseded</div>
+                        <div className="mt-1 text-sm text-foreground whitespace-pre-wrap">
+                          This task was cancelled as a duplicate of #{supersededByTaskId}. Treat that task as the canonical record.
+                        </div>
+                      </div>
+                    ) : null}
+                    {canonicalTaskId && canonicalTaskId !== task.id ? (
+                      <div className="rounded-lg border border-sky-500/20 bg-sky-500/10 p-3">
+                        <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Canonical task</div>
+                        <div className="mt-1 text-sm text-foreground whitespace-pre-wrap">
+                          This task points at canonical task #{canonicalTaskId}. Review that task for the authoritative status and evidence.
+                        </div>
+                      </div>
+                    ) : null}
+                    {reopenedAt ? (
+                      <div className="rounded-lg border border-violet-500/20 bg-violet-500/10 p-3">
+                        <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Reopened</div>
+                        <div className="mt-1 text-sm text-foreground whitespace-pre-wrap">
+                          Reopened {reopenedAt}{reopenedReason ? ` because ${reopenedReason}.` : '.'}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
                 <div className="space-y-3">
                   <div className="rounded-lg border border-border/60 bg-surface-2/45 p-3">
                     <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Delivery state</div>

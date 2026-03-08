@@ -179,6 +179,19 @@ interface FounderApiResponse {
       sentBackByQc: number
       staleAssigned: number
     }
+    duplicateFingerprintCount: number
+    productionTruth: {
+      duplicateFingerprintCount: number
+      staleReportCount: number
+      criticalOfflineAgentCount: number
+      latestChecks: Array<{
+        label: string
+        path: string | null
+        generatedAt: string | null
+        ageSeconds: number | null
+        stale: boolean
+      }>
+    }
   }
 }
 
@@ -280,6 +293,21 @@ function Metric({
       {subtitle ? <div className="mt-1 text-2xs text-foreground/55">{subtitle}</div> : null}
     </div>
   )
+}
+
+function formatPtTimestamp(value: string | null | undefined) {
+  if (!value) return 'Missing'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString('en-US', {
+    timeZone: 'America/Los_Angeles',
+    month: '2-digit',
+    day: '2-digit',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  }) + ' PT'
 }
 
 function SectionList({ title, items, empty }: { title: string; items: string[]; empty: string }) {
@@ -654,6 +682,42 @@ export function FounderCockpitPanel() {
             <Metric label="Waiting On QC" value={data.tasks.waitingOnQcQueue.length} subtitle="Not ready for you yet" color="amber" />
             <Metric label="Founder Conversations" value={data.adoption?.founderConversations ?? 0} subtitle={`Signals ${data.signals.total}`} color="blue" />
             <Metric label="Activated Users" value={data.adoption?.activatedUsers ?? 0} subtitle={`${data.adoption?.weeklyActiveUsers ?? 0} weekly active`} color="green" />
+          </div>
+
+          <div className="rounded-xl border border-amber-500/20 bg-gradient-to-br from-amber-500/8 via-surface-2/82 to-surface-2/82 p-4 shadow-[0_12px_28px_rgba(0,0,0,0.18)]">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold text-foreground">Production truth</h3>
+                <p className="mt-1 text-xs text-muted-foreground">Fresh runtime checks and canonical queue state from clean production sources.</p>
+              </div>
+              <div className="text-xs text-muted-foreground">Dirty local workspaces do not count as production truth.</div>
+            </div>
+            <div className="mt-4 grid gap-3 md:grid-cols-4">
+              <Metric label="Queue Drift" value={data.tasks.productionTruth.duplicateFingerprintCount} subtitle="Duplicate fingerprints" color={data.tasks.productionTruth.duplicateFingerprintCount ? 'red' : 'green'} />
+              <Metric label="Stale Reports" value={data.tasks.productionTruth.staleReportCount} subtitle="Freshness warnings" color={data.tasks.productionTruth.staleReportCount ? 'amber' : 'green'} />
+              <Metric label="Critical Offline" value={data.tasks.productionTruth.criticalOfflineAgentCount} subtitle="Production agents" color={data.tasks.productionTruth.criticalOfflineAgentCount ? 'red' : 'green'} />
+              <Metric label="Visible Duplicates" value={data.tasks.duplicateFingerprintCount} subtitle="Filtered from Founder view" color={data.tasks.duplicateFingerprintCount ? 'amber' : 'green'} />
+            </div>
+            <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+              {data.tasks.productionTruth.latestChecks.map((check) => (
+                <div key={check.label} className="rounded-lg border border-white/10 bg-black/15 p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{check.label}</div>
+                    <span className={`rounded-full px-2 py-0.5 text-[11px] uppercase tracking-wide ${
+                      check.stale ? 'bg-amber-500/15 text-amber-300' : 'bg-emerald-500/15 text-emerald-300'
+                    }`}>
+                      {check.stale ? 'Stale' : 'Fresh'}
+                    </span>
+                  </div>
+                  <div className="mt-2 text-sm text-foreground">{formatPtTimestamp(check.generatedAt)}</div>
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    {typeof check.ageSeconds === 'number'
+                      ? `${Math.floor(check.ageSeconds / 3600)}h ${Math.floor((check.ageSeconds % 3600) / 60)}m old`
+                      : 'No successful artifact yet'}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
 
           <div className="grid items-start xl:grid-cols-[1.15fr_0.85fr] gap-3">
