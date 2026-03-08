@@ -403,24 +403,115 @@ function normalizeSourceSamples(input: unknown, trendClusters?: unknown): string
 }
 
 function normalizeGrowthStrategy(input: unknown): {
+  accountStage?: string
+  cadenceModel?: string
+  distributionPriority: string[]
   primaryGoal: string
   contentMix: string[]
   engagementTactics: string[]
   editorialBias: string[]
   followerGrowthLoop: string[]
   targetAccountStrategy: string[]
+  prioritizedAccounts: string[]
+  todayBestMove?: {
+    title: string
+    distributionType: string
+    primaryAction: string
+    why: string
+    sourceUrl: string
+    sourceAccount: string
+    clusterLabel: string
+    confidence: string
+  } | null
+  weeklyMixRecommendation?: {
+    targetMix: Array<{ type: string; share: string; reason: string }>
+    availableOpportunityBalance: { reply: number; quote: number; original: number }
+    currentBias: string
+  } | null
+  scheduleGuidance?: {
+    recommendation: string
+    timing: string
+  } | null
   whyThisWeek: string[]
 } | null {
   if (!input || typeof input !== 'object') return null
   const record = input as Record<string, unknown>
   return {
+    accountStage: String(record.accountStage || '').trim() || undefined,
+    cadenceModel: String(record.cadenceModel || '').trim() || undefined,
+    distributionPriority: Array.isArray(record.distributionPriority) ? record.distributionPriority.map((v) => String(v).trim()).filter(Boolean).slice(0, 4) : [],
     primaryGoal: String(record.primaryGoal || '').trim(),
     contentMix: Array.isArray(record.contentMix) ? record.contentMix.map((v) => String(v).trim()).filter(Boolean).slice(0, 4) : [],
     engagementTactics: Array.isArray(record.engagementTactics) ? record.engagementTactics.map((v) => String(v).trim()).filter(Boolean).slice(0, 4) : [],
     editorialBias: Array.isArray(record.editorialBias) ? record.editorialBias.map((v) => String(v).trim()).filter(Boolean).slice(0, 4) : [],
     followerGrowthLoop: Array.isArray(record.followerGrowthLoop) ? record.followerGrowthLoop.map((v) => String(v).trim()).filter(Boolean).slice(0, 4) : [],
     targetAccountStrategy: Array.isArray(record.targetAccountStrategy) ? record.targetAccountStrategy.map((v) => String(v).trim()).filter(Boolean).slice(0, 4) : [],
+    prioritizedAccounts: Array.isArray(record.prioritizedAccounts) ? record.prioritizedAccounts.map((v) => String(v).trim()).filter(Boolean).slice(0, 6) : [],
+    todayBestMove: record.todayBestMove && typeof record.todayBestMove === 'object'
+      ? {
+          title: String((record.todayBestMove as Record<string, unknown>).title || '').trim(),
+          distributionType: String((record.todayBestMove as Record<string, unknown>).distributionType || '').trim(),
+          primaryAction: String((record.todayBestMove as Record<string, unknown>).primaryAction || '').trim(),
+          why: String((record.todayBestMove as Record<string, unknown>).why || '').trim(),
+          sourceUrl: String((record.todayBestMove as Record<string, unknown>).sourceUrl || '').trim(),
+          sourceAccount: String((record.todayBestMove as Record<string, unknown>).sourceAccount || '').trim(),
+          clusterLabel: String((record.todayBestMove as Record<string, unknown>).clusterLabel || '').trim(),
+          confidence: String((record.todayBestMove as Record<string, unknown>).confidence || '').trim(),
+        }
+      : null,
+    weeklyMixRecommendation: record.weeklyMixRecommendation && typeof record.weeklyMixRecommendation === 'object'
+      ? {
+          targetMix: Array.isArray((record.weeklyMixRecommendation as Record<string, unknown>).targetMix)
+            ? ((record.weeklyMixRecommendation as Record<string, unknown>).targetMix as Array<Record<string, unknown>>)
+                .map((entry) => ({
+                  type: String(entry?.type || '').trim(),
+                  share: String(entry?.share || '').trim(),
+                  reason: String(entry?.reason || '').trim(),
+                }))
+                .filter((entry) => entry.type && entry.share && entry.reason)
+                .slice(0, 4)
+            : [],
+          availableOpportunityBalance: {
+            reply: Number(((record.weeklyMixRecommendation as Record<string, any>).availableOpportunityBalance?.reply) || 0),
+            quote: Number(((record.weeklyMixRecommendation as Record<string, any>).availableOpportunityBalance?.quote) || 0),
+            original: Number(((record.weeklyMixRecommendation as Record<string, any>).availableOpportunityBalance?.original) || 0),
+          },
+          currentBias: String((record.weeklyMixRecommendation as Record<string, unknown>).currentBias || '').trim(),
+        }
+      : null,
+    scheduleGuidance: record.scheduleGuidance && typeof record.scheduleGuidance === 'object'
+      ? {
+          recommendation: String((record.scheduleGuidance as Record<string, unknown>).recommendation || '').trim(),
+          timing: String((record.scheduleGuidance as Record<string, unknown>).timing || '').trim(),
+        }
+      : null,
     whyThisWeek: Array.isArray(record.whyThisWeek) ? record.whyThisWeek.map((v) => String(v).trim()).filter(Boolean).slice(0, 3) : [],
+  }
+}
+
+function normalizeEditorialMemory(input: unknown) {
+  if (!input || typeof input !== 'object') {
+    return {
+      updatedAt: null,
+      recentFeedback: [],
+      archetypeStats: {},
+    }
+  }
+  const record = input as Record<string, any>
+  return {
+    updatedAt: String(record.updatedAt || '').trim() || null,
+    recentFeedback: Array.isArray(record.recentFeedback)
+      ? record.recentFeedback
+          .map((entry: any) => ({
+            decision: String(entry?.decision || '').trim(),
+            feedback: String(entry?.feedback || '').trim(),
+            archetype: String(entry?.archetype || '').trim(),
+            reviewedAtPt: String(entry?.reviewedAtPt || '').trim(),
+          }))
+          .filter((entry: { decision: string; feedback: string; archetype: string; reviewedAtPt: string }) => entry.feedback)
+          .slice(-5)
+      : [],
+    archetypeStats: record.archetypeStats && typeof record.archetypeStats === 'object' ? record.archetypeStats : {},
   }
 }
 
@@ -474,6 +565,289 @@ function normalizeGrowthRecommendations(input: unknown): {
   }
 }
 
+function filterGrowthRecommendations(
+  recommendations: {
+    bestForFollowerGrowth: string | null
+    bestForBrandBuilding: string | null
+    bestOriginalPost: string | null
+  } | null,
+  draftCandidates: Array<Record<string, any>>,
+) {
+  if (!recommendations) return null
+  const candidateIds = new Set(
+    draftCandidates
+      .map((entry) => String(entry?.id || '').trim())
+      .filter(Boolean),
+  )
+  return {
+    bestForFollowerGrowth: candidateIds.has(String(recommendations.bestForFollowerGrowth || '').trim())
+      ? recommendations.bestForFollowerGrowth
+      : null,
+    bestForBrandBuilding: candidateIds.has(String(recommendations.bestForBrandBuilding || '').trim())
+      ? recommendations.bestForBrandBuilding
+      : null,
+    bestOriginalPost: candidateIds.has(String(recommendations.bestOriginalPost || '').trim())
+      ? recommendations.bestOriginalPost
+      : null,
+  }
+}
+
+function normalizeGrowthChangesSummary(input: unknown): {
+  newCount: number
+  retainedCount: number
+  changedDraftIds: string[]
+  feedbackEffects: string[]
+} | null {
+  if (!input || typeof input !== 'object') return null
+  const record = input as Record<string, unknown>
+  return {
+    newCount: Number(record.newCount || 0),
+    retainedCount: Number(record.retainedCount || 0),
+    changedDraftIds: Array.isArray(record.changedDraftIds) ? record.changedDraftIds.map((value) => String(value).trim()).filter(Boolean).slice(0, 10) : [],
+    feedbackEffects: Array.isArray(record.feedbackEffects) ? record.feedbackEffects.map((value) => String(value).trim()).filter(Boolean).slice(0, 6) : [],
+  }
+}
+
+function normalizeSourceCandidates(input: unknown): Array<{
+  clusterLabel: string
+  url: string
+  text: string
+  author: string
+  likes: number
+  replies: number
+  followers: number
+  score: number
+}> {
+  if (!Array.isArray(input)) return []
+  return input
+    .map((entry) => {
+      if (!entry || typeof entry !== 'object') return null
+      const record = entry as Record<string, unknown>
+      const url = String(record.url || '').trim()
+      if (!url) return null
+      return {
+        clusterLabel: String(record.clusterLabel || '').trim(),
+        url,
+        text: String(record.text || '').trim(),
+        author: String(record.author || '').trim(),
+        likes: Number(record.likes || 0),
+        replies: Number(record.replies || 0),
+        followers: Number(record.followers || 0),
+        score: Number(record.score || 0),
+      }
+    })
+    .filter(Boolean)
+    .slice(0, 6) as Array<{
+      clusterLabel: string
+      url: string
+      text: string
+      author: string
+      likes: number
+      replies: number
+      followers: number
+      score: number
+    }>
+}
+
+function normalizeAccountTargets(input: unknown): Array<{
+  username: string
+  followers: number
+  verified: boolean
+  why: string
+  sourceUrl: string
+  clusterLabel: string
+  state?: string
+  stateNote?: string
+}> {
+  if (!Array.isArray(input)) return []
+  return input
+    .map((entry) => {
+      if (!entry || typeof entry !== 'object') return null
+      const record = entry as Record<string, unknown>
+      const username = String(record.username || '').trim()
+      if (!username) return null
+      return {
+        username,
+        followers: Number(record.followers || 0),
+        verified: Boolean(record.verified),
+        why: String(record.why || '').trim(),
+        sourceUrl: String(record.sourceUrl || '').trim(),
+        clusterLabel: String(record.clusterLabel || '').trim(),
+        state: String(record.state || '').trim() || undefined,
+        stateNote: String(record.reason || record.stateNote || '').trim() || undefined,
+      }
+    })
+    .filter(Boolean)
+    .slice(0, 6) as Array<{
+      username: string
+      followers: number
+      verified: boolean
+      why: string
+      sourceUrl: string
+      clusterLabel: string
+    }>
+}
+
+function buildSourceMemoryAccountMap(input: unknown): Map<string, { state: string; updatedAt: string | null; note: string }> {
+  if (!input || typeof input !== 'object') return new Map()
+  const record = input as Record<string, any>
+  const accounts = record.accounts && typeof record.accounts === 'object' ? record.accounts : {}
+  const entries = Object.entries(accounts).map(([username, value]) => {
+    const account = value as Record<string, unknown>
+    return [
+      String(username || '').replace(/^@/, '').trim().toLowerCase(),
+      {
+        state: String(account.state || 'watch').trim(),
+        updatedAt: String(account.updatedAt || '').trim() || null,
+        note: String(account.note || '').trim(),
+      },
+    ] as const
+  }).filter(([username]) => Boolean(username))
+  return new Map(entries)
+}
+
+function overlayAccountTargetsWithSourceMemory(
+  targets: Array<{
+    username: string
+    followers: number
+    verified: boolean
+    why: string
+    sourceUrl: string
+    clusterLabel: string
+    state?: string
+    stateNote?: string
+  }>,
+  sourceMemory: unknown,
+) {
+  const memoryMap = buildSourceMemoryAccountMap(sourceMemory)
+  return targets.map((target) => {
+    const key = String(target.username || '').replace(/^@/, '').trim().toLowerCase()
+    const memory = memoryMap.get(key)
+    if (!memory) return target
+    return {
+      ...target,
+      state: memory.state || target.state || 'watch',
+      stateNote: memory.note || target.stateNote,
+    }
+  })
+}
+
+function normalizeWatchlistRecommendations(input: unknown): Array<{
+  username: string
+  clusterLabel: string
+  why: string
+  state: string
+  stateUpdatedAt: string | null
+  sourceUrl: string
+  reason: string
+}> {
+  if (!Array.isArray(input)) return []
+  return input
+    .map((entry) => {
+      if (!entry || typeof entry !== 'object') return null
+      const record = entry as Record<string, unknown>
+      const username = String(record.username || '').trim()
+      if (!username) return null
+      return {
+        username,
+        clusterLabel: String(record.clusterLabel || '').trim(),
+        why: String(record.why || '').trim(),
+        state: String(record.state || 'watch').trim(),
+        stateUpdatedAt: String(record.stateUpdatedAt || '').trim() || null,
+        sourceUrl: String(record.sourceUrl || '').trim(),
+        reason: String(record.reason || '').trim(),
+      }
+    })
+    .filter(Boolean)
+    .slice(0, 8) as Array<{
+      username: string
+      clusterLabel: string
+      why: string
+      state: string
+      stateUpdatedAt: string | null
+      sourceUrl: string
+      reason: string
+    }>
+}
+
+function overlayWatchlistRecommendationsWithSourceMemory(
+  recommendations: Array<{
+    username: string
+    clusterLabel: string
+    why: string
+    state: string
+    stateUpdatedAt: string | null
+    sourceUrl: string
+    reason: string
+  }>,
+  sourceMemory: unknown,
+) {
+  const memoryMap = buildSourceMemoryAccountMap(sourceMemory)
+  return recommendations.map((entry) => {
+    const key = String(entry.username || '').replace(/^@/, '').trim().toLowerCase()
+    const memory = memoryMap.get(key)
+    if (!memory) return entry
+    return {
+      ...entry,
+      state: memory.state || entry.state || 'watch',
+      stateUpdatedAt: memory.updatedAt || entry.stateUpdatedAt,
+      reason: memory.note || entry.reason,
+    }
+  })
+}
+
+function normalizeEditorialOpportunities(input: unknown): Array<{
+  id: string
+  title: string
+  archetype: string
+  sourceType: string
+  whyNow: string
+  brandFit: string
+  supportingSignals: string[]
+}> {
+  if (!Array.isArray(input)) return []
+  return input
+    .map((entry) => {
+      if (!entry || typeof entry !== 'object') return null
+      const record = entry as Record<string, unknown>
+      return {
+        id: String(record.id || '').trim(),
+        title: String(record.title || '').trim(),
+        archetype: String(record.archetype || '').trim(),
+        sourceType: String(record.sourceType || '').trim(),
+        whyNow: String(record.whyNow || '').trim(),
+        brandFit: String(record.brandFit || '').trim(),
+        supportingSignals: Array.isArray(record.supportingSignals) ? record.supportingSignals.map((value) => String(value).trim()).filter(Boolean).slice(0, 3) : [],
+      }
+    })
+    .filter((entry) => entry && entry.id)
+    .slice(0, 6) as Array<{
+      id: string
+      title: string
+      archetype: string
+      sourceType: string
+      whyNow: string
+      brandFit: string
+      supportingSignals: string[]
+    }>
+}
+
+function normalizeDraftCandidates(input: unknown): Array<Record<string, any>> {
+  if (!Array.isArray(input)) return []
+  return input
+    .map((entry) => {
+      if (!entry || typeof entry !== 'object') return null
+      const record = { ...(entry as Record<string, any>) }
+      const status = String(record.status || '').trim().toLowerCase()
+      const approval = String(record.approval || '').trim().toLowerCase()
+      if (['approved', 'scheduled', 'published', 'archived', 'rejected'].includes(status)) return null
+      if (['approved', 'scheduled', 'published', 'archived', 'rejected'].includes(approval)) return null
+      return record
+    })
+    .filter(Boolean)
+    .slice(0, 6) as Array<Record<string, any>>
+}
+
 function normalizeApprovedPosts(input: unknown): Array<{
   id: string
   text: string
@@ -481,8 +855,17 @@ function normalizeApprovedPosts(input: unknown): Array<{
   angle: string
   status: string
   approvedAtPt: string
+  scheduledAt?: string | null
+  scheduledAtPt?: string | null
+  scheduleSource?: string | null
+  scheduleNote?: string | null
+  distributionType?: string
+  sourceType?: string
+  selectionReason?: string
   tweetId?: string
   tweetUrl?: string | null
+  publishStatus?: string
+  publishError?: string
 }> {
   if (!Array.isArray(input)) return []
   return input
@@ -498,8 +881,17 @@ function normalizeApprovedPosts(input: unknown): Array<{
         angle: String(record.angle || '').trim(),
         status: String(record.status || 'approved').trim(),
         approvedAtPt: String(record.approved_at_pt || '').trim(),
+        scheduledAt: String(record.scheduled_at || '').trim() || null,
+        scheduledAtPt: String(record.scheduled_at_pt || '').trim() || null,
+        scheduleSource: String(record.schedule_source || '').trim() || null,
+        scheduleNote: String(record.schedule_note || '').trim() || null,
+        distributionType: String(record.distribution_type || '').trim() || undefined,
+        sourceType: String(record.source_type || '').trim() || undefined,
+        selectionReason: String(record.selection_reason || '').trim() || undefined,
         tweetId: String(record.tweet_id || '').trim(),
-        tweetUrl: record.tweet_id ? `https://x.com/i/web/status/${record.tweet_id}` : null,
+        tweetUrl: String(record.tweet_url || '').trim() || (record.tweet_id ? `https://x.com/i/web/status/${record.tweet_id}` : null),
+        publishStatus: String(record.publish_status || '').trim() || undefined,
+        publishError: String(record.publish_error || '').trim() || undefined,
       }
     })
     .filter(Boolean)
@@ -510,22 +902,50 @@ function normalizeApprovedPosts(input: unknown): Array<{
       angle: string
       status: string
       approvedAtPt: string
+      scheduledAt?: string | null
+      scheduledAtPt?: string | null
+      scheduleSource?: string | null
+      scheduleNote?: string | null
+      distributionType?: string
+      sourceType?: string
+      selectionReason?: string
       tweetId?: string
       tweetUrl?: string | null
+      publishStatus?: string
+      publishError?: string
     }>
 }
 
 function normalizeResultsSummary(input: unknown): {
   postedCount: number
+  syncedPostCount: number
   winningPillars: string[]
+  winningSourceTypes: string[]
+  winningDistributionTypes: string[]
   strategyNotes: string[]
-  topPosts: Array<{ id: string; pillar: string; tweetUrl: string | null; engagementScore: number }>
+  topPosts: Array<{ id: string; pillar: string; tweetUrl: string | null; engagementScore: number; distributionType: string; sourceType: string; sourceAccount: string | null }>
+  winningSourceAccounts: string[]
 } | null {
   if (!input || typeof input !== 'object') return null
   const record = input as Record<string, any>
+  const normalizeRankedKeys = (value: unknown) =>
+    Array.isArray(value)
+      ? value
+          .map((entry: unknown) => {
+            if (entry && typeof entry === 'object' && 'key' in (entry as Record<string, unknown>)) {
+              return String((entry as Record<string, unknown>).key || '').trim()
+            }
+            return String(entry || '').trim()
+          })
+          .filter(Boolean)
+      : []
   return {
     postedCount: Number(record.postedCount || 0),
+    syncedPostCount: Number(record.syncedPostCount || 0),
     winningPillars: Array.isArray(record.winningPillars) ? record.winningPillars.map((v: unknown) => String(v)).filter(Boolean) : [],
+    winningSourceTypes: normalizeRankedKeys(record.winningSourceTypes),
+    winningDistributionTypes: normalizeRankedKeys(record.winningDistributionTypes),
+    winningSourceAccounts: normalizeRankedKeys(record.winningSourceAccounts),
     strategyNotes: Array.isArray(record.strategyNotes) ? record.strategyNotes.map((v: unknown) => String(v)).filter(Boolean) : [],
     topPosts: Array.isArray(record.topPosts)
       ? record.topPosts.slice(0, 3).map((post: any) => ({
@@ -533,9 +953,108 @@ function normalizeResultsSummary(input: unknown): {
           pillar: String(post.pillar || ''),
           tweetUrl: post.tweet_url || null,
           engagementScore: Number(post.engagementScore || 0),
+          distributionType: String(post.distribution_type || ''),
+          sourceType: String(post.source_type || ''),
+          sourceAccount: String(post.source_tweet?.author?.username || '').trim() || null,
         }))
       : [],
   }
+}
+
+function normalizeStrategyMemory(input: unknown): {
+  strategyNotes?: string[]
+  accountStage?: string
+  performance?: {
+    postedCount?: number
+    syncedPostCount?: number
+    publishAttempts?: number
+  }
+  winningSourceTypes?: string[]
+  winningDistributionTypes?: string[]
+  winningArchetypes?: string[]
+  winningSourceAccounts?: string[]
+  timingBias?: string[]
+} | null {
+  if (!input || typeof input !== 'object') return null
+  const record = input as Record<string, any>
+  const normalizeRankedKeys = (value: unknown) =>
+    Array.isArray(value)
+      ? value
+          .map((entry: unknown) => {
+            if (entry && typeof entry === 'object' && 'key' in (entry as Record<string, unknown>)) {
+              return String((entry as Record<string, unknown>).key || '').trim()
+            }
+            return String(entry || '').trim()
+          })
+          .filter(Boolean)
+      : []
+
+  return {
+    strategyNotes: ensureStringArray(record.strategyNotes, 8),
+    accountStage: String(record.accountStage || '').trim() || undefined,
+    performance: record.performance && typeof record.performance === 'object'
+      ? {
+          postedCount: Number((record.performance as Record<string, unknown>).postedCount || 0),
+          syncedPostCount: Number((record.performance as Record<string, unknown>).syncedPostCount || 0),
+          publishAttempts: Number((record.performance as Record<string, unknown>).publishAttempts || 0),
+        }
+      : undefined,
+    winningSourceTypes: normalizeRankedKeys(record.winningSourceTypes).length
+      ? normalizeRankedKeys(record.winningSourceTypes)
+      : normalizeRankedKeys((record.performance as Record<string, unknown> | undefined)?.winningSourceTypes),
+    winningDistributionTypes: normalizeRankedKeys(record.winningDistributionTypes).length
+      ? normalizeRankedKeys(record.winningDistributionTypes)
+      : normalizeRankedKeys((record.performance as Record<string, unknown> | undefined)?.winningDistributionTypes),
+    winningArchetypes: normalizeRankedKeys(record.winningArchetypes).length
+      ? normalizeRankedKeys(record.winningArchetypes)
+      : normalizeRankedKeys((record.performance as Record<string, unknown> | undefined)?.winningArchetypes),
+    winningSourceAccounts: normalizeRankedKeys(record.winningSourceAccounts).length
+      ? normalizeRankedKeys(record.winningSourceAccounts)
+      : normalizeRankedKeys((record.performance as Record<string, unknown> | undefined)?.winningSourceAccounts),
+    timingBias: normalizeRankedKeys(record.timingBias).length
+      ? normalizeRankedKeys(record.timingBias)
+      : normalizeRankedKeys((record.performance as Record<string, unknown> | undefined)?.timingBias),
+  }
+}
+
+function normalizeSourceMemory(input: unknown): {
+  updatedAt: string | null
+  rejectedSources: string[]
+  rejectedClusters: string[]
+  rejectedPhrases: string[]
+  negativeStyleMarkers: string[]
+  positiveStyleMarkers: string[]
+  accounts: Array<{ username: string; state: string; updatedAt: string | null; note: string }>
+} | null {
+  if (!input || typeof input !== 'object') return null
+  const record = input as Record<string, any>
+  const accounts = record.accounts && typeof record.accounts === 'object'
+    ? Object.entries(record.accounts)
+        .map(([username, value]) => {
+          const account = value as Record<string, unknown>
+          return {
+            username: String(username).trim(),
+            state: String(account.state || 'watch').trim(),
+            updatedAt: String(account.updatedAt || '').trim() || null,
+            note: String(account.note || '').trim(),
+          }
+        })
+        .slice(0, 12)
+    : []
+
+  return {
+    updatedAt: String(record.updatedAt || '').trim() || null,
+    rejectedSources: ensureStringArray(record.rejectedSources, 8),
+    rejectedClusters: ensureStringArray(record.rejectedClusters, 8),
+    rejectedPhrases: ensureStringArray(record.rejectedPhrases, 8),
+    negativeStyleMarkers: ensureStringArray(record.negativeStyleMarkers, 8),
+    positiveStyleMarkers: ensureStringArray(record.positiveStyleMarkers, 8),
+    accounts,
+  }
+}
+
+function ensureStringArray(input: unknown, limit = 8): string[] {
+  return Array.isArray(input) ? input.map((value) => String(value || '').trim()).filter(Boolean).slice(0, limit) : []
 }
 
 function summarizeRepeatedPains(entries: Array<{ problem?: string }>): string[] {
@@ -902,6 +1421,10 @@ export async function GET(request: NextRequest) {
           scorecardPath: path.join(GROWTH_WEEKS_ROOT, latestGrowthWeek, 'scorecard.json'),
           approvedPostsPath: path.join(GROWTH_WEEKS_ROOT, latestGrowthWeek, 'approved-posts.json'),
           resultsSummaryPath: path.join(GROWTH_WEEKS_ROOT, latestGrowthWeek, 'results-summary.json'),
+          strategyMemoryPath: path.join(GROWTH_WEEKS_ROOT, latestGrowthWeek, 'strategy-memory.json'),
+          editorialMemoryPath: path.join(GROWTH_WEEKS_ROOT, latestGrowthWeek, 'editorial-memory.json'),
+          sourceMemoryPath: path.join(GROWTH_WEEKS_ROOT, latestGrowthWeek, 'source-memory.json'),
+          publishLogPath: path.join(GROWTH_WEEKS_ROOT, latestGrowthWeek, 'publish-log.json'),
         }
       : null
     const growthResearch = growthPaths ? await readJsonOrNull<any>(growthPaths.researchBriefPath) : null
@@ -909,10 +1432,30 @@ export async function GET(request: NextRequest) {
     const growthScorecard = growthPaths ? await readJsonOrNull<any>(growthPaths.scorecardPath) : null
     const growthApprovedPosts = growthPaths ? await readJsonOrNull<any>(growthPaths.approvedPostsPath) : null
     const growthResultsSummary = growthPaths ? await readJsonOrNull<any>(growthPaths.resultsSummaryPath) : null
+    const growthStrategyMemory = growthPaths ? await readJsonOrNull<any>(growthPaths.strategyMemoryPath) : null
+    const growthEditorialMemory = growthPaths ? await readJsonOrNull<any>(growthPaths.editorialMemoryPath) : null
+    const growthSourceMemory = growthPaths ? await readJsonOrNull<any>(growthPaths.sourceMemoryPath) : null
+    const growthPublishLog = growthPaths ? await readJsonOrNull<any>(growthPaths.publishLogPath) : null
     const repeatedPains = summarizeRepeatedPains(signalLedger)
     const workspaceId = auth.user.workspace_id ?? 1
     const taskSnapshot = loadTaskSnapshot(workspaceId)
     const productionTruth = await loadProductionTruth(workspaceId)
+
+    const normalizedSourceMemory = normalizeSourceMemory(growthSourceMemory)
+    const normalizedAccountTargets = overlayAccountTargetsWithSourceMemory(
+      normalizeAccountTargets(growthResearch?.accountTargets),
+      growthSourceMemory,
+    )
+    const normalizedWatchlistRecommendations = overlayWatchlistRecommendationsWithSourceMemory(
+      normalizeWatchlistRecommendations(growthResearch?.watchlistRecommendations),
+      growthSourceMemory,
+    )
+
+    const normalizedDraftCandidates = normalizeDraftCandidates(growthDraftPack?.drafts)
+    const normalizedRecommendations = filterGrowthRecommendations(
+      normalizeGrowthRecommendations(growthDraftPack?.recommendations),
+      normalizedDraftCandidates,
+    )
 
     return NextResponse.json({
       hasPacket: Boolean(packet),
@@ -939,15 +1482,26 @@ export async function GET(request: NextRequest) {
         researchGeneratedAt: growthResearch?.generatedAt ?? null,
         draftPackGeneratedAt: growthDraftPack?.generatedAt ?? null,
         externalStatus: String(growthResearch?.externalStatus || 'missing'),
+        freshness: growthResearch?.freshness || null,
         researchSignals: normalizeGrowthResearchSignals(growthResearch?.signals),
         strategy: normalizeGrowthStrategy(growthResearch?.growthStrategy),
+        strategyMemory: normalizeStrategyMemory(growthStrategyMemory),
+        editorialMemory: normalizeEditorialMemory(growthEditorialMemory),
+        sourceMemory: normalizedSourceMemory,
         engagementTargets: normalizeGrowthTargets(growthResearch?.engagementTargets),
+        sourceCandidates: normalizeSourceCandidates(growthResearch?.sourceCandidates),
+        accountTargets: normalizedAccountTargets,
+        watchlistRecommendations: normalizedWatchlistRecommendations,
+        editorialOpportunities: normalizeEditorialOpportunities(growthResearch?.editorialOpportunities || growthResearch?.opportunities),
+        listeningDiagnostics: growthResearch?.listeningDiagnostics || null,
         trendClusters: normalizeTrendClusters(growthResearch?.trendClusters),
         sourceSamples: normalizeSourceSamples(growthResearch?.sourceSamples, growthResearch?.trendClusters),
-        draftCandidates: Array.isArray(growthDraftPack?.drafts) ? growthDraftPack.drafts.slice(0, 3) : [],
-        recommendations: normalizeGrowthRecommendations(growthDraftPack?.recommendations),
+        draftCandidates: normalizedDraftCandidates,
+        recommendations: normalizedRecommendations,
+        changesSummary: normalizeGrowthChangesSummary(growthDraftPack?.changesSummary),
         approvedPosts: normalizeApprovedPosts(growthApprovedPosts),
         resultsSummary: normalizeResultsSummary(growthResultsSummary),
+        publishLog: Array.isArray(growthPublishLog) ? growthPublishLog.slice(-5).reverse() : [],
         scorecard: growthScorecard,
       },
       tasks: {
