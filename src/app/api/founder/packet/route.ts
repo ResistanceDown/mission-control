@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs'
 import path from 'node:path'
 import { requireRole } from '@/lib/auth'
 import { getDatabase } from '@/lib/db'
+import { classifyFounderTaskState, hasFounderApproval } from '@/lib/habi-founder-state'
 import { logger } from '@/lib/logger'
 import { isExecutionProgressComment, isKickoffComment } from '@/lib/habi-task-execution'
 
@@ -421,6 +422,9 @@ function normalizeGrowthChangesSummary(input: unknown): {
   retainedCount: number
   changedDraftIds: string[]
   feedbackEffects: string[]
+  orphanCount: number
+  reconciledCount: number
+  whatChangedSinceLastRun: string[]
 } | null {
   if (!input || typeof input !== 'object') return null
   const record = input as Record<string, unknown>
@@ -429,6 +433,9 @@ function normalizeGrowthChangesSummary(input: unknown): {
     retainedCount: Number(record.retainedCount || 0),
     changedDraftIds: Array.isArray(record.changedDraftIds) ? record.changedDraftIds.map((value) => String(value).trim()).filter(Boolean).slice(0, 10) : [],
     feedbackEffects: Array.isArray(record.feedbackEffects) ? record.feedbackEffects.map((value) => String(value).trim()).filter(Boolean).slice(0, 6) : [],
+    orphanCount: Number(record.orphanCount || 0),
+    reconciledCount: Number(record.reconciledCount || 0),
+    whatChangedSinceLastRun: Array.isArray(record.whatChangedSinceLastRun) ? record.whatChangedSinceLastRun.map((value) => String(value).trim()).filter(Boolean).slice(0, 8) : [],
   }
 }
 
@@ -656,6 +663,110 @@ function normalizeEditorialOpportunities(input: unknown): Array<{
     }>
 }
 
+function normalizeSelectedOpportunities(input: unknown): Array<{
+  id: string
+  opportunityId: string
+  title: string
+  distributionType: string
+  sourceType: string
+  sourceState: string
+  sourceFamilyKey: string
+  sourceUrl: string | null
+  sourceAccount: string
+  sourceText: string
+  clusterId: string | null
+  clusterLabel: string
+  whyNow: string
+  audienceFit: string
+  brandFit: string
+  growthScore: number
+  brandScore: number
+  timelinessScore: number
+  confidence: string
+  selectionReason: string
+  selectionFactors: string[]
+  sourceSeenCount: number
+  accountSeenCount: number
+  clusterSeenCount: number
+  accountState: string
+  replyEligible: boolean
+  blockedReason?: string
+  suppressionReason?: string
+  supportingSignals: string[]
+}> {
+  if (!Array.isArray(input)) return []
+  return input
+    .map((entry) => {
+      if (!entry || typeof entry !== 'object') return null
+      const record = entry as Record<string, unknown>
+      const id = String(record.id || '').trim()
+      if (!id) return null
+      return {
+        id,
+        opportunityId: String(record.opportunityId || id).trim(),
+        title: String(record.title || '').trim(),
+        distributionType: String(record.distributionType || '').trim(),
+        sourceType: String(record.sourceType || '').trim(),
+        sourceState: String(record.sourceState || 'available').trim(),
+        sourceFamilyKey: String(record.sourceFamilyKey || '').trim(),
+        sourceUrl: String(record.sourceUrl || '').trim() || null,
+        sourceAccount: String(record.sourceAccount || '').trim(),
+        sourceText: String(record.sourceText || '').trim(),
+        clusterId: String(record.clusterId || '').trim() || null,
+        clusterLabel: String(record.clusterLabel || '').trim(),
+        whyNow: String(record.whyNow || '').trim(),
+        audienceFit: String(record.audienceFit || '').trim(),
+        brandFit: String(record.brandFit || '').trim(),
+        growthScore: Number(record.growthScore || 0),
+        brandScore: Number(record.brandScore || 0),
+        timelinessScore: Number(record.timelinessScore || 0),
+        confidence: String(record.confidence || '').trim(),
+        selectionReason: String(record.selectionReason || '').trim(),
+        selectionFactors: Array.isArray(record.selectionFactors) ? record.selectionFactors.map((value) => String(value).trim()).filter(Boolean).slice(0, 5) : [],
+        sourceSeenCount: Number(record.sourceSeenCount || 0),
+        accountSeenCount: Number(record.accountSeenCount || 0),
+        clusterSeenCount: Number(record.clusterSeenCount || 0),
+        accountState: String(record.accountState || 'available').trim(),
+        replyEligible: Boolean(record.replyEligible),
+        blockedReason: String(record.blockedReason || '').trim() || undefined,
+        suppressionReason: String(record.suppressionReason || '').trim() || undefined,
+        supportingSignals: Array.isArray(record.supportingSignals) ? record.supportingSignals.map((value) => String(value).trim()).filter(Boolean).slice(0, 4) : [],
+      }
+    })
+    .filter(Boolean)
+    .slice(0, 16) as Array<{
+      id: string
+      opportunityId: string
+      title: string
+      distributionType: string
+      sourceType: string
+      sourceState: string
+      sourceFamilyKey: string
+      sourceUrl: string | null
+      sourceAccount: string
+      sourceText: string
+      clusterId: string | null
+      clusterLabel: string
+      whyNow: string
+      audienceFit: string
+      brandFit: string
+      growthScore: number
+      brandScore: number
+      timelinessScore: number
+      confidence: string
+      selectionReason: string
+      selectionFactors: string[]
+      sourceSeenCount: number
+      accountSeenCount: number
+      clusterSeenCount: number
+      accountState: string
+      replyEligible: boolean
+      blockedReason?: string
+      suppressionReason?: string
+      supportingSignals: string[]
+    }>
+}
+
 function normalizeDraftCandidates(input: unknown): Array<Record<string, any>> {
   if (!Array.isArray(input)) return []
   return input
@@ -670,6 +781,96 @@ function normalizeDraftCandidates(input: unknown): Array<Record<string, any>> {
     })
     .filter(Boolean)
     .slice(0, 6) as Array<Record<string, any>>
+}
+
+function growthOpportunityFamilyKey(opportunity: Record<string, any>) {
+  const explicit = String(opportunity.sourceFamilyKey || '').trim().toLowerCase()
+  if (explicit) return explicit
+  const distributionType = String(opportunity.distributionType || '').trim().toLowerCase() || 'original'
+  const sourceUrl = String(opportunity.sourceUrl || '').trim().toLowerCase()
+  if (sourceUrl) return `${distributionType}::${sourceUrl}`
+  const opportunityId = String(opportunity.opportunityId || opportunity.id || '').trim().toLowerCase()
+  return opportunityId ? `${distributionType}::${opportunityId}` : ''
+}
+
+function growthDraftFamilyKey(draft: Record<string, any>) {
+  const explicit = String(draft.variant_family_id || '').trim().toLowerCase()
+  if (explicit) return explicit
+  const distributionType = String(draft.distribution_type || '').trim().toLowerCase() || 'original'
+  const sourceUrl = String(draft.source_tweet?.url || draft.source_url || draft.source_tweet_url || '').trim().toLowerCase()
+  if (sourceUrl) return `${distributionType}::${sourceUrl}`
+  const opportunityId = String(draft.opportunity_id || '').trim().toLowerCase()
+  return opportunityId ? `${distributionType}::${opportunityId}` : ''
+}
+
+function reconcileGrowthDraftCandidates(
+  selectedOpportunities: Array<Record<string, any>>,
+  draftCandidates: Array<Record<string, any>>,
+  approvedPosts: Array<Record<string, any>>,
+) {
+  const selectedByFamily = new Map<string, Record<string, any>>()
+  for (const opportunity of selectedOpportunities) {
+    const familyKey = growthOpportunityFamilyKey(opportunity)
+    if (!familyKey) continue
+    selectedByFamily.set(familyKey, opportunity)
+  }
+
+  const consumedFamilies = new Set(
+    approvedPosts
+      .map((post) => String(post.variant_family_id || '').trim().toLowerCase())
+      .filter(Boolean),
+  )
+
+  const seenTextsByFamily = new Map<string, Set<string>>()
+  const familyCounts = new Map<string, number>()
+  let orphanCount = 0
+  let consumedCount = 0
+  let prunedVariantCount = 0
+  const reconciled = []
+
+  for (const draft of draftCandidates) {
+    const familyKey = growthDraftFamilyKey(draft)
+    const selected = selectedByFamily.get(familyKey)
+    if (!selected) {
+      orphanCount += 1
+      continue
+    }
+    if (consumedFamilies.has(familyKey)) {
+      consumedCount += 1
+      continue
+    }
+
+    const maxVariants = selected.distributionType === 'reply' || selected.distributionType === 'quote' ? 2 : 1
+    const currentCount = familyCounts.get(familyKey) || 0
+    const normalizedText = String(draft.text || '').trim().toLowerCase()
+    const seenTexts = seenTextsByFamily.get(familyKey) || new Set<string>()
+    if ((normalizedText && seenTexts.has(normalizedText)) || currentCount >= maxVariants) {
+      prunedVariantCount += 1
+      continue
+    }
+
+    if (normalizedText) seenTexts.add(normalizedText)
+    seenTextsByFamily.set(familyKey, seenTexts)
+    familyCounts.set(familyKey, currentCount + 1)
+
+    reconciled.push({
+      ...draft,
+      opportunity_id: draft.opportunity_id || selected.opportunityId || selected.id,
+      variant_family_id: familyKey || draft.variant_family_id,
+      source_state: draft.source_state || selected.sourceState || 'available',
+    })
+  }
+
+  return {
+    draftCandidates: reconciled.slice(0, 12),
+    integrity: {
+      selectedOpportunityCount: selectedOpportunities.length,
+      draftCandidateCount: reconciled.length,
+      orphanDraftCount: orphanCount,
+      consumedDraftCount: consumedCount,
+      prunedVariantCount,
+    },
+  }
 }
 
 function normalizeApprovedPosts(input: unknown): Array<{
@@ -846,6 +1047,7 @@ function normalizeSourceMemory(input: unknown): {
   negativeStyleMarkers: string[]
   positiveStyleMarkers: string[]
   accounts: Array<{ username: string; state: string; updatedAt: string | null; note: string }>
+  blockedSourceCount: number
 } | null {
   if (!input || typeof input !== 'object') return null
   const record = input as Record<string, any>
@@ -862,6 +1064,13 @@ function normalizeSourceMemory(input: unknown): {
         })
         .slice(0, 12)
     : []
+  const sources = record.sources && typeof record.sources === 'object'
+    ? Object.values(record.sources).filter((value) => value && typeof value === 'object')
+    : []
+  const blockedSourceCount = sources.filter((value) => {
+    const state = String((value as Record<string, unknown>).state || '').trim().toLowerCase()
+    return state === 'non_replyable'
+  }).length
 
   return {
     updatedAt: String(record.updatedAt || '').trim() || null,
@@ -871,6 +1080,7 @@ function normalizeSourceMemory(input: unknown): {
     negativeStyleMarkers: ensureStringArray(record.negativeStyleMarkers, 8),
     positiveStyleMarkers: ensureStringArray(record.positiveStyleMarkers, 8),
     accounts,
+    blockedSourceCount,
   }
 }
 
@@ -889,10 +1099,6 @@ function summarizeRepeatedPains(entries: Array<{ problem?: string }>): string[] 
     .filter(([, count]) => count >= 2)
     .sort((a, b) => b[1] - a[1])
     .map(([problem]) => problem)
-}
-
-function hasFounderApproval(metadata: Record<string, unknown>) {
-  return Boolean(metadata.founder_approved_at || metadata.founder_approved_for_execution)
 }
 
 function hasAegisApproval(
@@ -996,10 +1202,6 @@ function loadTaskSnapshot(workspaceId: number) {
         OR (
           status = 'assigned'
           AND coalesce(json_extract(metadata, '$.origin_lane'), '') != 'growth'
-          AND coalesce(json_extract(metadata, '$.execution_mode'), '') IN ('audit_only', 'draft_pr')
-          AND coalesce(json_extract(metadata, '$.disposition'), '') IN ('execute_now', 'founder_decision_needed')
-          AND coalesce(json_extract(metadata, '$.founder_approved_for_execution'), 0) != 1
-          AND coalesce(json_extract(metadata, '$.founder_approved_at'), '') = ''
         )
       )
     ORDER BY
@@ -1047,19 +1249,21 @@ function loadTaskSnapshot(workspaceId: number) {
       waitingOnQc: Boolean(parsedMetadata.waiting_on_qc),
       liveInMain: parsedMetadata.live_in_main === true,
       liveApprovalExempt: parsedMetadata.live_approval_exempt === true,
+      founderState: classifyFounderTaskState({
+        status: task.status,
+        assigned_to: task.assigned_to,
+        metadata: parsedMetadata,
+        aegisApproved: hasAegisApproval(db, task.id, workspaceId),
+      }),
     }
   })
 
-  const approvalQueue = approvalCandidates.filter((task) => {
-    if (task.status === 'quality_review') return task.aegisApproved && (task.liveInMain || task.liveApprovalExempt)
-    if (task.status === 'review') return !task.waitingOnQc
-    return true
-  })
-  const waitingOnQcQueue = approvalCandidates.filter((task) => {
-    if (task.status === 'quality_review' && !task.aegisApproved) return true
-    if (task.status === 'review' && task.waitingOnQc) return true
-    return false
-  })
+  const approvalQueue = approvalCandidates.filter((task) =>
+    task.founderState === 'needs_founder_approval' ||
+    task.founderState === 'ready_to_merge' ||
+    task.founderState === 'ready_for_founder_closeout'
+  )
+  const waitingOnQcQueue = approvalCandidates.filter((task) => task.founderState === 'waiting_on_qc')
 
   const appFinishTaskRows = db.prepare(`
     SELECT id, title, status, assigned_to, priority, updated_at, metadata
@@ -1089,8 +1293,6 @@ function loadTaskSnapshot(workspaceId: number) {
   }>
 
   const appFinishQueue = appFinishTaskRows
-    .filter((task) => !['review', 'quality_review'].includes(task.status))
-    .slice(0, 8)
     .map((task) => {
       let metadata: Record<string, unknown> = {}
       try {
@@ -1106,8 +1308,77 @@ function loadTaskSnapshot(workspaceId: number) {
         priority: task.priority,
         updated_at: task.updated_at,
         founderApproved: hasFounderApproval(metadata),
+        founderState: classifyFounderTaskState({
+          status: task.status,
+          assigned_to: task.assigned_to,
+          metadata,
+          aegisApproved: hasAegisApproval(db, task.id, workspaceId),
+        }),
       }
     })
+    .filter((task) => task.founderState === 'queued_for_execution' || task.founderState === 'in_execution')
+    .slice(0, 8)
+
+  const surfacedTaskIds = new Set<number>([
+    ...approvalQueue.map((task) => task.id),
+    ...waitingOnQcQueue.map((task) => task.id),
+    ...appFinishQueue.map((task) => task.id),
+  ])
+
+  const backgroundWork = topActive
+    .filter((task) => !surfacedTaskIds.has(task.id))
+    .slice(0, 6)
+    .map((task) => {
+      const metadata = db.prepare(`
+        SELECT metadata FROM tasks
+        WHERE id = ? AND workspace_id = ?
+        LIMIT 1
+      `).get(task.id, workspaceId) as { metadata?: string } | undefined
+      let parsedMetadata: Record<string, unknown> = {}
+      try {
+        parsedMetadata = metadata?.metadata ? JSON.parse(metadata.metadata) : {}
+      } catch {
+        parsedMetadata = {}
+      }
+
+      const originLane = String(parsedMetadata.origin_lane || '').trim()
+      const executionMode = String(parsedMetadata.execution_mode || '').trim()
+      const founderApproved = hasFounderApproval(parsedMetadata)
+      const waitingOnForeman = Boolean(parsedMetadata.waiting_on_foreman)
+      const founderState = classifyFounderTaskState({
+        status: task.status,
+        assigned_to: task.assigned_to,
+        metadata: parsedMetadata,
+        aegisApproved: hasAegisApproval(db, task.id, workspaceId),
+      })
+      const backgroundReason =
+        task.status === 'assigned' && founderApproved
+          ? 'Approved and queued for execution'
+          : task.status === 'assigned' && originLane === 'growth'
+            ? 'Growth lane work'
+            : task.status === 'assigned' && waitingOnForeman
+              ? 'Waiting on foreman'
+              : task.status === 'assigned' && executionMode === 'audit_only'
+                ? 'Audit lane work'
+                : task.status === 'in_progress'
+                  ? 'Execution in progress'
+                  : originLane === 'growth'
+                    ? 'Growth lane work'
+                    : 'Tracked outside the main founder decision lanes'
+
+      return {
+        id: task.id,
+        title: task.title,
+        status: task.status,
+        assigned_to: task.assigned_to,
+        priority: task.priority,
+        updated_at: task.updated_at,
+        founderApproved,
+        founderState,
+        backgroundReason,
+      }
+    })
+    .filter((task) => task.founderState === 'background_work')
 
   const appFinishTaskIds = appFinishTaskRows.map((task) => task.id)
   const commentRows = appFinishTaskIds.length
@@ -1192,8 +1463,9 @@ function loadTaskSnapshot(workspaceId: number) {
     approvalQueue,
     waitingOnQcQueue,
     appFinishQueue,
+    backgroundWork,
     appFinishCounts: {
-      active: appFinishTaskRows.length,
+      active: appFinishQueue.length,
       blockedByFounder: appFinishHealth.filter((task) => task.status === 'assigned' && !task.founderApproved).length,
       blockedByEvidence: appFinishHealth.filter((task) =>
         ['in_progress', 'review', 'quality_review'].includes(task.status) &&
@@ -1223,6 +1495,8 @@ export async function GET(request: NextRequest) {
     const growthPaths = latestGrowthWeek
       ? {
           researchBriefPath: path.join(GROWTH_WEEKS_ROOT, latestGrowthWeek, 'research-brief.json'),
+          opportunityPackPath: path.join(GROWTH_WEEKS_ROOT, latestGrowthWeek, 'opportunity-pack.json'),
+          researchHistoryPath: path.join(GROWTH_WEEKS_ROOT, latestGrowthWeek, 'research-history.json'),
           draftPackPath: path.join(GROWTH_WEEKS_ROOT, latestGrowthWeek, 'draft-pack.json'),
           scorecardPath: path.join(GROWTH_WEEKS_ROOT, latestGrowthWeek, 'scorecard.json'),
           approvedPostsPath: path.join(GROWTH_WEEKS_ROOT, latestGrowthWeek, 'approved-posts.json'),
@@ -1234,6 +1508,8 @@ export async function GET(request: NextRequest) {
         }
       : null
     const growthResearch = growthPaths ? await readJsonOrNull<any>(growthPaths.researchBriefPath) : null
+    const growthOpportunityPack = growthPaths ? await readJsonOrNull<any>(growthPaths.opportunityPackPath) : null
+    const growthResearchHistory = growthPaths ? await readJsonOrNull<any>(growthPaths.researchHistoryPath) : null
     const growthDraftPack = growthPaths ? await readJsonOrNull<any>(growthPaths.draftPackPath) : null
     const growthScorecard = growthPaths ? await readJsonOrNull<any>(growthPaths.scorecardPath) : null
     const growthApprovedPosts = growthPaths ? await readJsonOrNull<any>(growthPaths.approvedPostsPath) : null
@@ -1255,11 +1531,43 @@ export async function GET(request: NextRequest) {
       growthSourceMemory,
     )
 
-    const normalizedDraftCandidates = normalizeDraftCandidates(growthDraftPack?.drafts)
+    const normalizedSelectedOpportunities = normalizeSelectedOpportunities(growthOpportunityPack?.selected)
+    const normalizedBlockedOpportunities = normalizeSelectedOpportunities(growthOpportunityPack?.blocked)
+    const normalizedWatchOnlyOpportunities = normalizeSelectedOpportunities(growthOpportunityPack?.watchOnly)
+    const normalizedApprovedPosts = normalizeApprovedPosts(growthApprovedPosts)
+    const reconciledGrowthState = reconcileGrowthDraftCandidates(
+      normalizedSelectedOpportunities,
+      normalizeDraftCandidates(growthDraftPack?.drafts),
+      normalizedApprovedPosts,
+    )
     const normalizedRecommendations = filterGrowthRecommendations(
       normalizeGrowthRecommendations(growthDraftPack?.recommendations),
-      normalizedDraftCandidates,
+      reconciledGrowthState.draftCandidates,
     )
+    const normalizedChangesSummary = normalizeGrowthChangesSummary(growthDraftPack?.changesSummary)
+    if (normalizedChangesSummary && reconciledGrowthState.integrity.orphanDraftCount > 0) {
+      normalizedChangesSummary.whatChangedSinceLastRun = [
+        ...normalizedChangesSummary.whatChangedSinceLastRun,
+        `${reconciledGrowthState.integrity.orphanDraftCount} orphan draft${reconciledGrowthState.integrity.orphanDraftCount === 1 ? '' : 's'} hidden because the source family is no longer selected`,
+      ].slice(0, 8)
+    }
+    if (normalizedChangesSummary && reconciledGrowthState.integrity.prunedVariantCount > 0) {
+      normalizedChangesSummary.whatChangedSinceLastRun = [
+        ...normalizedChangesSummary.whatChangedSinceLastRun,
+        `${reconciledGrowthState.integrity.prunedVariantCount} extra variant${reconciledGrowthState.integrity.prunedVariantCount === 1 ? '' : 's'} pruned to preserve grounded/sharper family limits`,
+      ].slice(0, 8)
+    }
+    const blockedSourceCount = Number(normalizedSourceMemory?.blockedSourceCount || 0)
+    const noOpportunityReason =
+      normalizedSelectedOpportunities.length === 0
+        ? normalizedBlockedOpportunities.length > 0
+          ? 'Current live listening found source families, but they are blocked by source truth and reply-permission rules.'
+          : String(growthResearch?.externalStatus || '').trim().toLowerCase() === 'live'
+            ? blockedSourceCount > 0
+              ? 'Current live listening is fresh, but no new viable opportunities cleared the bar after blocked reply targets were suppressed.'
+              : 'Current live listening is fresh, but no source family cleared the selection bar yet.'
+            : 'Research is not fresh enough yet to surface reliable opportunities.'
+        : null
 
     return NextResponse.json({
       hasPacket: Boolean(packet),
@@ -1281,6 +1589,8 @@ export async function GET(request: NextRequest) {
       growth: {
         week: latestGrowthWeek,
         researchBriefPath: growthPaths?.researchBriefPath ?? null,
+        opportunityPackPath: growthPaths?.opportunityPackPath ?? null,
+        researchHistoryPath: growthPaths?.researchHistoryPath ?? null,
         draftPackPath: growthPaths?.draftPackPath ?? null,
         scorecardPath: growthPaths?.scorecardPath ?? null,
         researchGeneratedAt: growthResearch?.generatedAt ?? null,
@@ -1296,14 +1606,20 @@ export async function GET(request: NextRequest) {
         sourceCandidates: normalizeSourceCandidates(growthResearch?.sourceCandidates),
         accountTargets: normalizedAccountTargets,
         watchlistRecommendations: normalizedWatchlistRecommendations,
+        researchHistory: growthResearchHistory || null,
+        selectedOpportunities: normalizedSelectedOpportunities,
+        blockedOpportunities: normalizedBlockedOpportunities,
+        watchOnlyOpportunities: normalizedWatchOnlyOpportunities,
         editorialOpportunities: normalizeEditorialOpportunities(growthResearch?.editorialOpportunities || growthResearch?.opportunities),
         listeningDiagnostics: growthResearch?.listeningDiagnostics || null,
         trendClusters: normalizeTrendClusters(growthResearch?.trendClusters),
         sourceSamples: normalizeSourceSamples(growthResearch?.sourceSamples, growthResearch?.trendClusters),
-        draftCandidates: normalizedDraftCandidates,
+        draftCandidates: reconciledGrowthState.draftCandidates,
         recommendations: normalizedRecommendations,
-        changesSummary: normalizeGrowthChangesSummary(growthDraftPack?.changesSummary),
-        approvedPosts: normalizeApprovedPosts(growthApprovedPosts),
+        changesSummary: normalizedChangesSummary,
+        stateIntegrity: reconciledGrowthState.integrity,
+        noOpportunityReason,
+        approvedPosts: normalizedApprovedPosts,
         resultsSummary: normalizeResultsSummary(growthResultsSummary),
         publishLog: Array.isArray(growthPublishLog) ? growthPublishLog.slice(-5).reverse() : [],
         scorecard: growthScorecard,

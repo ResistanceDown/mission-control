@@ -5,6 +5,10 @@ import { useSmartPoll } from '@/lib/use-smart-poll'
 
 type GrowthAction =
   | 'refresh_research'
+  | 'select_opportunities'
+  | 'refresh_research_and_select'
+  | 'reject_opportunity'
+  | 'archive_opportunity'
   | 'generate_drafts'
   | 'refresh_research_and_generate'
   | 'expand_family_variants'
@@ -17,6 +21,7 @@ type GrowthAction =
   | 'schedule_draft'
   | 'unschedule_draft'
   | 'mark_published'
+  | 'link_manual_publish'
   | 'reopen_published'
   | 'set_account_target_state'
 
@@ -25,6 +30,8 @@ interface GrowthApiResponse {
   growth: {
     week: string | null
     researchBriefPath: string | null
+    opportunityPackPath?: string | null
+    researchHistoryPath?: string | null
     draftPackPath: string | null
     scorecardPath: string | null
     researchGeneratedAt?: string | null
@@ -75,6 +82,106 @@ interface GrowthApiResponse {
     sourceCandidates: Array<{ clusterLabel: string; url: string; text: string; author: string; likes: number; replies: number; followers: number; score: number }>
     accountTargets: Array<{ username: string; followers: number; verified: boolean; why: string; sourceUrl: string; clusterLabel: string; state?: string; stateNote?: string }>
     watchlistRecommendations: Array<{ username: string; clusterLabel: string; why: string; state: string; stateUpdatedAt: string | null; sourceUrl: string; reason: string }>
+    researchHistory?: {
+      updatedAt?: string | null
+      runs?: Array<{ generatedAt?: string | null }>
+      sources?: Record<string, { seenCount?: number }>
+      clusters?: Record<string, { seenCount?: number }>
+      accounts?: Record<string, { seenCount?: number }>
+    } | null
+    selectedOpportunities: Array<{
+      id: string
+      opportunityId: string
+      title: string
+      distributionType: string
+      sourceType: string
+      sourceState: string
+      sourceFamilyKey: string
+      sourceUrl: string | null
+      sourceAccount: string
+      sourceText: string
+      clusterId: string | null
+      clusterLabel: string
+      whyNow: string
+      audienceFit: string
+      brandFit: string
+      growthScore: number
+      brandScore: number
+      timelinessScore: number
+      confidence: string
+      selectionReason: string
+      selectionFactors: string[]
+      sourceSeenCount: number
+      accountSeenCount: number
+      clusterSeenCount: number
+      accountState: string
+      replyEligible: boolean
+      blockedReason?: string
+      suppressionReason?: string
+      supportingSignals: string[]
+    }>
+    blockedOpportunities: Array<{
+      id: string
+      opportunityId: string
+      title: string
+      distributionType: string
+      sourceType: string
+      sourceState: string
+      sourceFamilyKey: string
+      sourceUrl: string | null
+      sourceAccount: string
+      sourceText: string
+      clusterId: string | null
+      clusterLabel: string
+      whyNow: string
+      audienceFit: string
+      brandFit: string
+      growthScore: number
+      brandScore: number
+      timelinessScore: number
+      confidence: string
+      selectionReason: string
+      selectionFactors: string[]
+      sourceSeenCount: number
+      accountSeenCount: number
+      clusterSeenCount: number
+      accountState: string
+      replyEligible: boolean
+      blockedReason?: string
+      suppressionReason?: string
+      supportingSignals: string[]
+    }>
+    watchOnlyOpportunities: Array<{
+      id: string
+      opportunityId: string
+      title: string
+      distributionType: string
+      sourceType: string
+      sourceState: string
+      sourceFamilyKey: string
+      sourceUrl: string | null
+      sourceAccount: string
+      sourceText: string
+      clusterId: string | null
+      clusterLabel: string
+      whyNow: string
+      audienceFit: string
+      brandFit: string
+      growthScore: number
+      brandScore: number
+      timelinessScore: number
+      confidence: string
+      selectionReason: string
+      selectionFactors: string[]
+      sourceSeenCount: number
+      accountSeenCount: number
+      clusterSeenCount: number
+      accountState: string
+      replyEligible: boolean
+      blockedReason?: string
+      suppressionReason?: string
+      supportingSignals: string[]
+    }>
     editorialOpportunities: Array<{ id: string; title: string; archetype: string; sourceType: string; whyNow: string; brandFit: string; supportingSignals: string[] }>
     listeningDiagnostics?: {
       queryCount?: number
@@ -154,7 +261,18 @@ interface GrowthApiResponse {
       retainedCount: number
       changedDraftIds: string[]
       feedbackEffects: string[]
+      orphanCount?: number
+      reconciledCount?: number
+      whatChangedSinceLastRun?: string[]
     } | null
+    stateIntegrity?: {
+      selectedOpportunityCount: number
+      draftCandidateCount: number
+      orphanDraftCount: number
+      consumedDraftCount: number
+      prunedVariantCount: number
+    } | null
+    noOpportunityReason?: string | null
     approvedPosts: Array<{
       id: string
       text: string
@@ -219,6 +337,7 @@ interface GrowthApiResponse {
       negativeStyleMarkers: string[]
       positiveStyleMarkers: string[]
       accounts: Array<{ username: string; state: string; updatedAt: string | null; note: string }>
+      blockedSourceCount?: number
     } | null
   }
 }
@@ -352,6 +471,19 @@ function buildSuggestedSchedule(post: GrowthApiResponse['growth']['approvedPosts
   }
 }
 
+function isNonReplyablePublishError(message?: string | null) {
+  const text = String(message || '').toLowerCase()
+  return (
+    text.includes('not allowed to reply') ||
+    text.includes('not permitted to reply') ||
+    text.includes('reply to this conversation is not allowed') ||
+    text.includes('reply to this conversation is not permitted') ||
+    text.includes('not been mentioned or otherwise engaged') ||
+    text.includes('only people mentioned') ||
+    text.includes('only users mentioned')
+  )
+}
+
 function QueueBadge({ label, value, tone = 'neutral' }: { label: string; value: string; tone?: 'neutral' | 'urgent' | 'ready' | 'active' }) {
   const toneClass =
     tone === 'urgent'
@@ -367,6 +499,325 @@ function QueueBadge({ label, value, tone = 'neutral' }: { label: string; value: 
       <div className="text-[11px] uppercase tracking-[0.12em] text-current/70">{label}</div>
       <div className="mt-1 text-sm font-medium text-foreground">{value}</div>
     </div>
+  )
+}
+
+function scrollToId(id: string) {
+  if (typeof document === 'undefined') return
+  const element = document.getElementById(id)
+  element?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+function OpportunityCard({
+  opportunity,
+  blocked = false,
+  feedbackValue = '',
+  onFeedbackChange,
+  onAction,
+  saving = false,
+}: {
+  opportunity: GrowthApiResponse['growth']['selectedOpportunities'][number]
+  blocked?: boolean
+  feedbackValue?: string
+  onFeedbackChange?: (value: string) => void
+  onAction?: (action: GrowthAction, opportunityId: string, extra?: Record<string, unknown>) => void
+  saving?: boolean
+}) {
+  const feedbackPresets = ['Weak source', 'Wrong audience', 'Too generic', 'Already replied', 'Good direction, rewrite']
+  const historyChips = [
+    opportunity.sourceSeenCount > 1 ? `source seen ${opportunity.sourceSeenCount}x` : '',
+    opportunity.accountSeenCount > 1 ? `account seen ${opportunity.accountSeenCount}x` : '',
+    opportunity.clusterSeenCount > 1 ? `cluster seen ${opportunity.clusterSeenCount}x` : '',
+    opportunity.accountState && opportunity.accountState !== 'available' ? opportunity.accountState.replace(/_/g, ' ') : '',
+  ].filter(Boolean)
+  return (
+    <article className={cx(
+      'rounded-2xl border p-4 shadow-[0_16px_36px_rgba(0,0,0,0.24)]',
+      blocked ? 'border-rose-500/15 bg-[#171116]' : 'border-cyan-500/15 bg-[#10161f]',
+    )}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold text-foreground">{opportunity.title || 'Opportunity'}</div>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {opportunity.distributionType ? <FieldChip>{opportunity.distributionType}</FieldChip> : null}
+            {opportunity.sourceType ? <FieldChip>{opportunity.sourceType}</FieldChip> : null}
+            {opportunity.clusterLabel ? <FieldChip>{opportunity.clusterLabel}</FieldChip> : null}
+            {opportunity.sourceAccount ? <FieldChip>{opportunity.sourceAccount}</FieldChip> : null}
+            {opportunity.confidence ? <FieldChip>{opportunity.confidence}</FieldChip> : null}
+            <FieldChip>growth {opportunity.growthScore}</FieldChip>
+            <FieldChip>brand {opportunity.brandScore}</FieldChip>
+          </div>
+        </div>
+        <span className={cx(
+          'rounded-full border px-2 py-1 text-[10px] uppercase tracking-[0.16em]',
+          blocked ? 'border-rose-500/25 bg-rose-500/10 text-rose-200' : 'border-emerald-500/25 bg-emerald-500/10 text-emerald-200',
+        )}>
+          {blocked ? opportunity.sourceState.replace(/_/g, ' ') : 'selected'}
+        </span>
+      </div>
+      {opportunity.sourceText ? (
+        <div className="mt-4 rounded-xl border border-white/8 bg-black/20 px-4 py-3 text-sm leading-6 text-foreground/88">
+          {opportunity.sourceText}
+        </div>
+      ) : null}
+      <div className="mt-4 grid gap-3 lg:grid-cols-[1.15fr_0.85fr]">
+        <div className="space-y-3">
+          {opportunity.selectionReason ? (
+            <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
+              <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Why this move</div>
+              <div className="mt-1 text-sm text-foreground/90">{opportunity.selectionReason}</div>
+            </div>
+          ) : null}
+          {opportunity.whyNow ? (
+            <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
+              <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Why now</div>
+              <div className="mt-1 text-sm text-foreground/90">{opportunity.whyNow}</div>
+            </div>
+          ) : null}
+        </div>
+        <div className="space-y-3">
+          <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
+            <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Source truth</div>
+            <div className="mt-1 text-sm text-foreground/90">
+              {blocked
+                ? opportunity.blockedReason || opportunity.suppressionReason || `Blocked because this source is ${opportunity.sourceState.replace(/_/g, ' ')}.`
+                : opportunity.replyEligible || opportunity.distributionType !== 'reply'
+                  ? 'Actionable now.'
+                  : 'Not actionable until source state changes.'}
+            </div>
+            {historyChips.length ? (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {historyChips.map((chip, index) => <FieldChip key={`${opportunity.id}-history-${index}`}>{chip}</FieldChip>)}
+              </div>
+            ) : null}
+            {opportunity.sourceUrl ? <a href={opportunity.sourceUrl} target="_blank" rel="noreferrer" className="mt-3 inline-block text-xs text-cyan-200 hover:text-cyan-100">Open source post</a> : null}
+          </div>
+          {opportunity.selectionFactors?.length ? (
+            <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
+              <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Why it ranked</div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {opportunity.selectionFactors.map((factor, index) => <FieldChip key={`${opportunity.id}-factor-${index}`}>{factor}</FieldChip>)}
+              </div>
+            </div>
+          ) : null}
+          {opportunity.supportingSignals?.length ? (
+            <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
+              <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Supporting signals</div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {opportunity.supportingSignals.map((signal, index) => <FieldChip key={`${opportunity.id}-signal-${index}`}>{signal}</FieldChip>)}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </div>
+      {!blocked && onAction && onFeedbackChange ? (
+        <div className="mt-4 rounded-xl border border-white/8 bg-black/20 px-3 py-3">
+          <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Opportunity feedback</div>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {feedbackPresets.map((preset) => (
+              <button
+                key={`${opportunity.id}-${preset}`}
+                type="button"
+                className="rounded-full border border-white/10 px-2.5 py-1 text-[11px] text-muted-foreground transition-smooth hover:bg-surface-2"
+                onClick={() => {
+                  const next = feedbackValue
+                    ? feedbackValue.includes(preset)
+                      ? feedbackValue
+                      : `${feedbackValue} | ${preset}`
+                    : preset
+                  onFeedbackChange(next)
+                }}
+              >
+                {preset}
+              </button>
+            ))}
+          </div>
+          <textarea
+            className="mt-3 min-h-20 w-full rounded-xl border border-border bg-background px-3 py-2 text-sm"
+            placeholder="Why this move should be demoted, archived, or learned from."
+            value={feedbackValue}
+            onChange={(event) => onFeedbackChange(event.target.value)}
+          />
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              onClick={() => onAction('generate_drafts', opportunity.id, { opportunityId: opportunity.opportunityId })}
+              disabled={saving}
+              className="rounded-lg border border-cyan-500/20 px-3 py-2 text-xs font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/10 disabled:opacity-60"
+            >
+              Generate Drafts
+            </button>
+            <button
+              onClick={() => onAction('reject_opportunity', opportunity.id, { feedback: feedbackValue })}
+              disabled={saving}
+              className="rounded-lg border border-white/10 px-3 py-2 text-xs font-medium text-muted-foreground transition-smooth hover:bg-surface-2 disabled:opacity-60"
+            >
+              Reject Opportunity
+            </button>
+            <button
+              onClick={() => onAction('archive_opportunity', opportunity.id, { feedback: feedbackValue })}
+              disabled={saving}
+              className="rounded-lg border border-amber-500/20 px-3 py-2 text-xs font-medium text-amber-200 transition-smooth hover:bg-amber-500/10 disabled:opacity-60"
+            >
+              Archive Angle
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </article>
+  )
+}
+
+function OpportunityLane({
+  title,
+  subtitle,
+  opportunities,
+  feedbackDrafts,
+  onFeedbackChange,
+  onAction,
+  saving,
+}: {
+  title: string
+  subtitle: string
+  opportunities: GrowthApiResponse['growth']['selectedOpportunities']
+  feedbackDrafts: Record<string, string>
+  onFeedbackChange: (opportunityId: string, value: string) => void
+  onAction: (action: GrowthAction, draftId?: string, extra?: Record<string, unknown>) => void
+  saving: boolean
+}) {
+  if (!opportunities.length) return null
+  return (
+    <details open className="rounded-xl border border-white/10 bg-[#0f151d] p-4">
+      <summary className="cursor-pointer list-none">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-sm font-semibold text-foreground">{title}</div>
+            <div className="mt-1 text-xs text-muted-foreground">{subtitle}</div>
+          </div>
+          <FieldChip>{opportunities.length}</FieldChip>
+        </div>
+      </summary>
+      <div className="mt-4 space-y-3">
+        {opportunities.map((opportunity) => (
+          <OpportunityCard
+            key={opportunity.id}
+            opportunity={opportunity}
+            feedbackValue={feedbackDrafts[opportunity.id] || ''}
+            onFeedbackChange={(value) => onFeedbackChange(opportunity.id, value)}
+            onAction={onAction}
+            saving={saving}
+          />
+        ))}
+      </div>
+    </details>
+  )
+}
+
+function OpportunityFamilyGroup({
+  familyLabel,
+  sourceLabel,
+  opportunities,
+  feedbackDrafts,
+  onFeedbackChange,
+  onAction,
+  saving,
+  defaultOpen,
+}: {
+  familyLabel: string
+  sourceLabel: string
+  opportunities: GrowthApiResponse['growth']['selectedOpportunities']
+  feedbackDrafts: Record<string, string>
+  onFeedbackChange: (opportunityId: string, value: string) => void
+  onAction: (action: GrowthAction, draftId?: string, extra?: Record<string, unknown>) => void
+  saving: boolean
+  defaultOpen?: boolean
+}) {
+  if (!opportunities.length) return null
+  const leader = opportunities[0]
+  return (
+    <details
+      open={defaultOpen}
+      className="rounded-2xl border border-cyan-500/15 bg-[#0f151d] p-4 shadow-[0_18px_40px_rgba(0,0,0,0.26)] group"
+    >
+      <summary className="flex cursor-pointer list-none flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <div className="text-[11px] uppercase tracking-[0.14em] text-cyan-100/70">{familyLabel}</div>
+          <div className="mt-1 text-sm font-semibold text-foreground">{sourceLabel}</div>
+          <div className="mt-1 text-xs text-muted-foreground">
+            {opportunities.length} move{opportunities.length === 1 ? '' : 's'} from the same source family. Reject or archive here before drafting if the source is not worth engaging.
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {leader.distributionType ? <FieldChip>{leader.distributionType}</FieldChip> : null}
+          {leader.sourceAccount ? <FieldChip>{leader.sourceAccount}</FieldChip> : null}
+          {leader.clusterLabel ? <FieldChip>{leader.clusterLabel}</FieldChip> : null}
+          {leader.confidence ? <FieldChip>{leader.confidence}</FieldChip> : null}
+          <FieldChip>{opportunities.length} options</FieldChip>
+          <span className="rounded-full border border-white/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
+            Expand
+          </span>
+        </div>
+      </summary>
+      <div className="mt-4 space-y-3">
+        {opportunities.map((opportunity) => (
+          <OpportunityCard
+            key={opportunity.id}
+            opportunity={opportunity}
+            feedbackValue={feedbackDrafts[opportunity.id] || ''}
+            onFeedbackChange={(value) => onFeedbackChange(opportunity.id, value)}
+            onAction={onAction}
+            saving={saving}
+          />
+        ))}
+      </div>
+    </details>
+  )
+}
+
+function OpportunityFamilyLane({
+  title,
+  subtitle,
+  families,
+  feedbackDrafts,
+  onFeedbackChange,
+  onAction,
+  saving,
+}: {
+  title: string
+  subtitle: string
+  families: Array<{ key: string; familyLabel: string; sourceLabel: string; opportunities: GrowthApiResponse['growth']['selectedOpportunities'] }>
+  feedbackDrafts: Record<string, string>
+  onFeedbackChange: (opportunityId: string, value: string) => void
+  onAction: (action: GrowthAction, draftId?: string, extra?: Record<string, unknown>) => void
+  saving: boolean
+}) {
+  if (!families.length) return null
+  return (
+    <details open className="rounded-xl border border-white/10 bg-[#0f151d] p-4">
+      <summary className="cursor-pointer list-none">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-sm font-semibold text-foreground">{title}</div>
+            <div className="mt-1 text-xs text-muted-foreground">{subtitle}</div>
+          </div>
+          <FieldChip>{families.length} families</FieldChip>
+        </div>
+      </summary>
+      <div className="mt-4 space-y-3">
+        {families.map((family, familyIndex) => (
+          <OpportunityFamilyGroup
+            key={family.key}
+            familyLabel={family.familyLabel}
+            sourceLabel={family.sourceLabel}
+            opportunities={family.opportunities}
+            feedbackDrafts={feedbackDrafts}
+            onFeedbackChange={onFeedbackChange}
+            onAction={onAction}
+            saving={saving}
+            defaultOpen={familyIndex === 0}
+          />
+        ))}
+      </div>
+    </details>
   )
 }
 
@@ -386,10 +837,12 @@ function DraftCard({
   const feedbackPresets = ['Too generic', 'Weak source', 'Too product-y', 'Wrong audience', 'Too abstract', 'Too founder-theater', 'Good direction, rewrite']
   const [draftText, setDraftText] = useState(draft.text)
   const [dirty, setDirty] = useState(false)
+  const [rewritePrompt, setRewritePrompt] = useState('')
 
   useEffect(() => {
     setDraftText(draft.text)
     setDirty(false)
+    setRewritePrompt('')
   }, [draft.id, draft.text])
 
   return (
@@ -418,7 +871,10 @@ function DraftCard({
 
       <div className="mt-4 rounded-xl border border-cyan-500/15 bg-[#0c1219] px-4 py-4">
         <div className="mb-2 flex items-center justify-between gap-3">
-          <div className="text-[11px] uppercase tracking-[0.12em] text-cyan-100/70">Exact post text</div>
+          <div>
+            <div className="text-[11px] uppercase tracking-[0.12em] text-cyan-100/70">Exact post text</div>
+            <div className="mt-1 text-xs text-foreground/65">Edit the exact copy here, or rewrite it from your feedback before approval.</div>
+          </div>
           {dirty ? <FieldChip>Edited locally</FieldChip> : null}
         </div>
         <textarea
@@ -438,13 +894,19 @@ function DraftCard({
             Save Edit
           </button>
           <button
-            onClick={() => onAction('rewrite_draft', draft.id)}
+            onClick={() => onAction('rewrite_draft', draft.id, { feedback: rewritePrompt.trim() || feedbackValue })}
             disabled={saving}
             className="rounded-lg border border-cyan-500/20 px-3 py-2 text-xs font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/10 disabled:opacity-60"
           >
-            Rewrite From Feedback
+            Rewrite With Direction
           </button>
         </div>
+        <textarea
+          className="mt-3 min-h-20 w-full rounded-xl border border-white/8 bg-black/15 px-3 py-2 text-sm text-foreground outline-none transition-smooth focus:border-cyan-500/30"
+          placeholder="Optional rewrite direction: sharpen the hook, lean more contrarian, reference the source context more directly."
+          value={rewritePrompt}
+          onChange={(event) => setRewritePrompt(event.target.value)}
+        />
       </div>
 
       <div className="mt-4 grid gap-3 lg:grid-cols-[1.2fr_0.8fr]">
@@ -635,10 +1097,12 @@ export function GrowthReviewPanel() {
   const { data, setData, loading, reload } = useGrowthData()
   const [actionState, setActionState] = useState<{ status: 'idle' | 'saving' | 'error' | 'saved'; message?: string }>({ status: 'idle' })
   const [feedbackDrafts, setFeedbackDrafts] = useState<Record<string, string>>({})
+  const [opportunityFeedback, setOpportunityFeedback] = useState<Record<string, string>>({})
   const [scheduleDrafts, setScheduleDrafts] = useState<Record<string, { when: string; note: string }>>({})
   const [publishDrafts, setPublishDrafts] = useState<Record<string, { tweetUrl: string; tweetId: string }>>({})
+  const [topDraftRewritePrompt, setTopDraftRewritePrompt] = useState('')
 
-  const growth = data?.growth
+  const growth = data?.growth ?? null
   const byId = useMemo(() => new Map((growth?.draftCandidates || []).map((draft) => [draft.id, draft])), [growth?.draftCandidates])
   const sortedForGrowth = useMemo(
     () => [...(growth?.draftCandidates || [])].sort((left, right) => Number(right.follower_growth_score || 0) - Number(left.follower_growth_score || 0)),
@@ -667,19 +1131,92 @@ export function GrowthReviewPanel() {
       [...group].sort((left, right) => Number(left.variant_position || 999) - Number(right.variant_position || 999)),
     )
   }, [growth?.draftCandidates])
-  const bestForFollowerGrowth = growth?.recommendations?.bestForFollowerGrowth
-    ? byId.get(growth.recommendations.bestForFollowerGrowth) || sortedForGrowth[0]
-    : sortedForGrowth[0]
-  const bestForBrandBuilding = growth?.recommendations?.bestForBrandBuilding
-    ? byId.get(growth.recommendations.bestForBrandBuilding) || sortedForBrand[0]
-    : sortedForBrand[0]
-  const bestOriginalPost = growth?.recommendations?.bestOriginalPost
-    ? byId.get(growth.recommendations.bestOriginalPost) || sortedOriginals[0]
-    : sortedOriginals[0]
   const approvedPosts = growth?.approvedPosts || []
-  const readyPosts = approvedPosts.filter((post) => post.status === 'approved' || post.status === 'failed')
+  const selectedOpportunities = growth?.selectedOpportunities || []
+  const blockedOpportunities = growth?.blockedOpportunities || []
+  const watchOnlyOpportunities = growth?.watchOnlyOpportunities || []
+  const reactiveOpportunities = selectedOpportunities.filter((opportunity) => opportunity.distributionType === 'reply' || opportunity.distributionType === 'quote')
+  const standaloneOpportunities = selectedOpportunities.filter((opportunity) => opportunity.distributionType === 'original')
+  const reactiveOpportunityFamilies = useMemo(() => {
+    const grouped = new Map<string, GrowthApiResponse['growth']['selectedOpportunities']>()
+    for (const opportunity of reactiveOpportunities) {
+      const key = String(opportunity.sourceFamilyKey || opportunity.sourceUrl || opportunity.id).trim()
+      if (!grouped.has(key)) grouped.set(key, [])
+      grouped.get(key)!.push(opportunity)
+    }
+    return Array.from(grouped.entries()).map(([key, family]) => {
+      const sortedFamily = [...family].sort((left, right) => {
+        const leftScore = left.growthScore + left.timelinessScore + (left.distributionType === 'reply' ? 6 : 2)
+        const rightScore = right.growthScore + right.timelinessScore + (right.distributionType === 'reply' ? 6 : 2)
+        return rightScore - leftScore
+      })
+      const leader = sortedFamily[0]
+      return {
+        key,
+        familyLabel: leader.sourceType === 'x_recent_search' ? 'Reactive source family' : 'Opportunity family',
+        sourceLabel: leader.sourceAccount
+          ? `${leader.sourceAccount} • ${leader.title || leader.clusterLabel || 'Reactive move'}`
+          : leader.title || leader.clusterLabel || 'Reactive move',
+        opportunities: sortedFamily,
+      }
+    })
+  }, [reactiveOpportunities])
+  const retryableFailedPosts = approvedPosts.filter((post) => post.status === 'failed' && !isNonReplyablePublishError(post.publishError))
+  const readyPosts = approvedPosts.filter((post) => post.status === 'approved').concat(retryableFailedPosts)
   const scheduledPosts = approvedPosts.filter((post) => post.status === 'scheduled')
   const publishedPosts = approvedPosts.filter((post) => post.status === 'published')
+  const candidateCount = growth?.stateIntegrity?.draftCandidateCount ?? growth?.draftCandidates.length ?? 0
+  const opportunityCount = growth?.stateIntegrity?.selectedOpportunityCount ?? selectedOpportunities.length
+  const readyToSchedule = readyPosts.length
+  const scheduledCount = scheduledPosts.length
+  const lowConfidenceCount = growth?.freshness?.lowConfidenceClusters?.length ?? 0
+  const topReplyCount = selectedOpportunities.filter((opportunity) => opportunity.distributionType === 'reply').length
+  const publishedCount = publishedPosts.length || growth?.resultsSummary?.postedCount || 0
+  const researchRunCount = Number(growth?.researchHistory?.runs?.length || 0)
+  const syncedPublishedCount = Number(growth?.resultsSummary?.syncedPostCount || growth?.strategyMemory?.performance?.syncedPostCount || 0)
+  const publishAttempts = Number(growth?.resultsSummary?.publishAttempts || growth?.strategyMemory?.performance?.publishAttempts || 0)
+  const todayBestMove = growth?.strategy?.todayBestMove || null
+  const weeklyMix = growth?.strategy?.weeklyMixRecommendation || null
+  const distributionPriority = growth?.strategy?.distributionPriority?.length ? growth.strategy.distributionPriority.join(' → ') : 'reply → quote → original'
+  const topOpportunity = useMemo(() => {
+    const ranked = [...selectedOpportunities].sort((left, right) => {
+      const leftReactiveBoost = left.distributionType === 'reply' ? 8 : left.distributionType === 'quote' ? 4 : 0
+      const rightReactiveBoost = right.distributionType === 'reply' ? 8 : right.distributionType === 'quote' ? 4 : 0
+      const leftScore = leftReactiveBoost + left.growthScore + left.timelinessScore
+      const rightScore = rightReactiveBoost + right.growthScore + right.timelinessScore
+      return rightScore - leftScore
+    })
+    return ranked[0] || null
+  }, [selectedOpportunities])
+  const topDraft = useMemo(() => {
+    if (!growth?.draftCandidates?.length) return null
+    if (topOpportunity?.sourceUrl) {
+      const matched = growth.draftCandidates.find((draft) => String(draft.source_tweet?.url || '').trim() === String(topOpportunity.sourceUrl || '').trim())
+      if (matched) return matched
+    }
+    return sortedForGrowth[0] || growth.draftCandidates[0] || null
+  }, [growth?.draftCandidates, sortedForGrowth, topOpportunity?.sourceUrl])
+  useEffect(() => {
+    setTopDraftRewritePrompt('')
+  }, [topDraft?.id])
+  const nextScheduledPost = useMemo(() => {
+    if (!scheduledPosts.length) return null
+    return [...scheduledPosts].sort((left, right) => {
+      const leftTime = new Date(String(left.scheduledAt || '')).getTime() || Number.MAX_SAFE_INTEGER
+      const rightTime = new Date(String(right.scheduledAt || '')).getTime() || Number.MAX_SAFE_INTEGER
+      return leftTime - rightTime
+    })[0] || null
+  }, [scheduledPosts])
+  const topMoveTitle = topOpportunity?.title || todayBestMove?.title || 'Refresh research before choosing the next move.'
+  const topMoveBody = topOpportunity?.selectionReason || topOpportunity?.whyNow || todayBestMove?.why || 'The desk should rank the best live move before it writes copy.'
+  const topMoveActionText =
+    readyToSchedule
+      ? `${readyToSchedule} approved post${readyToSchedule === 1 ? '' : 's'} waiting to schedule`
+      : topDraft
+        ? 'Review the top draft candidate'
+        : topOpportunity
+          ? 'Generate drafts from the current top opportunity'
+          : 'Refresh research or select opportunities'
 
   const patchAccountTargetState = useCallback((usernameInput: string, nextState: 'watch' | 'prioritize' | 'mute' | 'engage_this_week', note: string) => {
     const normalized = displayUsername(usernameInput).replace(/^@/, '').trim().toLowerCase()
@@ -737,7 +1274,8 @@ export function GrowthReviewPanel() {
 
   const runGrowthAction = useCallback(async (action: GrowthAction, draftId?: string, extra: Record<string, unknown> = {}) => {
     const growthWeek = growth?.week ?? null
-    const feedback = draftId ? String(feedbackDrafts[draftId] || '').trim() : String(extra.feedback || '').trim()
+    const feedbackSource = extra.feedback ?? (draftId ? feedbackDrafts[draftId] : '')
+    const feedback = String(feedbackSource || '').trim()
     setActionState({ status: 'saving' })
     try {
       const response = await fetch('/api/founder/growth', {
@@ -761,6 +1299,8 @@ export function GrowthReviewPanel() {
       await reload()
       const messageMap: Partial<Record<GrowthAction, string>> = {
         refresh_research: 'Research refreshed.',
+        select_opportunities: 'Opportunities selected from the current research snapshot.',
+        refresh_research_and_select: 'Research refreshed and opportunities re-ranked.',
         generate_drafts: 'Draft candidates generated.',
         refresh_research_and_generate: 'Research refreshed and a new candidate pack generated.',
         expand_family_variants: 'Added more options for this source family.',
@@ -769,15 +1309,19 @@ export function GrowthReviewPanel() {
         approve_draft: 'Post approved and moved to Ready to schedule.',
         reject_draft: 'Draft rejected. The system will learn from that.',
         archive_draft: 'Angle archived without poisoning the whole source family.',
+        reject_opportunity: 'Opportunity rejected and removed from the active lane.',
+        archive_opportunity: 'Opportunity archived out of the active lane.',
         clear_current_drafts: 'Current drafts cleared. Learning memory was preserved.',
         schedule_draft: 'Post scheduled in the editorial desk.',
         unschedule_draft: 'Post moved back to Ready to schedule without a publish time.',
         mark_published: 'Post marked published and the results loop was triggered.',
+        link_manual_publish: 'Manual publish link recorded and source family retired.',
         reopen_published: 'Published state cleared and the post moved back into the scheduling lane.',
         set_account_target_state: 'Account target updated.',
       }
       if (draftId) {
         setFeedbackDrafts((current) => ({ ...current, [draftId]: '' }))
+        setOpportunityFeedback((current) => ({ ...current, [draftId]: '' }))
       }
       setActionState({ status: 'saved', message: messageMap[action] || 'Growth updated.' })
     } catch {
@@ -793,25 +1337,6 @@ export function GrowthReviewPanel() {
     return <div className="panel"><div className="panel-body text-sm text-muted-foreground">Growth data is not available yet.</div></div>
   }
 
-  const candidateCount = growth.draftCandidates.length
-  const readyToSchedule = readyPosts.length
-  const scheduledCount = scheduledPosts.length
-  const lowConfidenceCount = growth.freshness?.lowConfidenceClusters?.length ?? 0
-  const topReplyCount = growth.engagementTargets.replyTargets.length
-  const publishedCount = publishedPosts.length || growth.resultsSummary?.postedCount || 0
-  const syncedPublishedCount = Number(growth.resultsSummary?.syncedPostCount || growth.strategyMemory?.performance?.syncedPostCount || 0)
-  const publishAttempts = Number(growth.resultsSummary?.publishAttempts || growth.strategyMemory?.performance?.publishAttempts || 0)
-  const todayBestMove = growth.strategy?.todayBestMove || null
-  const bestForFollowerGrowthCard = bestForFollowerGrowth ?? (todayBestMove
-    ? {
-        distribution_type: todayBestMove.distributionType || 'reply',
-        follower_growth_score: null,
-        text: todayBestMove.why || todayBestMove.title || 'The strongest live opportunity is in the current conversation queue.',
-      }
-    : null)
-  const weeklyMix = growth.strategy?.weeklyMixRecommendation || null
-  const distributionPriority = growth.strategy?.distributionPriority?.length ? growth.strategy.distributionPriority.join(' → ') : 'reply → quote → original'
-
   return (
     <div className="space-y-5 p-5">
       <div className="rounded-2xl border border-white/10 bg-[#0f141b] p-5 shadow-[0_24px_60px_rgba(0,0,0,0.35)]">
@@ -821,16 +1346,19 @@ export function GrowthReviewPanel() {
             <div className="mt-1 max-w-3xl text-sm text-muted-foreground">Use this page like an editorial desk: refresh listening, choose the right participation move, approve exact post text, schedule it, then learn from outcomes.</div>
           </div>
           <div className="flex flex-wrap gap-2">
-            <button onClick={() => void runGrowthAction('refresh_research_and_generate')} disabled={actionState.status === 'saving'} className="rounded-lg bg-cyan-500/15 px-3 py-2 text-xs font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/20 disabled:opacity-60">Refresh Research + Generate</button>
-            <button onClick={() => void runGrowthAction('refresh_research')} disabled={actionState.status === 'saving'} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2 disabled:opacity-60">Refresh Research Only</button>
+            <button onClick={() => void runGrowthAction('refresh_research')} disabled={actionState.status === 'saving'} className="rounded-lg bg-cyan-500/15 px-3 py-2 text-xs font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/20 disabled:opacity-60">Refresh Research</button>
+            <button onClick={() => void runGrowthAction('select_opportunities')} disabled={actionState.status === 'saving'} className="rounded-lg border border-cyan-500/20 bg-black/20 px-3 py-2 text-xs font-medium text-cyan-100 transition-smooth hover:bg-cyan-500/10 disabled:opacity-60">Select Opportunities</button>
             <button onClick={() => void runGrowthAction(candidateCount ? 'clear_current_drafts' : 'generate_drafts')} disabled={actionState.status === 'saving'} className="rounded-lg border border-amber-500/20 bg-black/20 px-3 py-2 text-xs font-medium text-amber-200 transition-smooth hover:bg-amber-500/10 disabled:opacity-60">{candidateCount ? 'Clear Current Drafts' : 'Generate Drafts'}</button>
+            <button onClick={() => void runGrowthAction('refresh_research_and_select')} disabled={actionState.status === 'saving'} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2 disabled:opacity-60">Refresh + Select</button>
           </div>
         </div>
 
-        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
           <MetricCard label="Research" value={growth.externalStatus} subtitle={formatPacificTime(growth.freshness?.lastXPullAt || growth.researchGeneratedAt || null)} accent="cyan" />
-          <MetricCard label="Candidates" value={candidateCount} subtitle="Current review pack" accent="violet" />
-          <MetricCard label="Ready to schedule" value={readyToSchedule} subtitle="Approved + failed retries" accent="emerald" />
+          <MetricCard label="Research memory" value={researchRunCount} subtitle="stacked listening runs" accent="cyan" />
+          <MetricCard label="Opportunities" value={opportunityCount} subtitle="Selected participation moves" accent="violet" />
+          <MetricCard label="Candidates" value={candidateCount} subtitle="Drafts from selected opportunities" accent="violet" />
+          <MetricCard label="Ready to schedule" value={readyToSchedule} subtitle="Approved posts and transient failures" accent="emerald" />
           <MetricCard label="Reply opportunities" value={topReplyCount} subtitle="Best for follower growth" accent="amber" />
           <MetricCard label="Published" value={publishedCount} subtitle={growth.strategy?.accountStage || 'Tracked in results loop'} accent={publishedCount ? 'emerald' : lowConfidenceCount ? 'rose' : 'cyan'} />
         </div>
@@ -843,7 +1371,7 @@ export function GrowthReviewPanel() {
           />
           <QueueBadge
             label="Best next move"
-            value={todayBestMove?.primaryAction || (bestForFollowerGrowth ? `Review the top ${String(bestForFollowerGrowth.distribution_type || 'candidate')}` : 'No recommendation yet')}
+            value={topMoveActionText}
             tone="active"
           />
           <QueueBadge
@@ -863,23 +1391,49 @@ export function GrowthReviewPanel() {
             <div className="max-w-3xl">
               <div className="text-[11px] uppercase tracking-[0.14em] text-cyan-100/70">Today’s best move</div>
               <div className="mt-1 text-base font-semibold text-foreground">
-                {todayBestMove?.title || (bestForFollowerGrowth ? `${bestForFollowerGrowth.distribution_type || 'opportunity'} first: ${bestForFollowerGrowth.pillar}` : 'Refresh research before choosing the next move.')}
+                {topMoveTitle}
               </div>
               <div className="mt-2 text-sm text-foreground/85">
-                {todayBestMove?.why || bestForFollowerGrowth?.selection_reason || 'The system should choose the highest-quality conversation to enter before it falls back to generic originals.'}
+                {topMoveBody}
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
-                {todayBestMove?.distributionType ? <FieldChip>{todayBestMove.distributionType}</FieldChip> : null}
+                {topOpportunity?.distributionType ? <FieldChip>{topOpportunity.distributionType}</FieldChip> : todayBestMove?.distributionType ? <FieldChip>{todayBestMove.distributionType}</FieldChip> : null}
                 {growth.strategy?.accountStage ? <FieldChip>{growth.strategy.accountStage}</FieldChip> : null}
-                {todayBestMove?.clusterLabel ? <FieldChip>{todayBestMove.clusterLabel}</FieldChip> : null}
-                {todayBestMove?.sourceAccount ? <FieldChip>{todayBestMove.sourceAccount}</FieldChip> : null}
-                {todayBestMove?.confidence ? <FieldChip>{todayBestMove.confidence}</FieldChip> : null}
+                {topOpportunity?.clusterLabel ? <FieldChip>{topOpportunity.clusterLabel}</FieldChip> : todayBestMove?.clusterLabel ? <FieldChip>{todayBestMove.clusterLabel}</FieldChip> : null}
+                {topOpportunity?.sourceAccount ? <FieldChip>{topOpportunity.sourceAccount}</FieldChip> : todayBestMove?.sourceAccount ? <FieldChip>{todayBestMove.sourceAccount}</FieldChip> : null}
+                {topOpportunity?.confidence ? <FieldChip>{topOpportunity.confidence}</FieldChip> : todayBestMove?.confidence ? <FieldChip>{todayBestMove.confidence}</FieldChip> : null}
               </div>
-              {todayBestMove?.sourceUrl ? <a href={todayBestMove.sourceUrl} target="_blank" rel="noreferrer" className="mt-3 inline-block text-xs text-cyan-200 hover:text-cyan-100">Open source context</a> : null}
+              <div className="mt-3 flex flex-wrap gap-2">
+                {topOpportunity?.sourceUrl || todayBestMove?.sourceUrl ? (
+                  <a href={topOpportunity?.sourceUrl || todayBestMove?.sourceUrl || '#'} target="_blank" rel="noreferrer" className="inline-flex items-center rounded-lg border border-cyan-500/20 bg-cyan-500/10 px-3 py-2 text-xs font-medium text-cyan-100 hover:bg-cyan-500/20">
+                    Open source
+                  </a>
+                ) : null}
+                {topOpportunity ? (
+                  <button type="button" onClick={() => scrollToId('growth-opportunities')} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2">
+                    Jump to opportunity
+                  </button>
+                ) : null}
+                {candidateCount && topDraft ? (
+                  <button type="button" onClick={() => scrollToId('growth-drafts')} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2">
+                    Jump to drafts
+                  </button>
+                ) : null}
+                {!candidateCount && topOpportunity ? (
+                  <button type="button" onClick={() => void runGrowthAction('generate_drafts')} disabled={actionState.status === 'saving'} className="rounded-lg border border-amber-500/20 bg-black/20 px-3 py-2 text-xs font-medium text-amber-200 transition-smooth hover:bg-amber-500/10 disabled:opacity-60">
+                    Generate drafts
+                  </button>
+                ) : null}
+                {readyToSchedule ? (
+                  <button type="button" onClick={() => scrollToId('growth-ready-to-schedule')} className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs font-medium text-emerald-200 transition-smooth hover:bg-emerald-500/20">
+                    Go to scheduling
+                  </button>
+                ) : null}
+              </div>
             </div>
             <div className="grid gap-3">
               <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3 text-xs text-muted-foreground">
-                {actionState.message || todayBestMove?.primaryAction || 'The desk should prioritize credible replies, selective quotes, then originals only when they sharpen positioning.'}
+                {actionState.message || topMoveActionText}
               </div>
               <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
                 <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Strategy lane</div>
@@ -891,15 +1445,21 @@ export function GrowthReviewPanel() {
               </div>
             </div>
           </div>
-          {growth.changesSummary ? (
+          {growth.changesSummary || growth.stateIntegrity ? (
             <div className="mt-4 rounded-xl border border-white/8 bg-black/20 px-3 py-3">
               <div className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">What changed since last run</div>
               <div className="mt-2 flex flex-wrap gap-3 text-xs text-foreground/85">
-                <span>{growth.changesSummary.newCount} new</span>
-                <span>{growth.changesSummary.retainedCount} retained</span>
-                <span>{growth.changesSummary.changedDraftIds.length} materially changed</span>
+                {growth.changesSummary ? <span>{growth.changesSummary.newCount} new</span> : null}
+                {growth.changesSummary ? <span>{growth.changesSummary.retainedCount} retained</span> : null}
+                {growth.changesSummary ? <span>{growth.changesSummary.changedDraftIds.length} materially changed</span> : null}
+                {growth.stateIntegrity?.orphanDraftCount ? <span>{growth.stateIntegrity.orphanDraftCount} orphan draft{growth.stateIntegrity.orphanDraftCount === 1 ? '' : 's'} retired</span> : null}
+                {growth.stateIntegrity?.prunedVariantCount ? <span>{growth.stateIntegrity.prunedVariantCount} extra variant{growth.stateIntegrity.prunedVariantCount === 1 ? '' : 's'} pruned</span> : null}
               </div>
-              {growth.changesSummary.feedbackEffects?.length ? (
+              {growth.changesSummary?.whatChangedSinceLastRun?.length ? (
+                <div className="mt-2 space-y-1 text-xs text-foreground/85">
+                  {growth.changesSummary.whatChangedSinceLastRun.map((effect, index) => <div key={`change-${index}`} className="flex gap-2"><span>•</span><span>{effect}</span></div>)}
+                </div>
+              ) : growth.changesSummary?.feedbackEffects?.length ? (
                 <div className="mt-2 space-y-1 text-xs text-amber-100/85">
                   {growth.changesSummary.feedbackEffects.map((effect, index) => <div key={`effect-${index}`} className="flex gap-2"><span>•</span><span>{effect}</span></div>)}
                 </div>
@@ -946,34 +1506,164 @@ export function GrowthReviewPanel() {
         <div className="space-y-4">
           <div className="grid gap-3 xl:grid-cols-3">
             <div className="rounded-xl border border-cyan-500/15 bg-[#10161f] p-4">
-              <div className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Best for follower growth</div>
-              {bestForFollowerGrowthCard ? (
+              <div className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Top opportunity</div>
+              {topOpportunity ? (
                 <>
-                  <div className="mt-2 flex flex-wrap gap-2">{bestForFollowerGrowthCard.distribution_type ? <FieldChip>{bestForFollowerGrowthCard.distribution_type}</FieldChip> : null}{typeof bestForFollowerGrowthCard.follower_growth_score === 'number' ? <FieldChip>growth {bestForFollowerGrowthCard.follower_growth_score}</FieldChip> : null}</div>
-                  <div className="mt-3 text-sm font-medium text-foreground whitespace-pre-wrap">{bestForFollowerGrowthCard.text}</div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {topOpportunity.distributionType ? <FieldChip>{topOpportunity.distributionType}</FieldChip> : null}
+                    <FieldChip>growth {topOpportunity.growthScore}</FieldChip>
+                    <FieldChip>timeliness {topOpportunity.timelinessScore}</FieldChip>
+                    {topOpportunity.accountState && topOpportunity.accountState !== 'available' ? <FieldChip>{topOpportunity.accountState.replace(/_/g, ' ')}</FieldChip> : null}
+                  </div>
+                  <div className="mt-3 text-sm font-medium text-foreground whitespace-pre-wrap">{topOpportunity.title}</div>
+                  <div className="mt-2 text-xs text-foreground/75">{topOpportunity.selectionReason || topOpportunity.whyNow}</div>
+                  {topOpportunity.selectionFactors?.length ? (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {topOpportunity.selectionFactors.map((factor, index) => <FieldChip key={`top-opportunity-factor-${index}`}>{factor}</FieldChip>)}
+                    </div>
+                  ) : null}
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {topOpportunity.sourceUrl ? (
+                      <a href={topOpportunity.sourceUrl} target="_blank" rel="noreferrer" className="rounded-lg border border-cyan-500/20 bg-cyan-500/10 px-3 py-2 text-xs font-medium text-cyan-100 hover:bg-cyan-500/20">
+                        Open source
+                      </a>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => void runGrowthAction('reject_opportunity', topOpportunity.id, { feedback: opportunityFeedback[topOpportunity.id] || 'Top card reject' })}
+                      disabled={actionState.status === 'saving'}
+                      className="rounded-lg border border-white/10 px-3 py-2 text-xs font-medium text-muted-foreground transition-smooth hover:bg-surface-2 disabled:opacity-60"
+                    >
+                      Reject
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void runGrowthAction('archive_opportunity', topOpportunity.id, { feedback: opportunityFeedback[topOpportunity.id] || 'Top card archive' })}
+                      disabled={actionState.status === 'saving'}
+                      className="rounded-lg border border-amber-500/20 px-3 py-2 text-xs font-medium text-amber-200 transition-smooth hover:bg-amber-500/10 disabled:opacity-60"
+                    >
+                      Archive
+                    </button>
+                  </div>
                 </>
-              ) : <div className="mt-3 text-sm text-muted-foreground">No recommendation yet.</div>}
+              ) : <div className="mt-3 text-sm text-muted-foreground">No live opportunity selected yet.</div>}
             </div>
             <div className="rounded-xl border border-violet-500/15 bg-[#10161f] p-4">
-              <div className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Best for brand building</div>
-              {bestForBrandBuilding ? (
+              <div className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Top draft</div>
+              {topDraft ? (
                 <>
-                  <div className="mt-2 flex flex-wrap gap-2">{bestForBrandBuilding.distribution_type ? <FieldChip>{bestForBrandBuilding.distribution_type}</FieldChip> : null}{typeof bestForBrandBuilding.brand_building_score === 'number' ? <FieldChip>brand {bestForBrandBuilding.brand_building_score}</FieldChip> : null}</div>
-                  <div className="mt-3 text-sm font-medium text-foreground whitespace-pre-wrap">{bestForBrandBuilding.text}</div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {topDraft.distribution_type ? <FieldChip>{topDraft.distribution_type}</FieldChip> : null}
+                    {typeof topDraft.follower_growth_score === 'number' ? <FieldChip>growth {topDraft.follower_growth_score}</FieldChip> : null}
+                    {typeof topDraft.brand_building_score === 'number' ? <FieldChip>brand {topDraft.brand_building_score}</FieldChip> : null}
+                  </div>
+                  <div className="mt-3 text-sm font-medium text-foreground whitespace-pre-wrap">{topDraft.text}</div>
+                  <textarea
+                    className="mt-3 min-h-20 w-full rounded-xl border border-white/8 bg-black/15 px-3 py-2 text-sm text-foreground outline-none transition-smooth focus:border-cyan-500/30"
+                    placeholder="Rewrite direction for the top draft: sharper hook, more contrarian, tighter, less product-y, use source context."
+                    value={topDraftRewritePrompt}
+                    onChange={(event) => setTopDraftRewritePrompt(event.target.value)}
+                  />
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => scrollToId('growth-drafts')}
+                      className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2"
+                    >
+                      Open draft
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void runGrowthAction('rewrite_draft', topDraft.id, { feedback: topDraftRewritePrompt || feedbackDrafts[topDraft.id] || 'Rewrite from top draft card' })}
+                      disabled={actionState.status === 'saving'}
+                      className="rounded-lg border border-cyan-500/20 px-3 py-2 text-xs font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/10 disabled:opacity-60"
+                    >
+                      Rewrite With Direction
+                    </button>
+                  </div>
                 </>
-              ) : <div className="mt-3 text-sm text-muted-foreground">No recommendation yet.</div>}
+              ) : <div className="mt-3 text-sm text-muted-foreground">Generate drafts after selecting opportunities.</div>}
             </div>
             <div className="rounded-xl border border-amber-500/15 bg-[#10161f] p-4">
-              <div className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Best original post</div>
-              {bestOriginalPost ? (
+              <div className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Next publish</div>
+              {nextScheduledPost ? (
                 <>
-                  <div className="mt-2 flex flex-wrap gap-2">{bestOriginalPost.distribution_type ? <FieldChip>{bestOriginalPost.distribution_type}</FieldChip> : null}{typeof bestOriginalPost.timeliness_score === 'number' ? <FieldChip>timeliness {bestOriginalPost.timeliness_score}</FieldChip> : null}</div>
-                  <div className="mt-3 text-sm font-medium text-foreground whitespace-pre-wrap">{bestOriginalPost.text}</div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {nextScheduledPost.distributionType ? <FieldChip>{nextScheduledPost.distributionType}</FieldChip> : null}
+                    {nextScheduledPost.scheduledAtPt ? <FieldChip>{formatPacificTime(nextScheduledPost.scheduledAtPt)}</FieldChip> : nextScheduledPost.scheduledAt ? <FieldChip>{formatPacificTime(nextScheduledPost.scheduledAt)}</FieldChip> : null}
+                  </div>
+                  <div className="mt-3 text-sm font-medium text-foreground whitespace-pre-wrap">{nextScheduledPost.text}</div>
                 </>
-              ) : <div className="mt-3 text-sm text-muted-foreground">No original post opportunity is strong enough yet.</div>}
+              ) : readyToSchedule ? <div className="mt-3 text-sm text-muted-foreground">Approved posts are waiting in the scheduling lane.</div> : <div className="mt-3 text-sm text-muted-foreground">Nothing scheduled yet.</div>}
             </div>
           </div>
 
+          <div id="growth-opportunities">
+          <CollapsibleSection title="Opportunities" subtitle="Choose the participation move first. Drafting should only happen after the source and move are worth it." defaultOpen>
+            <div className="space-y-4">
+              {selectedOpportunities.length ? (
+                <div className="space-y-3">
+                  <OpportunityFamilyLane
+                    title="Reactive moves"
+                    subtitle="Grouped by source family so you can reject weak sources before they turn into draft churn."
+                    families={reactiveOpportunityFamilies}
+                    feedbackDrafts={opportunityFeedback}
+                    onFeedbackChange={(opportunityId, value) => setOpportunityFeedback((current) => ({ ...current, [opportunityId]: value }))}
+                    onAction={runGrowthAction}
+                    saving={actionState.status === 'saving'}
+                  />
+                  <OpportunityLane
+                    title="Standalone ideas"
+                    subtitle="Only shown when they clear the bar after reactive moves are ranked."
+                    opportunities={standaloneOpportunities}
+                    feedbackDrafts={opportunityFeedback}
+                    onFeedbackChange={(opportunityId, value) => setOpportunityFeedback((current) => ({ ...current, [opportunityId]: value }))}
+                    onAction={runGrowthAction}
+                    saving={actionState.status === 'saving'}
+                  />
+                </div>
+              ) : (
+                <div className="rounded-xl border border-white/10 bg-[#10161f] px-4 py-4 text-sm text-muted-foreground">
+                  {growth.noOpportunityReason || 'No selected opportunities yet. Refresh research, then run Select Opportunities before drafting.'}
+                  {growth.externalStatus === 'live' ? (
+                    <div className="mt-2 text-xs text-foreground/60">
+                      Last live pull: {formatPacificTime(growth.freshness?.lastXPullAt || growth.researchGeneratedAt || null)}
+                      {typeof growth.sourceMemory?.blockedSourceCount === 'number' && growth.sourceMemory.blockedSourceCount > 0
+                        ? ` • ${growth.sourceMemory.blockedSourceCount} blocked source${growth.sourceMemory.blockedSourceCount === 1 ? '' : 's'} retained in source memory`
+                        : ''}
+                    </div>
+                  ) : null}
+                </div>
+              )}
+              {blockedOpportunities.length ? (
+                <details className="rounded-xl border border-rose-500/15 bg-[#130f14] p-4">
+                  <summary className="cursor-pointer list-none text-sm font-medium text-rose-100">
+                    Blocked by source truth ({blockedOpportunities.length})
+                  </summary>
+                  <div className="mt-3 space-y-3">
+                    {blockedOpportunities.map((opportunity) => (
+                      <OpportunityCard key={`blocked-${opportunity.id}`} opportunity={opportunity} blocked />
+                    ))}
+                  </div>
+                </details>
+              ) : null}
+              {watchOnlyOpportunities.length ? (
+                <details className="rounded-xl border border-white/10 bg-[#11161d] p-4">
+                  <summary className="cursor-pointer list-none text-sm font-medium text-foreground">
+                    Watchlist and account context ({watchOnlyOpportunities.length})
+                  </summary>
+                  <div className="mt-3 space-y-3">
+                    {watchOnlyOpportunities.map((opportunity) => (
+                      <OpportunityCard key={`watch-${opportunity.id}`} opportunity={opportunity} blocked />
+                    ))}
+                  </div>
+                </details>
+              ) : null}
+            </div>
+          </CollapsibleSection>
+          </div>
+
+          <div id="growth-drafts">
           <CollapsibleSection title="Draft candidates" subtitle="Review exact post text, source basis, and why the system selected it." defaultOpen>
             <div className="space-y-4">
               {groupedDraftCandidates.length ? groupedDraftCandidates.map((group, groupIndex) => {
@@ -1013,8 +1703,10 @@ export function GrowthReviewPanel() {
               }) : <div className="rounded-xl border border-white/10 bg-[#10161f] px-4 py-4 text-sm text-muted-foreground">Research is ready. Generate a fresh candidate pack when you want posts to review.</div>}
             </div>
           </CollapsibleSection>
+          </div>
 
-          <CollapsibleSection title="Ready to schedule" subtitle="Approved and failed posts stay here until you schedule them." defaultOpen>
+          <div id="growth-ready-to-schedule">
+          <CollapsibleSection title="Ready to schedule" subtitle="Approved posts and transient failures stay here until you schedule them." defaultOpen>
             <div className="space-y-3">
               {readyPosts.length ? readyPosts.map((post) => {
                 const suggested = buildSuggestedSchedule(post)
@@ -1098,15 +1790,16 @@ export function GrowthReviewPanel() {
                           </label>
                         </div>
                         <div className="mt-3 flex flex-wrap gap-2">
-                          <button onClick={() => void runGrowthAction('mark_published', post.id, { tweetUrl: publishState.tweetUrl, tweetId: publishState.tweetId })} disabled={actionState.status === 'saving' || (!publishState.tweetUrl && !publishState.tweetId)} className="rounded-lg bg-cyan-500/15 px-3 py-2 text-xs font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/20 disabled:opacity-60">Mark Published</button>
+                          <button onClick={() => void runGrowthAction('link_manual_publish', post.id, { tweetUrl: publishState.tweetUrl, tweetId: publishState.tweetId })} disabled={actionState.status === 'saving' || (!publishState.tweetUrl && !publishState.tweetId)} className="rounded-lg bg-cyan-500/15 px-3 py-2 text-xs font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/20 disabled:opacity-60">Link Manual Publish</button>
                         </div>
                       </details>
                     </div>
                   </div>
                 )
-              }) : <div className="rounded-xl border border-white/10 bg-[#10161f] px-4 py-4 text-sm text-muted-foreground">No approved or failed posts are waiting for scheduling right now.</div>}
+              }) : <div className="rounded-xl border border-white/10 bg-[#10161f] px-4 py-4 text-sm text-muted-foreground">No approved or retryable posts are waiting for scheduling right now.</div>}
             </div>
           </CollapsibleSection>
+          </div>
 
           <CollapsibleSection title="Scheduled" subtitle="Auto-publish runs every 15 minutes between 6:00 AM and 9:00 PM PT." defaultOpen>
             <div className="space-y-3">
