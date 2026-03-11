@@ -16,6 +16,7 @@ interface AgentCostData {
   sessions: string[]
   timeline: Array<{ date: string; cost: number; tokens: number }>
   attributed: { requestCount: number; totalCost: number; totalTokens: number }
+  background: { requestCount: number; totalCost: number; totalTokens: number }
   unattributed: { requestCount: number; totalCost: number; totalTokens: number }
 }
 
@@ -24,6 +25,7 @@ interface AgentCostsResponse {
   timeframe: string
   recordCount: number
   attributedRecordCount: number
+  backgroundRecordCount: number
   unattributedRecordCount: number
 }
 
@@ -64,6 +66,7 @@ export function AgentCostPanel() {
   const totalCost = agents.reduce((sum, [, a]) => sum + a.stats.totalCost, 0)
   const totalAgents = agents.length
   const totalAttributedRequests = agents.reduce((sum, [, a]) => sum + a.attributed.requestCount, 0)
+  const totalBackgroundRequests = agents.reduce((sum, [, a]) => sum + a.background.requestCount, 0)
   const totalUnattributedRequests = agents.reduce((sum, [, a]) => sum + a.unattributed.requestCount, 0)
   const worstAttributionAgent = sortedAgents
     .filter(([, a]) => a.unattributed.requestCount > 0)
@@ -179,27 +182,38 @@ export function AgentCostPanel() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
             <div className="min-w-0 bg-card border border-border rounded-lg p-6">
               <div className="text-3xl font-bold text-foreground">{totalAttributedRequests}</div>
               <div className="text-sm text-muted-foreground">Attributed requests</div>
             </div>
             <div className="min-w-0 bg-card border border-border rounded-lg p-6">
+              <div className="text-3xl font-bold text-foreground">{totalBackgroundRequests}</div>
+              <div className="text-sm text-muted-foreground">Background requests</div>
+            </div>
+            <div className="min-w-0 bg-card border border-border rounded-lg p-6">
               <div className="text-3xl font-bold text-foreground">{totalUnattributedRequests}</div>
-              <div className="text-sm text-muted-foreground">Unattributed requests</div>
+              <div className="text-sm text-muted-foreground">Actionable unattributed requests</div>
             </div>
             <div className="min-w-0 bg-card border border-border rounded-lg p-6">
               <div className="text-3xl font-bold text-foreground">
-                {data.recordCount > 0 ? `${Math.round((data.attributedRecordCount / data.recordCount) * 100)}%` : '0%'}
+                {data.recordCount > 0 ? `${Math.round((data.attributedRecordCount / Math.max(1, data.attributedRecordCount + data.unattributedRecordCount)) * 100)}%` : '0%'}
               </div>
-              <div className="text-sm text-muted-foreground">Attribution coverage</div>
+              <div className="text-sm text-muted-foreground">Actionable attribution</div>
             </div>
           </div>
 
           {worstAttributionAgent && (
             <div className="bg-card border border-border rounded-lg p-4 text-sm text-muted-foreground">
               <span className="font-medium text-foreground">Attribution hint:</span>{' '}
-              {worstAttributionAgent[0]} is currently the biggest unattributed spender. Prioritize task-id attribution in that agent's session/task reporting path.
+              {worstAttributionAgent[0]} is currently the biggest actionable unattributed spender. Prioritize task-id attribution in that agent's session/task reporting path.
+            </div>
+          )}
+
+          {data.backgroundRecordCount > 0 && (
+            <div className="bg-card border border-border rounded-lg p-4 text-sm text-muted-foreground">
+              <span className="font-medium text-foreground">Background system spend:</span>{' '}
+              {data.backgroundRecordCount} records are from system agents and are tracked separately from task attribution.
             </div>
           )}
 
@@ -212,7 +226,7 @@ export function AgentCostPanel() {
                     <div>
                       <div className="font-medium text-foreground">#{index + 1} {name}</div>
                       <div className="text-xs text-muted-foreground">
-                        {agent.unattributed.requestCount} unattributed requests · {formatNumber(agent.unattributed.totalTokens)} tokens
+                        {agent.unattributed.requestCount} actionable unattributed requests · {formatNumber(agent.unattributed.totalTokens)} tokens
                       </div>
                     </div>
                     <div className="text-right">

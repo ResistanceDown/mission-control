@@ -9,6 +9,7 @@ import { getDatabase } from '@/lib/db'
 import { calculateTokenCost } from '@/lib/token-pricing'
 import { getProviderSubscriptionFlags } from '@/lib/provider-subscriptions'
 import { buildTaskCostReport, type TaskCostMetadata } from '@/lib/task-costs'
+import { classifyTokenAttribution } from '@/lib/token-attribution'
 
 const DATA_PATH = config.tokensPath
 
@@ -26,6 +27,8 @@ interface TokenUsageRecord {
   taskId?: number | null
   workspaceId?: number
   duration?: number
+  attributionKind?: 'task' | 'background' | 'unattributed'
+  attributionReason?: string
 }
 
 interface TokenStats {
@@ -249,7 +252,7 @@ function calculateStats(records: TokenUsageRecord[]): TokenStats {
   }
 }
 
-function filterByTimeframe(records: TokenUsageRecord[], timeframe: string): TokenUsageRecord[] {
+function filterByTimeframe<T extends TokenUsageRecord>(records: T[], timeframe: string): T[] {
   const now = Date.now()
   let cutoffTime: number
 
@@ -316,7 +319,11 @@ export async function GET(request: NextRequest) {
 
     const workspaceId = auth.user.workspace_id ?? 1
     const tokenData = await loadTokenData(workspaceId)
-    const filteredData = filterByTimeframe(tokenData, timeframe)
+    const classifiedData = classifyTokenAttribution(tokenData, workspaceId)
+    const filteredData = filterByTimeframe(classifiedData, timeframe)
+    const attributedRecords = filteredData.filter((record) => record.attributionKind === 'task')
+    const backgroundRecords = filteredData.filter((record) => record.attributionKind === 'background')
+    const unattributedRecords = filteredData.filter((record) => record.attributionKind === 'unattributed')
 
     if (action === 'list') {
       return NextResponse.json({
@@ -371,6 +378,9 @@ export async function GET(request: NextRequest) {
         agents: agentStats,
         timeframe,
         recordCount: filteredData.length,
+        attributedRecordCount: attributedRecords.length,
+        backgroundRecordCount: backgroundRecords.length,
+        unattributedRecordCount: unattributedRecords.length,
       })
     }
 
@@ -388,13 +398,15 @@ export async function GET(request: NextRequest) {
         sessions: string[]
         timeline: Array<{ date: string; cost: number; tokens: number }>
         attributed: TokenStats
+        background: TokenStats
         unattributed: TokenStats
       }> = {}
 
       for (const [agent, records] of Object.entries(agentGroups)) {
         const stats = calculateStats(records)
-        const attributedRecords = records.filter((record) => Number.isFinite(record.taskId) && Number(record.taskId) > 0)
-        const unattributedRecords = records.filter((record) => !Number.isFinite(record.taskId) || Number(record.taskId) <= 0)
+        const attributedRecords = records.filter((record) => record.attributionKind === 'task')
+        const backgroundRecords = records.filter((record) => record.attributionKind === 'background')
+        const unattributedRecords = records.filter((record) => record.attributionKind === 'unattributed')
 
         // Per-agent model breakdown
         const modelGroups = records.reduce((acc, r) => {
@@ -429,6 +441,7 @@ export async function GET(request: NextRequest) {
           sessions,
           timeline,
           attributed: calculateStats(attributedRecords),
+          background: calculateStats(backgroundRecords),
           unattributed: calculateStats(unattributedRecords),
         }
       }
@@ -437,8 +450,9 @@ export async function GET(request: NextRequest) {
         agents,
         timeframe,
         recordCount: filteredData.length,
-        attributedRecordCount: filteredData.filter((record) => Number.isFinite(record.taskId) && Number(record.taskId) > 0).length,
-        unattributedRecordCount: filteredData.filter((record) => !Number.isFinite(record.taskId) || Number(record.taskId) <= 0).length,
+        attributedRecordCount: attributedRecords.length,
+        backgroundRecordCount: backgroundRecords.length,
+        unattributedRecordCount: unattributedRecords.length,
       })
     }
 
@@ -466,21 +480,36 @@ export async function GET(request: NextRequest) {
         ...report,
         timeframe,
         recordCount: filteredData.length,
-        attributedRecordCount: filteredData.filter((record) => Number.isFinite(record.taskId) && Number(record.taskId) > 0).length,
+        attributedRecordCount: attributedRecords.length,
+        backgroundRecordCount: backgroundRecords.length,
+        unattributedRecordCount: unattributedRecords.length,
         attributionRate: filteredData.length > 0
-          ? filteredData.filter((record) => Number.isFinite(record.taskId) && Number(record.taskId) > 0).length / filteredData.length
+          ? attributedRecords.length / filteredData.length
           : 0,
+        actionableAttributionRate: attributedRecords.length + unattributedRecords.length > 0
+          ? attributedRecords.length / (attributedRecords.length + unattributedRecords.length)
+          : 1,
+        backgroundAgents: Object.entries(
+          backgroundRecords.reduce((acc, record) => {
+            const agent = record.agentName || extractAgentName(record.sessionId)
+            if (!acc[agent]) acc[agent] = { cost: 0, requests: 0, tokens: 0 }
+            acc[agent].cost += record.cost
+            acc[agent].requests += 1
+            acc[agent].tokens += record.totalTokens
+            return acc
+          }, {} as Record<string, { cost: number; requests: number; tokens: number }>)
+        )
+          .sort((a, b) => b[1].cost - a[1].cost)
+          .map(([agent, stats]) => ({ agent, ...stats })),
         topUnattributedAgents: Object.entries(
-          filteredData
-            .filter((record) => !Number.isFinite(record.taskId) || Number(record.taskId) <= 0)
-            .reduce((acc, record) => {
-              const agent = record.agentName || extractAgentName(record.sessionId)
-              if (!acc[agent]) acc[agent] = { cost: 0, requests: 0, tokens: 0 }
-              acc[agent].cost += record.cost
-              acc[agent].requests += 1
-              acc[agent].tokens += record.totalTokens
-              return acc
-            }, {} as Record<string, { cost: number; requests: number; tokens: number }>)
+          unattributedRecords.reduce((acc, record) => {
+            const agent = record.agentName || extractAgentName(record.sessionId)
+            if (!acc[agent]) acc[agent] = { cost: 0, requests: 0, tokens: 0 }
+            acc[agent].cost += record.cost
+            acc[agent].requests += 1
+            acc[agent].tokens += record.totalTokens
+            return acc
+          }, {} as Record<string, { cost: number; requests: number; tokens: number }>)
         )
           .sort((a, b) => b[1].cost - a[1].cost)
           .slice(0, 8)

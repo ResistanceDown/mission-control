@@ -51,6 +51,11 @@ interface TaskCostsResponse {
   }
   tasks: TaskCostEntry[]
   attributionRate: number
+  actionableAttributionRate: number
+  attributedRecordCount: number
+  backgroundRecordCount: number
+  unattributedRecordCount: number
+  backgroundAgents: Array<{ agent: string; cost: number; requests: number; tokens: number }>
   topUnattributedAgents: Array<{ agent: string; cost: number; requests: number; tokens: number }>
 }
 
@@ -277,9 +282,9 @@ export function TokenDashboardPanel() {
   const alerts = getAlerts()
   const attributionAlert = taskCosts
     ? taskCosts.topUnattributedAgents.length > 0
-      ? `Most unattributed spend is coming from ${taskCosts.topUnattributedAgents[0].agent}. Attach task IDs there first.`
-      : taskCosts.attributionRate < 0.9
-        ? 'Some spend is still unattributed. Review agent/session flows that write token usage without a task ID.'
+      ? `Most actionable unattributed spend is coming from ${taskCosts.topUnattributedAgents[0].agent}. Attach task IDs there first.`
+      : taskCosts.actionableAttributionRate < 0.9
+        ? 'Some task-related spend is still unattributed. Review agent/session flows that write usage without a task ID.'
         : 'Task attribution coverage is healthy.'
     : null
   const worstUnattributedAgent = taskCosts?.topUnattributedAgents?.[0] || null
@@ -288,10 +293,10 @@ export function TokenDashboardPanel() {
         worstUnattributedAgent
           ? `Patch ${worstUnattributedAgent.agent} to emit task_id on token usage writes first.`
           : null,
-        taskCosts.unattributed.requestCount > 0
-          ? 'Check background session flows that are writing usage outside a task lifecycle.'
+        taskCosts.topUnattributedAgents.length > 0
+          ? 'Check agent/session flows that should attach task_id but are still writing bare usage records.'
           : null,
-        taskCosts.attributionRate < 0.9
+        taskCosts.actionableAttributionRate < 0.9
           ? 'Verify task creation, assignment, and completion paths all preserve task_id through agent execution.'
           : null,
       ].filter(Boolean) as string[]
@@ -380,8 +385,8 @@ export function TokenDashboardPanel() {
                     <p className="text-sm text-muted-foreground">How much token usage is attached to real Habi work.</p>
                   </div>
                   <div className="text-right">
-                    <div className="text-2xl font-bold text-foreground">{(taskCosts.attributionRate * 100).toFixed(0)}%</div>
-                    <div className="text-xs text-muted-foreground">Attributed usage</div>
+                    <div className="text-2xl font-bold text-foreground">{(taskCosts.actionableAttributionRate * 100).toFixed(0)}%</div>
+                    <div className="text-xs text-muted-foreground">Actionable attribution</div>
                   </div>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -391,11 +396,11 @@ export function TokenDashboardPanel() {
                   </div>
                   <div className="rounded-lg border border-border bg-secondary/30 p-4">
                     <div className="text-lg font-semibold text-foreground">{formatCost(taskCosts.unattributed.totalCost)}</div>
-                    <div className="text-xs text-muted-foreground">Unattributed spend</div>
+                    <div className="text-xs text-muted-foreground">Actionable unattributed spend</div>
                   </div>
                   <div className="rounded-lg border border-border bg-secondary/30 p-4">
                     <div className="text-lg font-semibold text-foreground">{formatNumber(taskCosts.unattributed.requestCount)}</div>
-                    <div className="text-xs text-muted-foreground">Unattributed requests</div>
+                    <div className="text-xs text-muted-foreground">Actionable unattributed requests</div>
                   </div>
                 </div>
               </div>
@@ -433,6 +438,20 @@ export function TokenDashboardPanel() {
                         </div>
                       ))}
                     </div>
+                  </div>
+                )}
+                {taskCosts.backgroundAgents.length > 0 && (
+                  <div className="mt-4 rounded-lg border border-border bg-secondary/10 p-4">
+                    <h3 className="text-sm font-semibold text-foreground">Background system spend</h3>
+                    <div className="mt-3 space-y-2">
+                      {taskCosts.backgroundAgents.slice(0, 3).map((entry) => (
+                        <div key={entry.agent} className="flex items-center justify-between text-xs text-muted-foreground">
+                          <span>{entry.agent}</span>
+                          <span>{formatCost(entry.cost)} · {formatNumber(entry.requests)} requests</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="mt-3 text-xs text-muted-foreground">These agents run system/background work and are tracked separately from task attribution.</div>
                   </div>
                 )}
               </div>
