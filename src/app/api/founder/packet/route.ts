@@ -1478,6 +1478,13 @@ function loadTaskSnapshot(workspaceId: number) {
       sentBackByQc: appFinishHealth.filter((task) => task.sentBackByQc).length,
       staleAssigned: appFinishHealth.filter((task) => task.staleAssigned).length,
     },
+    duplicateFingerprintCount: 0,
+    productionTruth: {
+      duplicateFingerprintCount: 0,
+      staleReportCount: 0,
+      criticalOfflineAgentCount: 0,
+      latestChecks: [],
+    },
   }
 }
 

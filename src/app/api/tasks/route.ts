@@ -173,6 +173,14 @@ export async function POST(request: NextRequest) {
       assigned_to,
       due_date,
       estimated_hours,
+      actual_hours,
+      outcome,
+      error_message,
+      resolution,
+      feedback_rating,
+      feedback_notes,
+      retry_count = 0,
+      completed_at,
       tags = [],
       metadata = {}
     } = body;
@@ -218,9 +226,20 @@ export async function POST(request: NextRequest) {
       const insertStmt = db.prepare(`
         INSERT INTO tasks (
           title, description, status, priority, project_id, project_ticket_no, assigned_to, created_by,
-          created_at, updated_at, due_date, estimated_hours, tags, metadata, workspace_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          created_at, updated_at, due_date, estimated_hours, actual_hours,
+          outcome, error_message, resolution, feedback_rating, feedback_notes, retry_count, completed_at,
+          tags, metadata, workspace_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
+
+      const effectiveCompletedAt =
+        status === 'done'
+          ? (completed_at || now)
+          : (completed_at ?? null)
+      const effectiveOutcome =
+        status === 'done'
+          ? (outcome || 'success')
+          : (outcome ?? null)
 
       const dbResult = insertStmt.run(
         title,
@@ -235,6 +254,14 @@ export async function POST(request: NextRequest) {
         now,
         due_date,
         estimated_hours,
+        actual_hours,
+        effectiveOutcome,
+        error_message,
+        resolution,
+        feedback_rating,
+        feedback_notes,
+        retry_count,
+        effectiveCompletedAt,
         JSON.stringify(tags),
         JSON.stringify(metadata),
         workspaceId
@@ -343,12 +370,6 @@ export async function PUT(request: NextRequest) {
 
     const now = Math.floor(Date.now() / 1000);
 
-    const updateStmt = db.prepare(`
-      UPDATE tasks
-      SET status = ?, updated_at = ?
-      WHERE id = ? AND workspace_id = ?
-    `);
-
     const actor = auth.user.username
 
     const transaction = db.transaction((tasksToUpdate: any[]) => {
@@ -367,7 +388,20 @@ export async function PUT(request: NextRequest) {
           }
         }
 
-        updateStmt.run(task.status, now, task.id, workspaceId);
+        const completedAt =
+          task.status === 'done'
+            ? (oldTask.completed_at || now)
+            : (oldTask.status === 'done' ? null : oldTask.completed_at || null)
+        const outcome =
+          task.status === 'done'
+            ? (oldTask.outcome || 'success')
+            : oldTask.outcome || null
+
+        db.prepare(`
+          UPDATE tasks
+          SET status = ?, updated_at = ?, completed_at = ?, outcome = ?
+          WHERE id = ? AND workspace_id = ?
+        `).run(task.status, now, completedAt, outcome, task.id, workspaceId);
 
         // Log status change if different
         if (oldTask && oldTask.status !== task.status) {

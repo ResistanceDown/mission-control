@@ -36,6 +36,13 @@ interface Task {
   project_name?: string
   project_prefix?: string
   ticket_ref?: string
+  outcome?: 'success' | 'failed' | 'partial' | 'abandoned'
+  error_message?: string
+  resolution?: string
+  feedback_rating?: number
+  feedback_notes?: string
+  retry_count?: number
+  completed_at?: number
 }
 
 interface Agent {
@@ -156,6 +163,70 @@ interface Project {
   slug: string
   ticket_prefix: string
   status: 'active' | 'archived'
+}
+
+interface TaskOutcomeSummary {
+  total_done: number
+  with_outcome: number
+  by_outcome: Record<string, number>
+  avg_retry_count: number
+  avg_time_to_resolution_seconds: number
+  success_rate: number
+}
+
+interface TaskOutcomesResponse {
+  timeframe: string
+  summary: TaskOutcomeSummary
+  by_agent: Record<string, TaskOutcomeSummary & { total: number; success_rate: number }>
+  by_priority: Record<string, TaskOutcomeSummary & { total: number; success_rate: number }>
+  common_errors: Array<{ error_message: string; count: number }>
+  record_count: number
+}
+
+interface RegressionWindow {
+  sample_size: number
+  latency_seconds: { p50: number | null; p95: number | null; avg: number | null }
+  interventions: { count: number; rate: number }
+}
+
+interface RegressionResponse {
+  params: { beta_start: number; lookback_seconds: number }
+  windows: { baseline: RegressionWindow; post: RegressionWindow }
+  deltas: { p95_latency_seconds: number | null; intervention_rate: number }
+}
+
+interface TaskCostBreakdown {
+  stats: {
+    totalTokens: number
+    totalCost: number
+    requestCount: number
+    avgTokensPerRequest: number
+    avgCostPerRequest: number
+  }
+  models: Record<string, {
+    totalTokens: number
+    totalCost: number
+    requestCount: number
+    avgTokensPerRequest: number
+    avgCostPerRequest: number
+  }>
+}
+
+interface TaskCostEntry {
+  taskId: number
+  title: string
+  status: string
+  priority: string
+  assignedTo?: string | null
+  project: { id?: number | null; name?: string | null; slug?: string | null; ticketRef?: string | null }
+  stats: TaskCostBreakdown['stats']
+  models: TaskCostBreakdown['models']
+}
+
+interface TaskCostsResponse {
+  summary: TaskCostBreakdown['stats']
+  tasks: TaskCostEntry[]
+  unattributed: TaskCostBreakdown['stats']
 }
 
 interface MentionOption {
@@ -365,6 +436,10 @@ export function TaskBoardPanel() {
   const [showStickyScrollbar, setShowStickyScrollbar] = useState(false)
   const [stickyScrollbarMax, setStickyScrollbarMax] = useState(0)
   const [stickyScrollbarValue, setStickyScrollbarValue] = useState(0)
+  const [boardView, setBoardView] = useState<'board' | 'analytics'>('board')
+  const [outcomes, setOutcomes] = useState<TaskOutcomesResponse | null>(null)
+  const [regression, setRegression] = useState<RegressionResponse | null>(null)
+  const [taskCosts, setTaskCosts] = useState<TaskCostsResponse | null>(null)
   const dragCounter = useRef(0)
   const boardScrollRef = useRef<HTMLDivElement | null>(null)
   const selectedTaskIdFromUrl = Number.parseInt(searchParams.get('taskId') || '', 10)
@@ -460,9 +535,37 @@ export function TaskBoardPanel() {
     }
   }, [projectFilter, storeSetTasks])
 
+  const fetchAnalytics = useCallback(async () => {
+    try {
+      const now = Math.floor(Date.now() / 1000)
+      const betaStart = now - 7 * 24 * 60 * 60
+      const [outcomesResponse, regressionResponse, costsResponse] = await Promise.all([
+        fetch('/api/tasks/outcomes?timeframe=month'),
+        fetch(`/api/tasks/regression?beta_start=${betaStart}&lookback_seconds=${7 * 24 * 60 * 60}`),
+        fetch('/api/tokens?action=task-costs&timeframe=month'),
+      ])
+
+      if (outcomesResponse.ok) {
+        setOutcomes(await outcomesResponse.json())
+      }
+      if (regressionResponse.ok) {
+        setRegression(await regressionResponse.json())
+      }
+      if (costsResponse.ok) {
+        setTaskCosts(await costsResponse.json())
+      }
+    } catch (err) {
+      log.warn('Failed to fetch task analytics', err)
+    }
+  }, [])
+
   useEffect(() => {
     fetchData()
   }, [fetchData])
+
+  useEffect(() => {
+    fetchAnalytics()
+  }, [fetchAnalytics])
 
   useEffect(() => {
     const board = boardScrollRef.current
@@ -520,6 +623,19 @@ export function TaskBoardPanel() {
     acc[column.key] = tasks.filter(task => task.status === column.key)
     return acc
   }, {} as Record<string, Task[]>)
+
+  const staleAssignedCount = tasks.filter((task) => {
+    if (task.status !== 'assigned') return false
+    return (Math.floor(Date.now() / 1000) - task.updated_at) > 24 * 60 * 60
+  }).length
+
+  const staleInProgressCount = tasks.filter((task) => {
+    if (task.status !== 'in_progress') return false
+    return (Math.floor(Date.now() / 1000) - task.updated_at) > 24 * 60 * 60
+  }).length
+
+  const retryHeavyTasks = tasks.filter((task) => Number(task.retry_count || 0) >= 2)
+  const topCostTasks = (taskCosts?.tasks || []).slice(0, 3)
 
   // Drag and drop handlers
   const handleDragStart = (e: React.DragEvent, task: Task) => {
@@ -673,6 +789,26 @@ export function TaskBoardPanel() {
         </div>
         <div className="flex gap-2">
           <button
+            onClick={() => setBoardView('board')}
+            className={`px-4 py-2 rounded-md transition-smooth text-sm font-medium ${
+              boardView === 'board'
+                ? 'bg-primary text-primary-foreground'
+                : 'bg-secondary text-muted-foreground hover:bg-surface-2'
+            }`}
+          >
+            Board
+          </button>
+          <button
+            onClick={() => setBoardView('analytics')}
+            className={`px-4 py-2 rounded-md transition-smooth text-sm font-medium ${
+              boardView === 'analytics'
+                ? 'bg-primary text-primary-foreground'
+                : 'bg-secondary text-muted-foreground hover:bg-surface-2'
+            }`}
+          >
+            Analytics
+          </button>
+          <button
             onClick={() => setShowProjectManager(true)}
             className="px-4 py-2 bg-secondary text-muted-foreground rounded-md hover:bg-surface-2 transition-smooth text-sm font-medium"
           >
@@ -693,6 +829,37 @@ export function TaskBoardPanel() {
         </div>
       </div>
 
+      <div className="grid gap-3 px-4 pt-4 md:grid-cols-2 xl:grid-cols-4">
+        <div className="rounded-lg border border-border bg-surface-1/50 p-3">
+          <div className="text-xs uppercase tracking-wide text-muted-foreground">Success rate</div>
+          <div className="mt-2 text-xl font-semibold text-foreground">
+            {outcomes ? `${Math.round((outcomes.summary.success_rate || 0) * 100)}%` : '—'}
+          </div>
+          <div className="mt-1 text-xs text-muted-foreground">{outcomes ? `${outcomes.summary.total_done} completed tasks` : 'Loading outcomes'}</div>
+        </div>
+        <div className="rounded-lg border border-border bg-surface-1/50 p-3">
+          <div className="text-xs uppercase tracking-wide text-muted-foreground">Avg retry count</div>
+          <div className="mt-2 text-xl font-semibold text-foreground">{outcomes ? outcomes.summary.avg_retry_count.toFixed(1) : '—'}</div>
+          <div className="mt-1 text-xs text-muted-foreground">{retryHeavyTasks.length} retry-heavy tasks still active</div>
+        </div>
+        <div className="rounded-lg border border-border bg-surface-1/50 p-3">
+          <div className="text-xs uppercase tracking-wide text-muted-foreground">Regression signal</div>
+          <div className="mt-2 text-xl font-semibold text-foreground">
+            {regression?.deltas.p95_latency_seconds != null ? `${Math.round(regression.deltas.p95_latency_seconds / 60)}m` : '—'}
+          </div>
+          <div className="mt-1 text-xs text-muted-foreground">
+            {regression ? `${(regression.deltas.intervention_rate * 100).toFixed(1)} pts intervention delta` : 'Comparing current week to prior week'}
+          </div>
+        </div>
+        <div className="rounded-lg border border-border bg-surface-1/50 p-3">
+          <div className="text-xs uppercase tracking-wide text-muted-foreground">Spend health</div>
+          <div className="mt-2 text-xl font-semibold text-foreground">{taskCosts ? `$${taskCosts.unattributed.totalCost.toFixed(2)}` : '—'}</div>
+          <div className="mt-1 text-xs text-muted-foreground">
+            {taskCosts ? `${taskCosts.unattributed.requestCount} unattributed requests` : 'Loading task cost rollup'}
+          </div>
+        </div>
+      </div>
+
       {/* Error Display */}
       {error && (
         <div role="alert" className="bg-red-500/10 border border-red-500/20 text-red-400 p-3 m-4 rounded-lg text-sm flex items-center justify-between">
@@ -707,7 +874,78 @@ export function TaskBoardPanel() {
         </div>
       )}
 
-      {/* Kanban Board */}
+      {boardView === 'analytics' ? (
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          <div className="grid gap-4 lg:grid-cols-2">
+            <section className="rounded-lg border border-border bg-card p-4">
+              <h3 className="text-sm font-semibold text-foreground">Outcome mix</h3>
+              <div className="mt-3 grid grid-cols-2 gap-3">
+                {Object.entries(outcomes?.summary.by_outcome || {}).map(([key, value]) => (
+                  <div key={key} className="rounded-md border border-border bg-surface-1/40 px-3 py-2">
+                    <div className="text-xs uppercase tracking-wide text-muted-foreground">{key}</div>
+                    <div className="mt-1 text-lg font-semibold text-foreground">{value}</div>
+                  </div>
+                ))}
+              </div>
+            </section>
+            <section className="rounded-lg border border-border bg-card p-4">
+              <h3 className="text-sm font-semibold text-foreground">Queue diagnostics</h3>
+              <div className="mt-3 space-y-2">
+                <div className="flex items-center justify-between rounded-md border border-border bg-surface-1/40 px-3 py-2 text-sm">
+                  <span className="text-muted-foreground">Stale assigned</span>
+                  <span className="font-semibold text-foreground">{staleAssignedCount}</span>
+                </div>
+                <div className="flex items-center justify-between rounded-md border border-border bg-surface-1/40 px-3 py-2 text-sm">
+                  <span className="text-muted-foreground">Stale in progress</span>
+                  <span className="font-semibold text-foreground">{staleInProgressCount}</span>
+                </div>
+                <div className="flex items-center justify-between rounded-md border border-border bg-surface-1/40 px-3 py-2 text-sm">
+                  <span className="text-muted-foreground">Retry-heavy tasks</span>
+                  <span className="font-semibold text-foreground">{retryHeavyTasks.length}</span>
+                </div>
+                <div className="flex items-center justify-between rounded-md border border-border bg-surface-1/40 px-3 py-2 text-sm">
+                  <span className="text-muted-foreground">Unattributed usage</span>
+                  <span className="font-semibold text-foreground">{taskCosts?.unattributed.requestCount ?? '—'}</span>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <section className="rounded-lg border border-border bg-card p-4">
+              <h3 className="text-sm font-semibold text-foreground">Common failure reasons</h3>
+              <div className="mt-3 space-y-2">
+                {(outcomes?.common_errors || []).slice(0, 5).map((item) => (
+                  <div key={item.error_message} className="rounded-md border border-border bg-surface-1/40 px-3 py-2">
+                    <div className="text-sm font-medium text-foreground">{item.error_message}</div>
+                    <div className="mt-1 text-xs text-muted-foreground">{item.count} tasks</div>
+                  </div>
+                ))}
+                {!(outcomes?.common_errors || []).length && (
+                  <div className="text-sm text-muted-foreground">No repeated failure reasons recorded yet.</div>
+                )}
+              </div>
+            </section>
+            <section className="rounded-lg border border-border bg-card p-4">
+              <h3 className="text-sm font-semibold text-foreground">Top costly tasks</h3>
+              <div className="mt-3 space-y-2">
+                {topCostTasks.map((entry) => (
+                  <div key={entry.taskId} className="rounded-md border border-border bg-surface-1/40 px-3 py-2">
+                    <div className="text-sm font-medium text-foreground">{entry.title}</div>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      ${entry.stats.totalCost.toFixed(2)} · {entry.stats.totalTokens.toLocaleString()} tokens · {entry.assignedTo || 'Unassigned'}
+                    </div>
+                  </div>
+                ))}
+                {!topCostTasks.length && (
+                  <div className="text-sm text-muted-foreground">No task-attributed spend recorded yet.</div>
+                )}
+              </div>
+            </section>
+          </div>
+        </div>
+      ) : (
+      /* Kanban Board */
       <div ref={boardScrollRef} className="task-board-scrollbar flex-1 flex gap-4 p-4 pb-8 overflow-x-auto" role="region" aria-label="Task board">
         {statusColumns.map(column => (
           <div
@@ -850,6 +1088,7 @@ export function TaskBoardPanel() {
           </div>
         ))}
       </div>
+      )}
 
       {showStickyScrollbar && (
         <div className="sticky bottom-0 z-20 px-4 pb-3 pt-1">
@@ -959,6 +1198,7 @@ export function TaskDetailModal({
   const [reviewStatus, setReviewStatus] = useState<'approved' | 'rejected'>('approved')
   const [reviewNotes, setReviewNotes] = useState('')
   const [reviewError, setReviewError] = useState<string | null>(null)
+  const [taskCostEntry, setTaskCostEntry] = useState<TaskCostEntry | null>(null)
   const mentionTargets = useMentionTargets()
   const [activeTab, setActiveTab] = useState<'details' | 'comments' | 'quality'>('details')
   const [reviewer, setReviewer] = useState('aegis')
@@ -1058,6 +1298,24 @@ export function TaskDetailModal({
   useEffect(() => {
     fetchReviews()
   }, [fetchReviews])
+
+  useEffect(() => {
+    let cancelled = false
+    const run = async () => {
+      try {
+        const response = await fetch('/api/tokens?action=task-costs&timeframe=month')
+        if (!response.ok) return
+        const data = await response.json()
+        if (cancelled) return
+        const match = (data.tasks || []).find((entry: TaskCostEntry) => entry.taskId === task.id)
+        setTaskCostEntry(match || null)
+      } catch {
+        if (!cancelled) setTaskCostEntry(null)
+      }
+    }
+    run()
+    return () => { cancelled = true }
+  }, [task.id])
   
   useSmartPoll(fetchComments, 15000)
 
@@ -1330,6 +1588,79 @@ export function TaskDetailModal({
                       {typeof harnessBlockingCount === 'number' ? <div className="text-xs text-muted-foreground">Blocking findings: {harnessBlockingCount}</div> : null}
                       {typeof harnessIssueCount === 'number' ? <div className="text-xs text-muted-foreground">Issue count: {harnessIssueCount}</div> : null}
                     </div>
+                  </div>
+                  <div className="rounded-lg border border-border/60 bg-surface-2/45 p-3">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Execution health</div>
+                    <div className="mt-2 grid gap-3 md:grid-cols-2">
+                      <div className="rounded-md bg-black/20 p-3">
+                        <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Outcome</div>
+                        <div className="mt-1 text-sm font-medium text-foreground">{task.outcome || 'Not recorded'}</div>
+                      </div>
+                      <div className="rounded-md bg-black/20 p-3">
+                        <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Retry count</div>
+                        <div className="mt-1 text-sm font-medium text-foreground">{task.retry_count || 0}</div>
+                      </div>
+                      <div className="rounded-md bg-black/20 p-3">
+                        <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Feedback rating</div>
+                        <div className="mt-1 text-sm font-medium text-foreground">{task.feedback_rating ? `${task.feedback_rating}/5` : 'Not recorded'}</div>
+                      </div>
+                      <div className="rounded-md bg-black/20 p-3">
+                        <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Completed</div>
+                        <div className="mt-1 text-sm font-medium text-foreground">{task.completed_at ? new Date(task.completed_at * 1000).toLocaleString() : 'Not recorded'}</div>
+                      </div>
+                    </div>
+                    {task.error_message ? (
+                      <div className="mt-3 rounded-md bg-black/20 p-3">
+                        <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Error summary</div>
+                        <div className="mt-1 text-sm text-foreground whitespace-pre-wrap">{task.error_message}</div>
+                      </div>
+                    ) : null}
+                    {task.resolution ? (
+                      <div className="mt-3 rounded-md bg-black/20 p-3">
+                        <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Resolution</div>
+                        <div className="mt-1 text-sm text-foreground whitespace-pre-wrap">{task.resolution}</div>
+                      </div>
+                    ) : null}
+                    {task.feedback_notes ? (
+                      <div className="mt-3 rounded-md bg-black/20 p-3">
+                        <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Feedback notes</div>
+                        <div className="mt-1 text-sm text-foreground whitespace-pre-wrap">{task.feedback_notes}</div>
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="rounded-lg border border-border/60 bg-surface-2/45 p-3">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Task cost</div>
+                    {taskCostEntry ? (
+                      <div className="mt-2 space-y-3">
+                        <div className="grid gap-3 md:grid-cols-3">
+                          <div className="rounded-md bg-black/20 p-3">
+                            <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Total cost</div>
+                            <div className="mt-1 text-sm font-medium text-foreground">${taskCostEntry.stats.totalCost.toFixed(2)}</div>
+                          </div>
+                          <div className="rounded-md bg-black/20 p-3">
+                            <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Tokens</div>
+                            <div className="mt-1 text-sm font-medium text-foreground">{taskCostEntry.stats.totalTokens.toLocaleString()}</div>
+                          </div>
+                          <div className="rounded-md bg-black/20 p-3">
+                            <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Requests</div>
+                            <div className="mt-1 text-sm font-medium text-foreground">{taskCostEntry.stats.requestCount}</div>
+                          </div>
+                        </div>
+                        <div className="rounded-md bg-black/20 p-3">
+                          <div className="text-[11px] uppercase tracking-wide text-muted-foreground">By model</div>
+                          <div className="mt-2 space-y-2">
+                            {Object.entries(taskCostEntry.models).map(([model, stats]) => (
+                              <div key={model} className="flex items-center justify-between text-sm">
+                                <span className="text-foreground">{model}</span>
+                                <span className="text-muted-foreground">${stats.totalCost.toFixed(2)} · {stats.totalTokens.toLocaleString()} tokens</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mt-2 rounded-md bg-black/20 p-3 text-sm text-muted-foreground">No task-attributed token usage recorded yet.</div>
+                    )}
                   </div>
                 </div>
                 <div>
@@ -1743,6 +2074,12 @@ function EditTaskModal({
     project_id: task.project_id ? String(task.project_id) : (projects[0]?.id ? String(projects[0].id) : ''),
     assigned_to: task.assigned_to || '',
     tags: task.tags ? task.tags.join(', ') : '',
+    outcome: task.outcome || '',
+    error_message: task.error_message || '',
+    resolution: task.resolution || '',
+    feedback_rating: task.feedback_rating ? String(task.feedback_rating) : '',
+    feedback_notes: task.feedback_notes || '',
+    retry_count: String(task.retry_count || 0),
   })
   const mentionTargets = useMentionTargets()
 
@@ -1758,6 +2095,12 @@ function EditTaskModal({
         body: JSON.stringify({
           ...formData,
           project_id: formData.project_id ? Number(formData.project_id) : undefined,
+          outcome: formData.outcome || undefined,
+          error_message: formData.error_message || undefined,
+          resolution: formData.resolution || undefined,
+          feedback_rating: formData.feedback_rating ? Number(formData.feedback_rating) : undefined,
+          feedback_notes: formData.feedback_notes || undefined,
+          retry_count: Number(formData.retry_count || 0),
           tags: formData.tags ? formData.tags.split(',').map(t => t.trim()) : [],
           assigned_to: formData.assigned_to || undefined
         })
@@ -1887,6 +2230,83 @@ function EditTaskModal({
                 className="w-full bg-surface-1 text-foreground border border-border rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-primary/50"
                 placeholder="frontend, urgent, bug"
               />
+            </div>
+
+            <div className="rounded-lg border border-border/60 bg-surface-1/30 p-4 space-y-4">
+              <div className="text-sm font-medium text-foreground">Execution outcome</div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label htmlFor="edit-outcome" className="block text-sm text-muted-foreground mb-1">Outcome</label>
+                  <select
+                    id="edit-outcome"
+                    value={formData.outcome}
+                    onChange={(e) => setFormData(prev => ({ ...prev, outcome: e.target.value }))}
+                    className="w-full bg-surface-1 text-foreground border border-border rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-primary/50"
+                  >
+                    <option value="">Not recorded</option>
+                    <option value="success">Success</option>
+                    <option value="failed">Failed</option>
+                    <option value="partial">Partial</option>
+                    <option value="abandoned">Abandoned</option>
+                  </select>
+                </div>
+                <div>
+                  <label htmlFor="edit-retry-count" className="block text-sm text-muted-foreground mb-1">Retry count</label>
+                  <input
+                    id="edit-retry-count"
+                    type="number"
+                    min={0}
+                    value={formData.retry_count}
+                    onChange={(e) => setFormData(prev => ({ ...prev, retry_count: e.target.value }))}
+                    className="w-full bg-surface-1 text-foreground border border-border rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-primary/50"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="edit-feedback-rating" className="block text-sm text-muted-foreground mb-1">Feedback rating</label>
+                  <input
+                    id="edit-feedback-rating"
+                    type="number"
+                    min={1}
+                    max={5}
+                    value={formData.feedback_rating}
+                    onChange={(e) => setFormData(prev => ({ ...prev, feedback_rating: e.target.value }))}
+                    className="w-full bg-surface-1 text-foreground border border-border rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-primary/50"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label htmlFor="edit-error-message" className="block text-sm text-muted-foreground mb-1">Error summary</label>
+                <textarea
+                  id="edit-error-message"
+                  value={formData.error_message}
+                  onChange={(e) => setFormData(prev => ({ ...prev, error_message: e.target.value }))}
+                  className="w-full bg-surface-1 text-foreground border border-border rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-primary/50"
+                  rows={2}
+                />
+              </div>
+
+              <div>
+                <label htmlFor="edit-resolution" className="block text-sm text-muted-foreground mb-1">Resolution</label>
+                <textarea
+                  id="edit-resolution"
+                  value={formData.resolution}
+                  onChange={(e) => setFormData(prev => ({ ...prev, resolution: e.target.value }))}
+                  className="w-full bg-surface-1 text-foreground border border-border rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-primary/50"
+                  rows={2}
+                />
+              </div>
+
+              <div>
+                <label htmlFor="edit-feedback-notes" className="block text-sm text-muted-foreground mb-1">Feedback notes</label>
+                <textarea
+                  id="edit-feedback-notes"
+                  value={formData.feedback_notes}
+                  onChange={(e) => setFormData(prev => ({ ...prev, feedback_notes: e.target.value }))}
+                  className="w-full bg-surface-1 text-foreground border border-border rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-primary/50"
+                  rows={2}
+                />
+              </div>
             </div>
           </div>
 
