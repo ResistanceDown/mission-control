@@ -96,6 +96,10 @@ function resolveExistingTaskStatus(
     qcPassed?: boolean
   }
 ): IngestStatus {
+  if (existingStatus === 'done') {
+    return 'done' as IngestStatus
+  }
+
   const isPlannedExecution =
     (options?.executionMode === 'draft_pr' || options?.executionMode === 'audit_only') &&
     (options?.disposition === 'execute_now' || options?.disposition === 'founder_decision_needed')
@@ -235,7 +239,8 @@ function chooseCanonicalTask(tasks: ExistingTaskRow[]) {
 
 function shouldReopenCanonicalTask(task: ExistingTaskRow | null, item: { status_hint?: string; disposition?: string }) {
   if (!task) return false
-  if (!['done', 'cancelled'].includes(task.status)) return false
+  if (task.status === 'done') return false
+  if (task.status !== 'cancelled') return false
   if (item.disposition === 'reference_only' || item.disposition === 'narrative_only') return false
   return true
 }
