@@ -20,6 +20,7 @@ const BACKGROUND_AGENT_OPERATIONS = new Map<string, Set<string>>([
 const BACKGROUND_LABEL_PATTERNS = [
   /^Cron:\s*habi-task-ingest-/i,
   /^Cron:\s*habi-readiness-ui-audit-/i,
+  /^Cron:\s*habi-readiness-flow-smoke-/i,
 ]
 
 const INFER_FROM_ACTIVE_ASSIGNMENT_AGENTS = new Set([
