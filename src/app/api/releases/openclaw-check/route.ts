@@ -7,6 +7,8 @@ import { NextResponse } from 'next/server'
 import { requireRole } from '@/lib/auth'
 
 export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
 
 const execFileAsync = promisify(execFile)
 
@@ -42,7 +44,12 @@ function resolveOpenclawBin(): string {
     if (candidates.length > 0) return candidates[candidates.length - 1]
   }
 
-  return 'openclaw'
+  return '/opt/homebrew/bin/openclaw'
+}
+
+function parseInstalledVersion(stdout: string): string {
+  const match = stdout.match(/OpenClaw\s+([0-9]+\.[0-9]+\.[0-9]+)/i)
+  return match?.[1] || ''
 }
 
 export async function GET(request: Request) {
@@ -52,19 +59,26 @@ export async function GET(request: Request) {
   try {
     const openclawBin = resolveOpenclawBin()
     const safeCwd = process.env.OPENCLAW_WORKDIR || os.homedir()
+
+    const versionResult = await execFileAsync(openclawBin, ['--version'], {
+      cwd: safeCwd,
+      timeout: 6000,
+      maxBuffer: 256 * 1024,
+    })
+    const currentVersion = parseInstalledVersion(versionResult.stdout || '')
+
     const { stdout } = await execFileAsync(openclawBin, ['update', '--dry-run', '--json'], {
       cwd: safeCwd,
       timeout: 12000,
       maxBuffer: 1024 * 1024,
     })
     const parsed = JSON.parse(stdout) as OpenclawDryRunResult
-    const currentVersion = String(parsed.currentVersion || '').trim()
     const latestVersion = String(parsed.targetVersion || '').trim()
 
     if (!currentVersion || !latestVersion) {
       return NextResponse.json(
         { updateAvailable: false, currentVersion, latestVersion },
-        { headers: { 'Cache-Control': 'private, max-age=300' } }
+        { headers: { 'Cache-Control': 'no-store' } }
       )
     }
 
@@ -74,7 +88,7 @@ export async function GET(request: Request) {
         currentVersion,
         latestVersion,
       },
-      { headers: { 'Cache-Control': 'private, max-age=300' } }
+      { headers: { 'Cache-Control': 'no-store' } }
     )
   } catch (error: any) {
     return NextResponse.json(
@@ -84,7 +98,7 @@ export async function GET(request: Request) {
         latestVersion: '',
         error: String(error?.message || 'openclaw_check_failed'),
       },
-      { headers: { 'Cache-Control': 'private, max-age=60' } }
+      { headers: { 'Cache-Control': 'no-store' } }
     )
   }
 }
