@@ -41,4 +41,28 @@ describe('buildGatewayWebSocketUrl', () => {
       browserProtocol: 'https:',
     })).toBe('wss://bill.tail8b4599.ts.net:4443')
   })
+
+  it('preserves explicit gateway proxy paths', () => {
+    expect(buildGatewayWebSocketUrl({
+      host: 'https://atlas.example.com/gateway',
+      port: 18789,
+      browserProtocol: 'https:',
+    })).toBe('wss://atlas.example.com/gateway')
+  })
+
+  it('preserves token query when normalizing full URLs', () => {
+    expect(buildGatewayWebSocketUrl({
+      host: 'https://gateway.example.com/sessions?token=abc123#frag',
+      port: 18789,
+      browserProtocol: 'https:',
+    })).toBe('wss://gateway.example.com?token=abc123')
+  })
+
+  it('forces localhost targets to plain ws even on https pages', () => {
+    expect(buildGatewayWebSocketUrl({
+      host: 'https://127.0.0.1:18789',
+      port: 18789,
+      browserProtocol: 'https:',
+    })).toBe('ws://127.0.0.1:18789')
+  })
 })

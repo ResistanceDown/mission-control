@@ -3,6 +3,7 @@
 import { useCallback, useRef, useEffect } from 'react'
 import { useMissionControl } from '@/store'
 import { normalizeModel } from '@/lib/utils'
+import { buildGatewayWebSocketUrl } from '@/lib/gateway-url'
 import {
   getOrCreateDeviceIdentity,
   signPayload,
@@ -521,15 +522,23 @@ export function useWebSocket() {
       return // Already connected or connecting
     }
 
+    const normalizedUrl = buildGatewayWebSocketUrl({
+      host: url,
+      port: 18789,
+      browserProtocol: window.location.protocol,
+    })
+
     // Extract token from URL if present
-    const urlObj = new URL(url, window.location.origin)
+    const urlObj = new URL(normalizedUrl, window.location.origin)
     const urlToken = urlObj.searchParams.get('token')
     authTokenRef.current = token || urlToken || ''
 
     // Remove token from URL (we'll send it in handshake)
     urlObj.searchParams.delete('token')
 
-    reconnectUrl.current = url
+    const connectUrl = urlObj.toString()
+
+    reconnectUrl.current = connectUrl
     handshakeCompleteRef.current = false
     manualDisconnectRef.current = false
     nonRetryableErrorRef.current = null
@@ -537,14 +546,14 @@ export function useWebSocket() {
     gatewaySupportsPingRef.current = true
 
     try {
-      const ws = new WebSocket(url.split('?')[0]) // Connect without query params
+      const ws = new WebSocket(connectUrl.split('?')[0]) // Connect without query params
       wsRef.current = ws
 
       ws.onopen = () => {
-        log.info(`Connected to ${url.split('?')[0]}`)
+        log.info(`Connected to ${connectUrl.split('?')[0]}`)
         // Don't set isConnected yet - wait for handshake
         setConnection({
-          url: url.split('?')[0],
+          url: connectUrl.split('?')[0],
           reconnectAttempts: 0
         })
         // Wait for connect.challenge from server

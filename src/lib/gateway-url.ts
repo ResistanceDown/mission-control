@@ -13,6 +13,30 @@ function normalizeProtocol(protocol: string): 'ws:' | 'wss:' {
   return 'ws:'
 }
 
+function preserveTokenQuery(parsed: URL): void {
+  const token = parsed.searchParams.get('token')
+  parsed.search = ''
+  if (token) {
+    parsed.searchParams.set('token', token)
+  }
+}
+
+function normalizeGatewayPath(pathname: string): string {
+  const path = String(pathname || '/').trim() || '/'
+  if (
+    path === '/sessions' ||
+    path === '/sessions/' ||
+    path.startsWith('/sessions/')
+  ) {
+    return '/'
+  }
+  return path === '/' ? '/' : path.replace(/\/+$/, '')
+}
+
+function formatWebSocketUrl(parsed: URL): string {
+  return parsed.toString().replace(/\/$/, '').replace('/?', '?')
+}
+
 export function buildGatewayWebSocketUrl(input: {
   host: string
   port: number
@@ -23,7 +47,7 @@ export function buildGatewayWebSocketUrl(input: {
   const browserProtocol = input.browserProtocol === 'https:' ? 'https:' : 'http:'
 
   if (!rawHost) {
-    return `${browserProtocol === 'https:' ? 'wss' : 'ws'}://127.0.0.1:${port || 18789}`
+    return `ws://127.0.0.1:${port || 18789}`
   }
 
   const prefixed =
@@ -37,18 +61,18 @@ export function buildGatewayWebSocketUrl(input: {
   if (prefixed) {
     try {
       const parsed = new URL(prefixed)
-      parsed.protocol = normalizeProtocol(parsed.protocol)
-      // Users often paste dashboard/session URLs; websocket connect should target gateway root.
-      parsed.pathname = '/'
-      parsed.search = ''
+      parsed.protocol = isLocalHost(parsed.hostname) ? 'ws:' : normalizeProtocol(parsed.protocol)
+      // Keep explicit proxy paths (e.g. /gateway), but collapse known dashboard/session routes to root.
+      parsed.pathname = normalizeGatewayPath(parsed.pathname)
+      preserveTokenQuery(parsed)
       parsed.hash = ''
-      return parsed.toString().replace(/\/$/, '')
+      return formatWebSocketUrl(parsed)
     } catch {
       return prefixed
     }
   }
 
-  const wsProtocol = browserProtocol === 'https:' ? 'wss' : 'ws'
+  const wsProtocol = isLocalHost(rawHost) ? 'ws' : (browserProtocol === 'https:' ? 'wss' : 'ws')
   const shouldOmitPort =
     wsProtocol === 'wss' &&
     !isLocalHost(rawHost) &&

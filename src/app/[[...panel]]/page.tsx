@@ -40,6 +40,7 @@ import { LocalModeBanner } from '@/components/layout/local-mode-banner'
 import { UpdateBanner } from '@/components/layout/update-banner'
 import { useWebSocket } from '@/lib/websocket'
 import { useServerEvents } from '@/lib/use-server-events'
+import { buildGatewayWebSocketUrl } from '@/lib/gateway-url'
 import { useMissionControl } from '@/store'
 
 export default function Home() {
@@ -95,6 +96,28 @@ export default function Home() {
       .catch(() => {})
 
     // Check capabilities, then conditionally connect to gateway
+    const connectWithConfiguredGateway = () => {
+      const wsToken = process.env.NEXT_PUBLIC_GATEWAY_TOKEN || process.env.NEXT_PUBLIC_WS_TOKEN || ''
+      const explicitWsUrl = process.env.NEXT_PUBLIC_GATEWAY_URL || ''
+      const gatewayPort = Number(process.env.NEXT_PUBLIC_GATEWAY_PORT || '18789')
+      const gatewayHost = process.env.NEXT_PUBLIC_GATEWAY_HOST || window.location.hostname
+      const gatewayProto = window.location.protocol === 'https:' ? 'https' : 'http'
+      const useProxyPath =
+        window.location.protocol === 'https:' ||
+        window.location.hostname.endsWith('.ts.net')
+      const proxyPath = process.env.NEXT_PUBLIC_GATEWAY_PROXY_PATH || '/gateway'
+      const gatewayTarget = explicitWsUrl ||
+        (useProxyPath
+          ? `${gatewayProto}://${window.location.host}${proxyPath}`
+          : gatewayHost)
+      const wsUrl = buildGatewayWebSocketUrl({
+        host: gatewayTarget,
+        port: gatewayPort,
+        browserProtocol: window.location.protocol,
+      })
+      connect(wsUrl, wsToken)
+    }
+
     fetch('/api/status?action=capabilities')
       .then(res => res.ok ? res.json() : null)
       .then(data => {
@@ -111,42 +134,10 @@ export default function Home() {
           setDashboardMode('full')
           setGatewayAvailable(true)
         }
-        // Connect to gateway WebSocket
-        const wsToken = process.env.NEXT_PUBLIC_GATEWAY_TOKEN || process.env.NEXT_PUBLIC_WS_TOKEN || ''
-        const explicitWsUrl = process.env.NEXT_PUBLIC_GATEWAY_URL || ''
-        const gatewayPort = process.env.NEXT_PUBLIC_GATEWAY_PORT || '18789'
-        const gatewayHost = process.env.NEXT_PUBLIC_GATEWAY_HOST || window.location.hostname
-        const gatewayProto =
-          process.env.NEXT_PUBLIC_GATEWAY_PROTOCOL ||
-          (window.location.protocol === 'https:' ? 'wss' : 'ws')
-        const useProxyPath =
-          window.location.protocol === 'https:' ||
-          window.location.hostname.endsWith('.ts.net')
-        const proxyPath = process.env.NEXT_PUBLIC_GATEWAY_PROXY_PATH || '/gateway'
-        const wsUrl = explicitWsUrl ||
-          (useProxyPath
-            ? `${gatewayProto}://${window.location.host}${proxyPath}`
-            : `${gatewayProto}://${gatewayHost}:${gatewayPort}`)
-        connect(wsUrl, wsToken)
+        connectWithConfiguredGateway()
       })
       .catch(() => {
-        // If capabilities check fails, still try to connect
-        const wsToken = process.env.NEXT_PUBLIC_GATEWAY_TOKEN || process.env.NEXT_PUBLIC_WS_TOKEN || ''
-        const explicitWsUrl = process.env.NEXT_PUBLIC_GATEWAY_URL || ''
-        const gatewayPort = process.env.NEXT_PUBLIC_GATEWAY_PORT || '18789'
-        const gatewayHost = process.env.NEXT_PUBLIC_GATEWAY_HOST || window.location.hostname
-        const gatewayProto =
-          process.env.NEXT_PUBLIC_GATEWAY_PROTOCOL ||
-          (window.location.protocol === 'https:' ? 'wss' : 'ws')
-        const useProxyPath =
-          window.location.protocol === 'https:' ||
-          window.location.hostname.endsWith('.ts.net')
-        const proxyPath = process.env.NEXT_PUBLIC_GATEWAY_PROXY_PATH || '/gateway'
-        const wsUrl = explicitWsUrl ||
-          (useProxyPath
-            ? `${gatewayProto}://${window.location.host}${proxyPath}`
-            : `${gatewayProto}://${gatewayHost}:${gatewayPort}`)
-        connect(wsUrl, wsToken)
+        connectWithConfiguredGateway()
       })
   }, [connect, setCurrentUser, setDashboardMode, setGatewayAvailable, setSubscription, setUpdateAvailable, setOpenclawUpdateAvailable])
 
