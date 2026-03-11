@@ -651,6 +651,7 @@ function OpportunityLane({
   onFeedbackChange,
   onAction,
   saving,
+  defaultOpen = true,
 }: {
   title: string
   subtitle: string
@@ -659,10 +660,11 @@ function OpportunityLane({
   onFeedbackChange: (opportunityId: string, value: string) => void
   onAction: (action: GrowthAction, draftId?: string, extra?: Record<string, unknown>) => void
   saving: boolean
+  defaultOpen?: boolean
 }) {
   if (!opportunities.length) return null
   return (
-    <details open className="rounded-xl border border-white/10 bg-[#0f151d] p-4">
+    <details open={defaultOpen} className="rounded-xl border border-white/10 bg-[#0f151d] p-4">
       <summary className="cursor-pointer list-none">
         <div className="flex items-center justify-between gap-3">
           <div>
@@ -672,7 +674,7 @@ function OpportunityLane({
           <FieldChip>{opportunities.length}</FieldChip>
         </div>
       </summary>
-      <div className="mt-4 space-y-3">
+      <div className="mt-4 grid gap-3 xl:grid-cols-2">
         {opportunities.map((opportunity) => (
           <OpportunityCard
             key={opportunity.id}
@@ -733,7 +735,7 @@ function OpportunityFamilyGroup({
           </span>
         </div>
       </summary>
-      <div className="mt-4 space-y-3">
+      <div className="mt-4 grid gap-3 xl:grid-cols-2">
         {opportunities.map((opportunity) => (
           <OpportunityCard
             key={opportunity.id}
@@ -757,6 +759,7 @@ function OpportunityFamilyLane({
   onFeedbackChange,
   onAction,
   saving,
+  defaultOpen = true,
 }: {
   title: string
   subtitle: string
@@ -765,10 +768,11 @@ function OpportunityFamilyLane({
   onFeedbackChange: (opportunityId: string, value: string) => void
   onAction: (action: GrowthAction, draftId?: string, extra?: Record<string, unknown>) => void
   saving: boolean
+  defaultOpen?: boolean
 }) {
   if (!families.length) return null
   return (
-    <details open className="rounded-xl border border-white/10 bg-[#0f151d] p-4">
+    <details open={defaultOpen} className="rounded-xl border border-white/10 bg-[#0f151d] p-4">
       <summary className="cursor-pointer list-none">
         <div className="flex items-center justify-between gap-3">
           <div>
@@ -778,7 +782,7 @@ function OpportunityFamilyLane({
           <FieldChip>{families.length} families</FieldChip>
         </div>
       </summary>
-      <div className="mt-4 space-y-3">
+      <div className="mt-4 grid gap-3 xl:grid-cols-2">
         {families.map((family, familyIndex) => (
           <OpportunityFamilyGroup
             key={family.key}
@@ -885,7 +889,11 @@ function DraftCard({
         />
       </div>
 
-      <div className="mt-4 grid gap-3 lg:grid-cols-[1.2fr_0.8fr]">
+      <div className="mt-4 text-sm text-foreground/80">{draft.selection_reason || draft.why_now || draft.rationale}</div>
+
+      <details className="mt-4 rounded-xl border border-white/8 bg-black/20 px-3 py-3">
+        <summary className="cursor-pointer list-none text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Details</summary>
+        <div className="mt-3 grid gap-3 lg:grid-cols-[1.2fr_0.8fr]">
         <div className="space-y-3">
           {draft.selection_reason ? (
             <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
@@ -936,6 +944,7 @@ function DraftCard({
           ) : null}
         </div>
       </div>
+      </details>
 
       <div className="mt-4 rounded-xl border border-white/8 bg-black/20 px-3 py-3">
         <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Feedback for next pass</div>
@@ -1077,6 +1086,7 @@ export function GrowthReviewPanel() {
   const [scheduleDrafts, setScheduleDrafts] = useState<Record<string, { when: string; note: string }>>({})
   const [publishDrafts, setPublishDrafts] = useState<Record<string, { tweetUrl: string; tweetId: string }>>({})
   const [topDraftRewritePrompt, setTopDraftRewritePrompt] = useState('')
+  const [deskMode, setDeskMode] = useState<'act' | 'queue' | 'signals'>('act')
 
   const growth = data?.growth ?? null
   const byId = useMemo(() => new Map((growth?.draftCandidates || []).map((draft) => [draft.id, draft])), [growth?.draftCandidates])
@@ -1203,6 +1213,14 @@ export function GrowthReviewPanel() {
     : readyToSchedule
       ? `${readyToSchedule} ready to publish`
       : 'Nothing scheduled'
+  const queueStatusLine = `${readyToSchedule} ready • ${scheduledCount} scheduled${failedPosts.length ? ` • ${failedPosts.length} failed` : ''}`
+  const utilityActions = [
+    { key: 'refresh', label: 'Refresh', action: () => void runGrowthAction('refresh_research') },
+    { key: 'select', label: 'Select', action: () => void runGrowthAction('select_opportunities') },
+    { key: 'drafts', label: candidateCount ? 'Clear drafts' : 'Generate drafts', action: () => void runGrowthAction(candidateCount ? 'clear_current_drafts' : 'generate_drafts') },
+    { key: 'queue', label: 'Open queue', action: () => setDeskMode('queue') },
+    { key: 'signals', label: 'Open signals', action: () => setDeskMode('signals') },
+  ]
 
   const patchAccountTargetState = useCallback((usernameInput: string, nextState: 'watch' | 'prioritize' | 'mute' | 'engage_this_week', note: string) => {
     const normalized = displayUsername(usernameInput).replace(/^@/, '').trim().toLowerCase()
@@ -1331,11 +1349,35 @@ export function GrowthReviewPanel() {
             <div className="text-sm font-semibold text-foreground">Growth</div>
             <div className="mt-1 max-w-3xl text-sm text-muted-foreground">Review the next move, decide on exact post text, then push it into the publishing queue.</div>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <button onClick={() => void runGrowthAction('refresh_research')} disabled={actionState.status === 'saving'} className="rounded-lg bg-cyan-500/15 px-3 py-2 text-xs font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/20 disabled:opacity-60">Refresh Research</button>
-            <button onClick={() => void runGrowthAction('select_opportunities')} disabled={actionState.status === 'saving'} className="rounded-lg border border-cyan-500/20 bg-black/20 px-3 py-2 text-xs font-medium text-cyan-100 transition-smooth hover:bg-cyan-500/10 disabled:opacity-60">Select Opportunities</button>
-            <button onClick={() => void runGrowthAction(candidateCount ? 'clear_current_drafts' : 'generate_drafts')} disabled={actionState.status === 'saving'} className="rounded-lg border border-amber-500/20 bg-black/20 px-3 py-2 text-xs font-medium text-amber-200 transition-smooth hover:bg-amber-500/10 disabled:opacity-60">{candidateCount ? 'Clear Current Drafts' : 'Generate Drafts'}</button>
-            <button onClick={() => void runGrowthAction('refresh_research_and_select')} disabled={actionState.status === 'saving'} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2 disabled:opacity-60">Refresh + Select</button>
+          <div className="flex flex-col items-stretch gap-3 xl:items-end">
+            <div className="flex flex-wrap gap-2">
+              {(['act', 'queue', 'signals'] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => setDeskMode(mode)}
+                  className={cx(
+                    'rounded-full border px-3 py-1.5 text-xs font-medium transition-smooth',
+                    deskMode === mode ? 'border-cyan-500/25 bg-cyan-500/12 text-cyan-100' : 'border-white/10 bg-black/20 text-muted-foreground hover:bg-surface-2',
+                  )}
+                >
+                  {mode === 'act' ? 'Act' : mode === 'queue' ? 'Queue' : 'Signals'}
+                </button>
+              ))}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {utilityActions.map((item) => (
+                <button
+                  key={item.key}
+                  type="button"
+                  onClick={item.action}
+                  disabled={actionState.status === 'saving'}
+                  className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2 disabled:opacity-60"
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -1388,6 +1430,7 @@ export function GrowthReviewPanel() {
               <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
                 <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Research status</div>
                 <div className="mt-2 text-sm text-foreground/90">{researchStatusLine}</div>
+                <div className="mt-1 text-xs text-foreground/65">{queueStatusLine}</div>
                 <div className="mt-1 text-xs text-muted-foreground">{formatPacificTime(growth.freshness?.lastXPullAt || growth.researchGeneratedAt || null)}</div>
               </div>
               <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
@@ -1425,6 +1468,7 @@ export function GrowthReviewPanel() {
         </div>
       </div>
 
+      {deskMode === 'act' ? (
       <div className="space-y-4">
         <div id="growth-opportunities">
           <CollapsibleSection title="Opportunities" subtitle="Choose the move before you draft." defaultOpen>
@@ -1734,7 +1778,9 @@ export function GrowthReviewPanel() {
           </div>
         </CollapsibleSection>
       </div>
+      ) : null}
 
+      {deskMode === 'signals' ? (
         <div className="space-y-4">
           <CollapsibleSection title="Listening" subtitle="Market signal, research diagnostics, and live conversation quality." defaultOpen={false}>
             <div className="space-y-3">
@@ -1960,6 +2006,120 @@ export function GrowthReviewPanel() {
             </div>
           </CollapsibleSection>
         </div>
+      ) : null}
+
+      {deskMode === 'queue' ? (
+        <div className="space-y-4">
+          <div id="growth-ready-to-schedule">
+            <CollapsibleSection title="Publishing queue" subtitle="Ready, scheduled, failed, and published states live here." defaultOpen>
+              <div className="space-y-5">
+                <div className="space-y-3">
+                  <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Ready</div>
+                  {readyApprovedPosts.length ? readyApprovedPosts.map((post) => {
+                    const suggested = buildSuggestedSchedule(post)
+                    const scheduleState = scheduleDrafts[post.id] || { when: post.scheduledAt || suggested.when, note: post.scheduleNote || suggested.note }
+                    const publishState = publishDrafts[post.id] || { tweetUrl: post.tweetUrl || '', tweetId: post.tweetId || '' }
+                    return (
+                      <div key={post.id} className="rounded-2xl border border-emerald-500/15 bg-[#10161f] p-4 shadow-[0_16px_36px_rgba(0,0,0,0.24)]">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="text-sm font-semibold text-foreground">{post.pillar || 'Approved post'}{post.angle ? `: ${post.angle}` : ''}</div>
+                            <div className="mt-1 flex flex-wrap gap-2">
+                              {post.distributionType ? <FieldChip>{post.distributionType}</FieldChip> : null}
+                              {post.sourceType ? <FieldChip>{post.sourceType}</FieldChip> : null}
+                              {post.approvedAtPt ? <FieldChip>approved {formatPacificTime(post.approvedAtPt)}</FieldChip> : null}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="mt-4 rounded-xl border border-emerald-500/15 bg-black/20 px-4 py-4 text-[15px] leading-7 text-foreground whitespace-pre-wrap">{post.text}</div>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <button onClick={() => void runGrowthAction('schedule_draft', post.id, { scheduledAt: scheduleState.when, scheduleNote: scheduleState.note, scheduleSource: scheduleState.when === suggested.when ? 'machine_suggested' : 'user_selected' })} disabled={actionState.status === 'saving' || !scheduleState.when} className="rounded-lg bg-emerald-500/15 px-3 py-2 text-xs font-medium text-emerald-200 transition-smooth hover:bg-emerald-500/20 disabled:opacity-60">Schedule</button>
+                          <button onClick={() => void runGrowthAction('post_now', post.id)} disabled={actionState.status === 'saving'} className="rounded-lg bg-cyan-500/15 px-3 py-2 text-xs font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/20 disabled:opacity-60">Post now</button>
+                        </div>
+                        <details className="mt-3 rounded-xl border border-white/8 bg-black/20 px-3 py-3">
+                          <summary className="cursor-pointer list-none text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Scheduling details</summary>
+                          <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_1fr]">
+                            <label className="text-xs text-muted-foreground">When
+                              <input type="datetime-local" value={scheduleState.when} onChange={(event) => setScheduleDrafts((current) => ({ ...current, [post.id]: { ...scheduleState, when: event.target.value } }))} className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground" />
+                            </label>
+                            <label className="text-xs text-muted-foreground">Note
+                              <input value={scheduleState.note} onChange={(event) => setScheduleDrafts((current) => ({ ...current, [post.id]: { ...scheduleState, note: event.target.value } }))} className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground" placeholder="optional schedule note" />
+                            </label>
+                          </div>
+                          <details className="mt-3 rounded-xl border border-white/8 bg-black/15 px-3 py-3">
+                            <summary className="cursor-pointer list-none text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Manual fallback</summary>
+                            <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_1fr]">
+                              <label className="text-xs text-muted-foreground">Tweet URL
+                                <input value={publishState.tweetUrl} onChange={(event) => setPublishDrafts((current) => ({ ...current, [post.id]: { ...publishState, tweetUrl: event.target.value } }))} className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground" placeholder="https://x.com/.../status/..." />
+                              </label>
+                              <label className="text-xs text-muted-foreground">Tweet ID
+                                <input value={publishState.tweetId} onChange={(event) => setPublishDrafts((current) => ({ ...current, [post.id]: { ...publishState, tweetId: event.target.value } }))} className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground" placeholder="optional if URL is present" />
+                              </label>
+                            </div>
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              <button onClick={() => void runGrowthAction('link_manual_publish', post.id, { tweetUrl: publishState.tweetUrl, tweetId: publishState.tweetId })} disabled={actionState.status === 'saving' || (!publishState.tweetUrl && !publishState.tweetId)} className="rounded-lg bg-cyan-500/15 px-3 py-2 text-xs font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/20 disabled:opacity-60">Link manual publish</button>
+                            </div>
+                          </details>
+                        </details>
+                      </div>
+                    )
+                  }) : <div className="rounded-xl border border-white/10 bg-[#10161f] px-4 py-4 text-sm text-muted-foreground">Nothing is ready to publish yet.</div>}
+                </div>
+
+                <div className="space-y-3">
+                  <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Scheduled</div>
+                  {scheduledPosts.length ? scheduledPosts.map((post) => (
+                    <div key={`scheduled-${post.id}`} className="rounded-2xl border border-cyan-500/15 bg-[#10161f] p-4">
+                      <div className="text-sm font-semibold text-foreground">{post.pillar || 'Scheduled post'}{post.angle ? `: ${post.angle}` : ''}</div>
+                      <div className="mt-1 flex flex-wrap gap-2">
+                        <FieldChip>{post.distributionType || 'scheduled'}</FieldChip>
+                        <FieldChip>{formatPacificTime(post.scheduledAtPt || post.scheduledAt || null)}</FieldChip>
+                      </div>
+                      <div className="mt-4 rounded-xl border border-cyan-500/15 bg-black/20 px-4 py-4 text-[15px] leading-7 text-foreground whitespace-pre-wrap">{post.text}</div>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button onClick={() => void runGrowthAction('post_now', post.id)} disabled={actionState.status === 'saving'} className="rounded-lg bg-cyan-500/15 px-3 py-2 text-xs font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/20 disabled:opacity-60">Post now</button>
+                        <button onClick={() => void runGrowthAction('unschedule_draft', post.id)} disabled={actionState.status === 'saving'} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2 disabled:opacity-60">Unschedule</button>
+                      </div>
+                    </div>
+                  )) : <div className="rounded-xl border border-white/10 bg-[#10161f] px-4 py-4 text-sm text-muted-foreground">Nothing is scheduled.</div>}
+                </div>
+
+                <div className="space-y-3">
+                  <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Failed</div>
+                  {failedPosts.length ? failedPosts.map((post) => (
+                    <div key={`failed-${post.id}`} className="rounded-2xl border border-rose-500/15 bg-[#161014] p-4">
+                      <div className="text-sm font-semibold text-foreground">{post.pillar || 'Failed post'}{post.angle ? `: ${post.angle}` : ''}</div>
+                      <div className="mt-3 text-xs text-rose-100/90">{post.publishError || 'Publish failed.'}</div>
+                      <div className="mt-3 rounded-xl border border-rose-500/15 bg-black/20 px-4 py-4 text-[15px] leading-7 text-foreground whitespace-pre-wrap">{post.text}</div>
+                    </div>
+                  )) : <div className="rounded-xl border border-white/10 bg-[#10161f] px-4 py-4 text-sm text-muted-foreground">No failed publishes.</div>}
+                </div>
+              </div>
+            </CollapsibleSection>
+          </div>
+
+          <CollapsibleSection title="Published + learning" subtitle="Latest shipped posts and the learning they created." defaultOpen={false}>
+            <div className="space-y-4">
+              {growth.resultsSummary?.postedCount ? (
+                <div className="grid gap-3 xl:grid-cols-2">
+                  <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
+                    <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Latest result summary</div>
+                    <div className="mt-2 space-y-1 text-sm text-foreground/90">
+                      {growth.resultsSummary.winningDistributionTypes?.length ? <div>Winning distribution: {growth.resultsSummary.winningDistributionTypes.join(' • ')}</div> : null}
+                      {growth.resultsSummary.winningSourceTypes?.length ? <div>Winning sources: {growth.resultsSummary.winningSourceTypes.join(' • ')}</div> : null}
+                      {(growth.resultsSummary.strategyNotes || []).slice(0, 1).map((note, index) => <div key={`result-note-${index}`}>{note}</div>)}
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
+                    <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Published count</div>
+                    <div className="mt-2 text-sm text-foreground/90">{publishedCount} published or linked • {publishAttempts} publish update{publishAttempts === 1 ? '' : 's'}</div>
+                  </div>
+                </div>
+              ) : <div className="rounded-xl border border-white/10 bg-[#10161f] px-4 py-4 text-sm text-muted-foreground">No published post results yet.</div>}
+            </div>
+          </CollapsibleSection>
+        </div>
+      ) : null}
     </div>
   )
 }
