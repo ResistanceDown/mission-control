@@ -175,11 +175,21 @@ interface TaskOutcomeSummary {
   success_rate: number
 }
 
+interface TaskOutcomeBreakdown {
+  success: number
+  failed: number
+  partial: number
+  abandoned: number
+  unknown: number
+  total: number
+  success_rate: number
+}
+
 interface TaskOutcomesResponse {
   timeframe: string
   summary: TaskOutcomeSummary
-  by_agent: Record<string, TaskOutcomeSummary & { total: number; success_rate: number }>
-  by_priority: Record<string, TaskOutcomeSummary & { total: number; success_rate: number }>
+  by_agent: Record<string, TaskOutcomeBreakdown>
+  by_priority: Record<string, TaskOutcomeBreakdown>
   common_errors: Array<{ error_message: string; count: number }>
   trends?: Array<{
     bucket: string
@@ -246,6 +256,8 @@ interface TaskCostsResponse {
   summary: TaskCostBreakdown['stats']
   tasks: TaskCostEntry[]
   unattributed: TaskCostBreakdown['stats']
+  attributionRate?: number
+  topUnattributedAgents?: Array<{ agent: string; cost: number; requests: number; tokens: number }>
 }
 
 interface MentionOption {
@@ -459,6 +471,8 @@ export function TaskBoardPanel() {
   const [outcomes, setOutcomes] = useState<TaskOutcomesResponse | null>(null)
   const [regression, setRegression] = useState<RegressionResponse | null>(null)
   const [taskCosts, setTaskCosts] = useState<TaskCostsResponse | null>(null)
+  const [analyticsTimeframe, setAnalyticsTimeframe] = useState<'week' | 'month' | 'all'>('month')
+  const [regressionLookbackDays, setRegressionLookbackDays] = useState<7 | 14 | 30>(14)
   const dragCounter = useRef(0)
   const boardScrollRef = useRef<HTMLDivElement | null>(null)
   const selectedTaskIdFromUrl = Number.parseInt(searchParams.get('taskId') || '', 10)
@@ -557,11 +571,12 @@ export function TaskBoardPanel() {
   const fetchAnalytics = useCallback(async () => {
     try {
       const now = Math.floor(Date.now() / 1000)
-      const betaStart = now - 7 * 24 * 60 * 60
+      const lookbackSeconds = regressionLookbackDays * 24 * 60 * 60
+      const betaStart = now - lookbackSeconds
       const [outcomesResponse, regressionResponse, costsResponse] = await Promise.all([
-        fetch('/api/tasks/outcomes?timeframe=month'),
-        fetch(`/api/tasks/regression?beta_start=${betaStart}&lookback_seconds=${7 * 24 * 60 * 60}`),
-        fetch('/api/tokens?action=task-costs&timeframe=month'),
+        fetch(`/api/tasks/outcomes?timeframe=${analyticsTimeframe}`),
+        fetch(`/api/tasks/regression?beta_start=${betaStart}&lookback_seconds=${lookbackSeconds}`),
+        fetch(`/api/tokens?action=task-costs&timeframe=${analyticsTimeframe}`),
       ])
 
       if (outcomesResponse.ok) {
@@ -576,7 +591,7 @@ export function TaskBoardPanel() {
     } catch (err) {
       log.warn('Failed to fetch task analytics', err)
     }
-  }, [])
+  }, [analyticsTimeframe, regressionLookbackDays])
 
   useEffect(() => {
     fetchData()
@@ -655,6 +670,26 @@ export function TaskBoardPanel() {
 
   const retryHeavyTasks = tasks.filter((task) => Number(task.retry_count || 0) >= 2)
   const topCostTasks = (taskCosts?.tasks || []).slice(0, 3)
+  const topOutcomeAgents = Object.entries(outcomes?.by_agent || {})
+    .map(([agent, summary]) => ({ agent, ...summary }))
+    .sort((a, b) => {
+      if (b.success_rate !== a.success_rate) return b.success_rate - a.success_rate
+      return b.total - a.total
+    })
+  const topOutcomePriorities = Object.entries(outcomes?.by_priority || {})
+    .map(([priority, summary]) => ({ priority, ...summary }))
+    .sort((a, b) => {
+      if (b.success_rate !== a.success_rate) return b.success_rate - a.success_rate
+      return b.total - a.total
+    })
+  const unattributedShare = taskCosts && (taskCosts.summary.requestCount + taskCosts.unattributed.requestCount) > 0
+    ? taskCosts.unattributed.requestCount / (taskCosts.summary.requestCount + taskCosts.unattributed.requestCount)
+    : 0
+  const costGuidance = taskCosts?.topUnattributedAgents?.length
+    ? `Most unattributed spend is coming from ${taskCosts.topUnattributedAgents[0].agent}. Attach task IDs to that agent's session/task flows first.`
+    : unattributedShare > 0.1
+      ? 'A meaningful share of spend is still unattributed. Check agent/session flows that write token usage without a task ID.'
+      : 'Task attribution coverage is healthy.'
 
   // Drag and drop handlers
   const handleDragStart = (e: React.DragEvent, task: Task) => {
@@ -895,6 +930,45 @@ export function TaskBoardPanel() {
 
       {boardView === 'analytics' ? (
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card p-4">
+            <div>
+              <h3 className="text-sm font-semibold text-foreground">Analytics window</h3>
+              <p className="mt-1 text-xs text-muted-foreground">Tune the task outcome and regression views without changing Founder.</p>
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-2 rounded-md border border-border bg-surface-1/50 p-1">
+                {(['week', 'month', 'all'] as const).map((timeframe) => (
+                  <button
+                    key={timeframe}
+                    onClick={() => setAnalyticsTimeframe(timeframe)}
+                    className={`rounded px-3 py-1.5 text-xs font-medium transition-smooth ${
+                      analyticsTimeframe === timeframe
+                        ? 'bg-primary text-primary-foreground'
+                        : 'text-muted-foreground hover:bg-surface-2 hover:text-foreground'
+                    }`}
+                  >
+                    {timeframe === 'all' ? 'All time' : timeframe.charAt(0).toUpperCase() + timeframe.slice(1)}
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center gap-2 rounded-md border border-border bg-surface-1/50 p-1">
+                {([7, 14, 30] as const).map((days) => (
+                  <button
+                    key={days}
+                    onClick={() => setRegressionLookbackDays(days)}
+                    className={`rounded px-3 py-1.5 text-xs font-medium transition-smooth ${
+                      regressionLookbackDays === days
+                        ? 'bg-primary text-primary-foreground'
+                        : 'text-muted-foreground hover:bg-surface-2 hover:text-foreground'
+                    }`}
+                  >
+                    {days}d compare
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
           <div className="grid gap-4 lg:grid-cols-2">
             <section className="rounded-lg border border-border bg-card p-4">
               <h3 className="text-sm font-semibold text-foreground">Outcome mix</h3>
@@ -932,6 +1006,49 @@ export function TaskBoardPanel() {
 
           <div className="grid gap-4 lg:grid-cols-2">
             <section className="rounded-lg border border-border bg-card p-4">
+              <h3 className="text-sm font-semibold text-foreground">By agent</h3>
+              <div className="mt-3 space-y-2">
+                {topOutcomeAgents.slice(0, 6).map((entry) => (
+                  <div key={entry.agent} className="flex items-center justify-between rounded-md border border-border bg-surface-1/40 px-3 py-2 text-sm">
+                    <div className="min-w-0">
+                      <div className="truncate font-medium text-foreground">{entry.agent}</div>
+                      <div className="text-xs text-muted-foreground">{entry.total} completed · {entry.failed + entry.partial + entry.abandoned} interventions</div>
+                    </div>
+                    <div className="text-right">
+                      <div className="font-semibold text-foreground">{Math.round((entry.success_rate || 0) * 100)}%</div>
+                      <div className="text-[11px] text-muted-foreground">success</div>
+                    </div>
+                  </div>
+                ))}
+                {!topOutcomeAgents.length && (
+                  <div className="text-sm text-muted-foreground">No agent-attributed outcomes yet.</div>
+                )}
+              </div>
+            </section>
+            <section className="rounded-lg border border-border bg-card p-4">
+              <h3 className="text-sm font-semibold text-foreground">By priority</h3>
+              <div className="mt-3 space-y-2">
+                {topOutcomePriorities.map((entry) => (
+                  <div key={entry.priority} className="flex items-center justify-between rounded-md border border-border bg-surface-1/40 px-3 py-2 text-sm">
+                    <div>
+                      <div className="font-medium capitalize text-foreground">{entry.priority}</div>
+                      <div className="text-xs text-muted-foreground">{entry.total} completed · {entry.failed + entry.partial + entry.abandoned} interventions</div>
+                    </div>
+                    <div className="text-right">
+                      <div className="font-semibold text-foreground">{Math.round((entry.success_rate || 0) * 100)}%</div>
+                      <div className="text-[11px] text-muted-foreground">success</div>
+                    </div>
+                  </div>
+                ))}
+                {!topOutcomePriorities.length && (
+                  <div className="text-sm text-muted-foreground">No priority-level outcome data yet.</div>
+                )}
+              </div>
+            </section>
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <section className="rounded-lg border border-border bg-card p-4">
               <h3 className="text-sm font-semibold text-foreground">Common failure reasons</h3>
               <div className="mt-3 space-y-2">
                 {(outcomes?.common_errors || []).slice(0, 5).map((item) => (
@@ -959,6 +1076,9 @@ export function TaskBoardPanel() {
                 {!topCostTasks.length && (
                   <div className="text-sm text-muted-foreground">No task-attributed spend recorded yet.</div>
                 )}
+                <div className="mt-4 rounded-md border border-dashed border-border/60 bg-surface-1/20 px-3 py-3 text-xs text-muted-foreground">
+                  {costGuidance}
+                </div>
               </div>
             </section>
           </div>

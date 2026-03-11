@@ -64,6 +64,9 @@ export function AgentCostPanel() {
   const totalAgents = agents.length
   const totalAttributedRequests = agents.reduce((sum, [, a]) => sum + a.attributed.requestCount, 0)
   const totalUnattributedRequests = agents.reduce((sum, [, a]) => sum + a.unattributed.requestCount, 0)
+  const worstAttributionAgent = sortedAgents
+    .filter(([, a]) => a.unattributed.requestCount > 0)
+    .sort(([, a], [, b]) => b.unattributed.totalCost - a.unattributed.totalCost)[0]
 
   const mostExpensive = sortedAgents[0]
   const mostEfficient = agents.length > 0
@@ -188,6 +191,13 @@ export function AgentCostPanel() {
               <div className="text-sm text-muted-foreground">Attribution coverage</div>
             </div>
           </div>
+
+          {worstAttributionAgent && (
+            <div className="bg-card border border-border rounded-lg p-4 text-sm text-muted-foreground">
+              <span className="font-medium text-foreground">Attribution hint:</span>{' '}
+              {worstAttributionAgent[0]} is currently the biggest unattributed spender. Prioritize task-id attribution in that agent's session/task reporting path.
+            </div>
+          )}
 
           {/* Charts */}
           <div className="grid lg:grid-cols-2 gap-6">

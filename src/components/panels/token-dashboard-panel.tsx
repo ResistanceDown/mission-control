@@ -274,6 +274,13 @@ export function TokenDashboardPanel() {
   }
 
   const alerts = getAlerts()
+  const attributionAlert = taskCosts
+    ? taskCosts.topUnattributedAgents.length > 0
+      ? `Most unattributed spend is coming from ${taskCosts.topUnattributedAgents[0].agent}. Attach task IDs there first.`
+      : taskCosts.attributionRate < 0.9
+        ? 'Some spend is still unattributed. Review agent/session flows that write token usage without a task ID.'
+        : 'Task attribution coverage is healthy.'
+    : null
 
   return (
     <div className="p-6 space-y-6">
@@ -395,6 +402,11 @@ export function TokenDashboardPanel() {
                     ))
                   )}
                 </div>
+                {attributionAlert && (
+                  <div className="mt-4 rounded-lg border border-dashed border-border bg-secondary/10 px-3 py-3 text-xs text-muted-foreground">
+                    {attributionAlert}
+                  </div>
+                )}
               </div>
             </div>
           )}
