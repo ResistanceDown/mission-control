@@ -13,7 +13,15 @@ const BACKGROUND_AGENTS = new Set([
   'habi-foreman',
   'ops-heartbeat',
   'habi-qc',
+  'voice-fast',
+  'discord-mlx',
 ])
+
+const BACKGROUND_AGENT_PATTERNS = [
+  /^canary\d+$/i,
+  /^main-canary$/i,
+  /^q\d+bench-/i,
+]
 
 const BACKGROUND_AGENT_OPERATIONS = new Map<string, Set<string>>([
   ['habi-control', new Set(['cron', 'channel'])],
@@ -77,6 +85,15 @@ export function classifyTokenAttribution<T extends { taskId?: number | null; age
         taskId: null,
         attributionKind: 'background' as const,
         attributionReason: 'background_agent',
+      }
+    }
+
+    if (BACKGROUND_AGENT_PATTERNS.some((pattern) => pattern.test(record.agentName))) {
+      return {
+        ...record,
+        taskId: null,
+        attributionKind: 'background' as const,
+        attributionReason: 'background_agent_pattern',
       }
     }
 
