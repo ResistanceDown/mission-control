@@ -844,7 +844,7 @@ function filterConsumedGrowthOpportunities(
 ) {
   const consumedFamilies = new Set(
     approvedPosts
-      .map((post) => String(post.variant_family_id || '').trim().toLowerCase())
+      .map((post) => String(post.variantFamilyId || post.variant_family_id || '').trim().toLowerCase())
       .filter(Boolean),
   )
   if (!consumedFamilies.size) return opportunities
@@ -865,7 +865,7 @@ function reconcileGrowthDraftCandidates(
 
   const consumedFamilies = new Set(
     approvedPosts
-      .map((post) => String(post.variant_family_id || '').trim().toLowerCase())
+      .map((post) => String(post.variantFamilyId || post.variant_family_id || '').trim().toLowerCase())
       .filter(Boolean),
   )
 
@@ -957,6 +957,7 @@ function normalizeApprovedPosts(input: unknown): Array<{
         scheduledAtPt: String(record.scheduled_at_pt || '').trim() || null,
         scheduleSource: String(record.schedule_source || '').trim() || null,
         scheduleNote: String(record.schedule_note || '').trim() || null,
+        variantFamilyId: String(record.variant_family_id || '').trim() || null,
         distributionType: String(record.distribution_type || '').trim() || undefined,
         sourceType: String(record.source_type || '').trim() || undefined,
         selectionReason: String(record.selection_reason || '').trim() || undefined,
@@ -977,6 +978,7 @@ function normalizeApprovedPosts(input: unknown): Array<{
       scheduledAtPt?: string | null
       scheduleSource?: string | null
       scheduleNote?: string | null
+      variantFamilyId?: string | null
       distributionType?: string
       sourceType?: string
       selectionReason?: string
