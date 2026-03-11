@@ -1647,18 +1647,6 @@ export function GrowthReviewPanel() {
                   </div>
                 </details>
               ) : null}
-              {watchOnlyOpportunities.length ? (
-                <details className="rounded-xl border border-white/10 bg-[#11161d] p-4">
-                  <summary className="cursor-pointer list-none text-sm font-medium text-foreground">
-                    Watchlist and account context ({watchOnlyOpportunities.length})
-                  </summary>
-                  <div className="mt-3 space-y-3">
-                    {watchOnlyOpportunities.map((opportunity) => (
-                      <OpportunityCard key={`watch-${opportunity.id}`} opportunity={opportunity} blocked />
-                    ))}
-                  </div>
-                </details>
-              ) : null}
             </div>
           </CollapsibleSection>
           </div>
@@ -1937,8 +1925,23 @@ export function GrowthReviewPanel() {
             </div>
           </CollapsibleSection>
 
-          <CollapsibleSection title="Signals" subtitle="Source quality, account targets, and watchlist actions." defaultOpen={false}>
+          <CollapsibleSection title="Signals" subtitle="Source quality, account targets, and research residue that did not make the active review lane." defaultOpen={false}>
             <div className="space-y-3">
+              {watchOnlyOpportunities.length ? (
+                <details className="rounded-xl border border-white/8 bg-black/20 p-4">
+                  <summary className="cursor-pointer list-none text-sm font-medium text-foreground">
+                    Accounts to watch ({watchOnlyOpportunities.length})
+                  </summary>
+                  <div className="mt-2 text-xs text-foreground/70">
+                    These are low-confidence watch items and account targets, not live posting opportunities.
+                  </div>
+                  <div className="mt-3 space-y-3">
+                    {watchOnlyOpportunities.map((opportunity) => (
+                      <OpportunityCard key={`watch-${opportunity.id}`} opportunity={opportunity} blocked />
+                    ))}
+                  </div>
+                </details>
+              ) : null}
               {growth.watchlistRecommendations?.length ? (
                 <div className="space-y-2">
                   {growth.watchlistRecommendations.map((account) => (
