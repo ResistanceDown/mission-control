@@ -1777,7 +1777,7 @@ export function GrowthReviewPanel() {
                         </div>
                       </div>
                       <details className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
-                        <summary className="cursor-pointer list-none text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Manual fallback: mark published</summary>
+                        <summary className="cursor-pointer list-none text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Manual fallback: link an external publish</summary>
                         <div className="mt-2 text-xs text-foreground/75">
                           Use this only if scheduler publishing fails or you posted outside Mission Control.
                         </div>
@@ -1837,7 +1837,7 @@ export function GrowthReviewPanel() {
                       </div>
                     ) : (
                       <div className="mt-2 space-y-1 text-sm text-foreground/85">
-                        <div>{publishedCount} post{publishedCount === 1 ? '' : 's'} marked published.</div>
+                        <div>{publishedCount} post{publishedCount === 1 ? '' : 's'} published or linked.</div>
                         <div>Waiting on live X metrics before the engine promotes any format, source, or timing pattern as a winner.</div>
                         {publishAttempts ? <div className="text-xs text-muted-foreground">{publishAttempts} publish update{publishAttempts === 1 ? '' : 's'} recorded so far.</div> : null}
                       </div>
@@ -1854,11 +1854,11 @@ export function GrowthReviewPanel() {
                     <div className="mt-2 text-sm text-foreground/90">
                       {syncedPublishedCount
                         ? 'Use this section to see which source types, formats, and timing patterns are actually winning. The next pack should reflect these outcomes.'
-                        : 'Once the first live post has synced results, this lane will start showing what the system is promoting or demoting based on performance.'}
+                        : 'Once the first scheduled post publishes and syncs results, this lane will start showing what the system is promoting or demoting based on performance.'}
                     </div>
                   </div>
                 </div>
-              ) : <div className="rounded-xl border border-white/10 bg-[#10161f] px-4 py-4 text-sm text-muted-foreground">No published post results yet. Once you mark one post published, the results loop should start influencing future ranking.</div>}
+              ) : <div className="rounded-xl border border-white/10 bg-[#10161f] px-4 py-4 text-sm text-muted-foreground">No published post results yet. Once the first scheduled post publishes and syncs, the results loop should start influencing future ranking.</div>}
               {publishedPosts.length ? (
                 <div className="space-y-3">
                   {publishedPosts.map((post) => (
