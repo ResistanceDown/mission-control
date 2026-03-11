@@ -2,7 +2,7 @@ import { getDatabase } from '@/lib/db'
 
 export type TokenAttributionKind = 'task' | 'background' | 'unattributed'
 
-export type TokenAttributionRecord<T extends { taskId?: number | null; agentName: string; sessionId: string; operation?: string }> = T & {
+export type TokenAttributionRecord<T extends { taskId?: number | null; agentName: string; sessionId: string; operation?: string; label?: string }> = T & {
   taskId: number | null
   attributionKind: TokenAttributionKind
   attributionReason: string
@@ -16,6 +16,11 @@ const BACKGROUND_AGENTS = new Set([
 const BACKGROUND_AGENT_OPERATIONS = new Map<string, Set<string>>([
   ['habi-control', new Set(['cron', 'channel'])],
 ])
+
+const BACKGROUND_LABEL_PATTERNS = [
+  /^Cron:\s*habi-task-ingest-/i,
+  /^Cron:\s*habi-readiness-ui-audit-/i,
+]
 
 const INFER_FROM_ACTIVE_ASSIGNMENT_AGENTS = new Set([
   'habi-control',
@@ -46,7 +51,7 @@ function loadActiveAssignments(workspaceId: number): Map<string, number[]> {
   return out
 }
 
-export function classifyTokenAttribution<T extends { taskId?: number | null; agentName: string; sessionId: string; operation?: string }>(
+export function classifyTokenAttribution<T extends { taskId?: number | null; agentName: string; sessionId: string; operation?: string; label?: string }>(
   records: T[],
   workspaceId: number,
 ): Array<TokenAttributionRecord<T>> {
@@ -79,6 +84,16 @@ export function classifyTokenAttribution<T extends { taskId?: number | null; age
         taskId: null,
         attributionKind: 'background' as const,
         attributionReason: 'background_agent_operation',
+      }
+    }
+
+    const label = String(record.label || '').trim()
+    if (label && BACKGROUND_LABEL_PATTERNS.some((pattern) => pattern.test(label))) {
+      return {
+        ...record,
+        taskId: null,
+        attributionKind: 'background' as const,
+        attributionReason: 'background_label_pattern',
       }
     }
 

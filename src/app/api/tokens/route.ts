@@ -27,6 +27,8 @@ interface TokenUsageRecord {
   taskId?: number | null
   workspaceId?: number
   duration?: number
+  label?: string
+  spawnedBy?: string | null
   attributionKind?: 'task' | 'background' | 'unattributed'
   attributionReason?: string
 }
@@ -216,6 +218,8 @@ function deriveFromSessions(workspaceId: number, providerSubscriptions: Record<s
       operation: session.chatType || 'chat',
       taskId: session.taskId ?? null,
       workspaceId,
+      label: session.label,
+      spawnedBy: session.spawnedBy,
     })
   }
 
