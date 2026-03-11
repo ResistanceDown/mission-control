@@ -40,7 +40,7 @@ import { LocalModeBanner } from '@/components/layout/local-mode-banner'
 import { UpdateBanner } from '@/components/layout/update-banner'
 import { useWebSocket } from '@/lib/websocket'
 import { useServerEvents } from '@/lib/use-server-events'
-import { buildGatewayWebSocketUrl } from '@/lib/gateway-url'
+import { buildGatewayWebSocketUrl, isLocalHost } from '@/lib/gateway-url'
 import { useMissionControl } from '@/store'
 
 export default function Home() {
@@ -114,10 +114,24 @@ export default function Home() {
         window.location.protocol === 'https:' ||
         window.location.hostname.endsWith('.ts.net')
       const proxyPath = process.env.NEXT_PUBLIC_GATEWAY_PROXY_PATH || '/gateway'
-      const gatewayTarget = explicitWsUrl ||
+      let gatewayTarget = explicitWsUrl ||
         (useProxyPath
           ? `${gatewayProto}://${window.location.host}${proxyPath}`
           : gatewayHost)
+      if (explicitWsUrl && isLocalHost(window.location.hostname)) {
+        try {
+          const parsed = new URL(explicitWsUrl)
+          if (!isLocalHost(parsed.hostname)) {
+            gatewayTarget = useProxyPath
+              ? `${gatewayProto}://${window.location.host}${proxyPath}`
+              : gatewayHost
+          }
+        } catch {
+          gatewayTarget = useProxyPath
+            ? `${gatewayProto}://${window.location.host}${proxyPath}`
+            : gatewayHost
+        }
+      }
       const wsUrl = buildGatewayWebSocketUrl({
         host: gatewayTarget,
         port: gatewayPort,

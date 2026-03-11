@@ -1,4 +1,4 @@
-function isLocalHost(host: string): boolean {
+export function isLocalHost(host: string): boolean {
   const normalized = host.toLowerCase()
   return (
     normalized === 'localhost' ||
