@@ -12,6 +12,7 @@ import { parseHabiTaskMetadata } from '@/lib/habi-task-contract'
 
 import { AgentAvatar } from '@/components/ui/agent-avatar'
 import { MarkdownRenderer } from '@/components/markdown-renderer'
+import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 
 const log = createClientLogger('TaskBoard')
 
@@ -180,6 +181,24 @@ interface TaskOutcomesResponse {
   by_agent: Record<string, TaskOutcomeSummary & { total: number; success_rate: number }>
   by_priority: Record<string, TaskOutcomeSummary & { total: number; success_rate: number }>
   common_errors: Array<{ error_message: string; count: number }>
+  trends?: Array<{
+    bucket: string
+    total: number
+    success: number
+    failed: number
+    partial: number
+    abandoned: number
+    unknown: number
+  }>
+  recent_interventions?: Array<{
+    id: number
+    assigned_to?: string | null
+    priority?: string | null
+    outcome?: string | null
+    error_message?: string | null
+    retry_count: number
+    completed_at?: number | null
+  }>
   record_count: number
 }
 
@@ -939,6 +958,57 @@ export function TaskBoardPanel() {
                 ))}
                 {!topCostTasks.length && (
                   <div className="text-sm text-muted-foreground">No task-attributed spend recorded yet.</div>
+                )}
+              </div>
+            </section>
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-[1.35fr_1fr]">
+            <section className="rounded-lg border border-border bg-card p-4">
+              <h3 className="text-sm font-semibold text-foreground">Outcome trend</h3>
+              <p className="mt-1 text-xs text-muted-foreground">Success, failure, and partial outcomes across the selected window.</p>
+              <div className="mt-4 h-64">
+                {outcomes?.trends?.length ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={outcomes.trends}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.15)" />
+                      <XAxis dataKey="bucket" tick={{ fill: 'currentColor', fontSize: 12 }} />
+                      <YAxis tick={{ fill: 'currentColor', fontSize: 12 }} />
+                      <Tooltip />
+                      <Line type="monotone" dataKey="success" stroke="#22c55e" strokeWidth={2} dot={false} />
+                      <Line type="monotone" dataKey="failed" stroke="#ef4444" strokeWidth={2} dot={false} />
+                      <Line type="monotone" dataKey="partial" stroke="#f59e0b" strokeWidth={2} dot={false} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                    No outcome trend data yet.
+                  </div>
+                )}
+              </div>
+            </section>
+
+            <section className="rounded-lg border border-border bg-card p-4">
+              <h3 className="text-sm font-semibold text-foreground">Recent interventions</h3>
+              <p className="mt-1 text-xs text-muted-foreground">Completed tasks that needed retries or landed in a non-success state.</p>
+              <div className="mt-4 space-y-2">
+                {outcomes?.recent_interventions?.length ? outcomes.recent_interventions.slice(0, 6).map((entry) => (
+                  <div key={entry.id} className="rounded-md border border-border bg-surface-1/40 px-3 py-2">
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="text-sm font-medium text-foreground">Task #{entry.id}</div>
+                      <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{entry.outcome || 'unknown'}</div>
+                    </div>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      {(entry.assigned_to || 'unassigned')} · {entry.priority || 'unknown'} priority · {entry.retry_count} retries
+                    </div>
+                    {entry.error_message ? (
+                      <div className="mt-2 text-sm text-foreground/85 line-clamp-2">{entry.error_message}</div>
+                    ) : null}
+                  </div>
+                )) : (
+                  <div className="rounded-md border border-dashed border-border/60 px-3 py-4 text-sm text-muted-foreground">
+                    No recent intervention-heavy tasks in this window.
+                  </div>
                 )}
               </div>
             </section>

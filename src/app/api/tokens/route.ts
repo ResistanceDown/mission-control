@@ -387,10 +387,14 @@ export async function GET(request: NextRequest) {
         models: Record<string, TokenStats>
         sessions: string[]
         timeline: Array<{ date: string; cost: number; tokens: number }>
+        attributed: TokenStats
+        unattributed: TokenStats
       }> = {}
 
       for (const [agent, records] of Object.entries(agentGroups)) {
         const stats = calculateStats(records)
+        const attributedRecords = records.filter((record) => Number.isFinite(record.taskId) && Number(record.taskId) > 0)
+        const unattributedRecords = records.filter((record) => !Number.isFinite(record.taskId) || Number(record.taskId) <= 0)
 
         // Per-agent model breakdown
         const modelGroups = records.reduce((acc, r) => {
@@ -419,13 +423,22 @@ export async function GET(request: NextRequest) {
           .sort(([a], [b]) => a.localeCompare(b))
           .map(([date, data]) => ({ date, ...data }))
 
-        agents[agent] = { stats, models, sessions, timeline }
+        agents[agent] = {
+          stats,
+          models,
+          sessions,
+          timeline,
+          attributed: calculateStats(attributedRecords),
+          unattributed: calculateStats(unattributedRecords),
+        }
       }
 
       return NextResponse.json({
         agents,
         timeframe,
         recordCount: filteredData.length,
+        attributedRecordCount: filteredData.filter((record) => Number.isFinite(record.taskId) && Number(record.taskId) > 0).length,
+        unattributedRecordCount: filteredData.filter((record) => !Number.isFinite(record.taskId) || Number(record.taskId) <= 0).length,
       })
     }
 
@@ -453,7 +466,25 @@ export async function GET(request: NextRequest) {
         ...report,
         timeframe,
         recordCount: filteredData.length,
-        attributedRecordCount: filteredData.filter((record) => Number.isFinite(record.taskId)).length,
+        attributedRecordCount: filteredData.filter((record) => Number.isFinite(record.taskId) && Number(record.taskId) > 0).length,
+        attributionRate: filteredData.length > 0
+          ? filteredData.filter((record) => Number.isFinite(record.taskId) && Number(record.taskId) > 0).length / filteredData.length
+          : 0,
+        topUnattributedAgents: Object.entries(
+          filteredData
+            .filter((record) => !Number.isFinite(record.taskId) || Number(record.taskId) <= 0)
+            .reduce((acc, record) => {
+              const agent = record.agentName || extractAgentName(record.sessionId)
+              if (!acc[agent]) acc[agent] = { cost: 0, requests: 0, tokens: 0 }
+              acc[agent].cost += record.cost
+              acc[agent].requests += 1
+              acc[agent].tokens += record.totalTokens
+              return acc
+            }, {} as Record<string, { cost: number; requests: number; tokens: number }>)
+        )
+          .sort((a, b) => b[1].cost - a[1].cost)
+          .slice(0, 8)
+          .map(([agent, stats]) => ({ agent, ...stats })),
       })
     }
 

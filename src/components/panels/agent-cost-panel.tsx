@@ -14,12 +14,16 @@ interface AgentCostData {
   models: Record<string, { totalTokens: number; totalCost: number; requestCount: number }>
   sessions: string[]
   timeline: Array<{ date: string; cost: number; tokens: number }>
+  attributed: { requestCount: number; totalCost: number; totalTokens: number }
+  unattributed: { requestCount: number; totalCost: number; totalTokens: number }
 }
 
 interface AgentCostsResponse {
   agents: Record<string, AgentCostData>
   timeframe: string
   recordCount: number
+  attributedRecordCount: number
+  unattributedRecordCount: number
 }
 
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d', '#ffc658', '#ff6b6b']
@@ -58,6 +62,8 @@ export function AgentCostPanel() {
 
   const totalCost = agents.reduce((sum, [, a]) => sum + a.stats.totalCost, 0)
   const totalAgents = agents.length
+  const totalAttributedRequests = agents.reduce((sum, [, a]) => sum + a.attributed.requestCount, 0)
+  const totalUnattributedRequests = agents.reduce((sum, [, a]) => sum + a.unattributed.requestCount, 0)
 
   const mostExpensive = sortedAgents[0]
   const mostEfficient = agents.length > 0
@@ -163,6 +169,23 @@ export function AgentCostPanel() {
                   ${(mostEfficient[1].stats.totalCost / Math.max(1, mostEfficient[1].stats.totalTokens) * 1000).toFixed(4)}/1K tokens
                 </div>
               )}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="bg-card border border-border rounded-lg p-6">
+              <div className="text-3xl font-bold text-foreground">{totalAttributedRequests}</div>
+              <div className="text-sm text-muted-foreground">Attributed requests</div>
+            </div>
+            <div className="bg-card border border-border rounded-lg p-6">
+              <div className="text-3xl font-bold text-foreground">{totalUnattributedRequests}</div>
+              <div className="text-sm text-muted-foreground">Unattributed requests</div>
+            </div>
+            <div className="bg-card border border-border rounded-lg p-6">
+              <div className="text-3xl font-bold text-foreground">
+                {data.recordCount > 0 ? `${Math.round((data.attributedRecordCount / data.recordCount) * 100)}%` : '0%'}
+              </div>
+              <div className="text-sm text-muted-foreground">Attribution coverage</div>
             </div>
           </div>
 
@@ -273,6 +296,18 @@ export function AgentCostPanel() {
                   {expandedAgent === name && (
                     <div className="px-4 pb-4 border-t border-border bg-secondary/30">
                       <div className="pt-3 text-sm">
+                        <div className="mb-4 grid grid-cols-2 gap-3">
+                          <div className="rounded-md border border-border bg-background/60 p-3">
+                            <div className="text-xs uppercase tracking-wide text-muted-foreground">Attributed</div>
+                            <div className="mt-1 font-medium text-foreground">{formatCost(a.attributed.totalCost)}</div>
+                            <div className="text-xs text-muted-foreground">{a.attributed.requestCount} reqs · {formatNumber(a.attributed.totalTokens)} tokens</div>
+                          </div>
+                          <div className="rounded-md border border-border bg-background/60 p-3">
+                            <div className="text-xs uppercase tracking-wide text-muted-foreground">Unattributed</div>
+                            <div className="mt-1 font-medium text-foreground">{formatCost(a.unattributed.totalCost)}</div>
+                            <div className="text-xs text-muted-foreground">{a.unattributed.requestCount} reqs · {formatNumber(a.unattributed.totalTokens)} tokens</div>
+                          </div>
+                        </div>
                         <h4 className="font-medium text-muted-foreground mb-2">Model Breakdown</h4>
                         <div className="space-y-1.5">
                           {Object.entries(a.models)

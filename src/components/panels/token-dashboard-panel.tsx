@@ -26,12 +26,40 @@ interface TrendData {
   timeframe: string
 }
 
+interface TaskCostEntry {
+  taskId: number
+  title: string
+  assignedTo?: string | null
+  stats: {
+    totalTokens: number
+    totalCost: number
+    requestCount: number
+  }
+}
+
+interface TaskCostsResponse {
+  summary: {
+    totalTokens: number
+    totalCost: number
+    requestCount: number
+  }
+  unattributed: {
+    totalTokens: number
+    totalCost: number
+    requestCount: number
+  }
+  tasks: TaskCostEntry[]
+  attributionRate: number
+  topUnattributedAgents: Array<{ agent: string; cost: number; requests: number; tokens: number }>
+}
+
 export function TokenDashboardPanel() {
   const { sessions } = useMissionControl()
 
   const [selectedTimeframe, setSelectedTimeframe] = useState<'hour' | 'day' | 'week' | 'month'>('day')
   const [usageStats, setUsageStats] = useState<UsageStats | null>(null)
   const [trendData, setTrendData] = useState<TrendData | null>(null)
+  const [taskCosts, setTaskCosts] = useState<TaskCostsResponse | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
 
@@ -58,10 +86,21 @@ export function TokenDashboardPanel() {
     }
   }, [selectedTimeframe])
 
+  const loadTaskCosts = useCallback(async () => {
+    try {
+      const response = await fetch(`/api/tokens?action=task-costs&timeframe=${selectedTimeframe}`)
+      const data = await response.json()
+      setTaskCosts(data)
+    } catch (error) {
+      log.error('Failed to load task cost data:', error)
+    }
+  }, [selectedTimeframe])
+
   useEffect(() => {
     loadUsageStats()
     loadTrendData()
-  }, [loadUsageStats, loadTrendData])
+    loadTaskCosts()
+  }, [loadUsageStats, loadTrendData, loadTaskCosts])
 
   const exportData = async (format: 'json' | 'csv') => {
     setIsExporting(true)
@@ -310,6 +349,56 @@ export function TokenDashboardPanel() {
             </div>
           </div>
 
+          {taskCosts && (
+            <div className="grid grid-cols-1 lg:grid-cols-[1.4fr_1fr] gap-6">
+              <div className="bg-card border border-border rounded-lg p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h2 className="text-xl font-semibold">Task Attribution Health</h2>
+                    <p className="text-sm text-muted-foreground">How much token usage is attached to real Habi work.</p>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-2xl font-bold text-foreground">{(taskCosts.attributionRate * 100).toFixed(0)}%</div>
+                    <div className="text-xs text-muted-foreground">Attributed usage</div>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="rounded-lg border border-border bg-secondary/30 p-4">
+                    <div className="text-lg font-semibold text-foreground">{formatCost(taskCosts.summary.totalCost)}</div>
+                    <div className="text-xs text-muted-foreground">Task-attributed spend</div>
+                  </div>
+                  <div className="rounded-lg border border-border bg-secondary/30 p-4">
+                    <div className="text-lg font-semibold text-foreground">{formatCost(taskCosts.unattributed.totalCost)}</div>
+                    <div className="text-xs text-muted-foreground">Unattributed spend</div>
+                  </div>
+                  <div className="rounded-lg border border-border bg-secondary/30 p-4">
+                    <div className="text-lg font-semibold text-foreground">{formatNumber(taskCosts.unattributed.requestCount)}</div>
+                    <div className="text-xs text-muted-foreground">Unattributed requests</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-card border border-border rounded-lg p-6">
+                <h2 className="text-xl font-semibold mb-4">Top Unattributed Agents</h2>
+                <div className="space-y-3">
+                  {taskCosts.topUnattributedAgents.length === 0 ? (
+                    <div className="text-sm text-muted-foreground">All current usage is attributed to tasks.</div>
+                  ) : (
+                    taskCosts.topUnattributedAgents.slice(0, 5).map((entry) => (
+                      <div key={entry.agent} className="flex items-center justify-between gap-4 rounded-lg border border-border bg-secondary/20 px-3 py-2">
+                        <div className="min-w-0">
+                          <div className="font-medium text-foreground truncate">{entry.agent}</div>
+                          <div className="text-xs text-muted-foreground">{formatNumber(entry.requests)} requests · {formatNumber(entry.tokens)} tokens</div>
+                        </div>
+                        <div className="text-sm font-medium text-foreground">{formatCost(entry.cost)}</div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Charts Section */}
           <div className="grid lg:grid-cols-2 gap-6">
             {/* Usage Trends Chart */}
@@ -428,6 +517,37 @@ export function TokenDashboardPanel() {
               Export token usage data for analysis. Includes detailed usage records, model statistics, and cost breakdowns.
             </p>
           </div>
+
+          {taskCosts && (
+            <div className="bg-card border border-border rounded-lg p-6">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h2 className="text-xl font-semibold">Top Costly Tasks</h2>
+                  <p className="text-sm text-muted-foreground">Highest spend tasks in the selected timeframe.</p>
+                </div>
+              </div>
+              <div className="space-y-3">
+                {taskCosts.tasks.length === 0 ? (
+                  <div className="text-sm text-muted-foreground">No task-attributed token usage yet.</div>
+                ) : (
+                  taskCosts.tasks.slice(0, 8).map((task) => (
+                    <div key={task.taskId} className="flex items-center justify-between gap-4 rounded-lg border border-border bg-secondary/20 px-4 py-3">
+                      <div className="min-w-0">
+                        <div className="font-medium text-foreground truncate">{task.title}</div>
+                        <div className="text-xs text-muted-foreground">
+                          Task #{task.taskId}{task.assignedTo ? ` · ${task.assignedTo}` : ''} · {formatNumber(task.stats.requestCount)} requests
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="font-medium text-foreground">{formatCost(task.stats.totalCost)}</div>
+                        <div className="text-xs text-muted-foreground">{formatNumber(task.stats.totalTokens)} tokens</div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Performance Insights */}
           {performanceMetrics && (

@@ -5,6 +5,8 @@ import { logger } from '@/lib/logger'
 
 type Outcome = 'success' | 'failed' | 'partial' | 'abandoned'
 
+type OutcomeBucket = ReturnType<typeof outcomeBuckets>
+
 function resolveSince(timeframe: string): number {
   const now = Math.floor(Date.now() / 1000)
   switch (timeframe) {
@@ -28,6 +30,14 @@ function outcomeBuckets() {
     abandoned: 0,
     unknown: 0,
   }
+}
+
+function formatTrendBucket(timestampSeconds: number, timeframe: string): string {
+  const date = new Date(timestampSeconds * 1000)
+  if (timeframe === 'day') {
+    return `${String(date.getHours()).padStart(2, '0')}:00`
+  }
+  return date.toISOString().slice(0, 10)
 }
 
 export async function GET(request: NextRequest) {
@@ -78,6 +88,16 @@ export async function GET(request: NextRequest) {
     const byAgent: Record<string, ReturnType<typeof outcomeBuckets> & { total: number; success_rate: number }> = {}
     const byPriority: Record<string, ReturnType<typeof outcomeBuckets> & { total: number; success_rate: number }> = {}
     const errorMap = new Map<string, number>()
+    const trendMap = new Map<string, OutcomeBucket & { total: number }>()
+    const recentInterventions: Array<{
+      id: number
+      assigned_to: string | null
+      priority: string | null
+      outcome: string | null
+      error_message: string | null
+      retry_count: number
+      completed_at: number | null
+    }> = []
 
     let totalRetryCount = 0
     let totalResolutionSeconds = 0
@@ -88,6 +108,7 @@ export async function GET(request: NextRequest) {
       const assignedTo = row.assigned_to || 'unassigned'
       const priority = row.priority || 'unknown'
       const retryCount = Number.isFinite(row.retry_count) ? Number(row.retry_count) : 0
+      const completedAt = Number.isFinite(row.completed_at) ? Number(row.completed_at) : null
 
       if (outcome !== 'unknown') summary.with_outcome += 1
       if (outcome in summary.by_outcome) {
@@ -118,6 +139,20 @@ export async function GET(request: NextRequest) {
 
       totalRetryCount += retryCount
 
+      if (completedAt) {
+        const trendKey = formatTrendBucket(completedAt, timeframe)
+        if (!trendMap.has(trendKey)) {
+          trendMap.set(trendKey, { ...outcomeBuckets(), total: 0 })
+        }
+        const bucket = trendMap.get(trendKey)!
+        bucket.total += 1
+        if (outcome in bucket) {
+          bucket[outcome as keyof OutcomeBucket] += 1
+        } else {
+          bucket.unknown += 1
+        }
+      }
+
       if (row.completed_at && row.created_at && row.completed_at >= row.created_at) {
         totalResolutionSeconds += (row.completed_at - row.created_at)
         resolutionCount += 1
@@ -126,6 +161,18 @@ export async function GET(request: NextRequest) {
       const errorMessage = (row.error_message || '').trim()
       if (errorMessage) {
         errorMap.set(errorMessage, (errorMap.get(errorMessage) || 0) + 1)
+      }
+
+      if (retryCount > 0 || errorMessage || outcome === 'failed' || outcome === 'partial' || outcome === 'abandoned') {
+        recentInterventions.push({
+          id: row.id,
+          assigned_to: row.assigned_to ?? null,
+          priority: row.priority ?? null,
+          outcome: row.outcome ?? null,
+          error_message: row.error_message ?? null,
+          retry_count: retryCount,
+          completed_at: completedAt,
+        })
       }
     }
 
@@ -148,12 +195,30 @@ export async function GET(request: NextRequest) {
       .slice(0, 10)
       .map(([error_message, count]) => ({ error_message, count }))
 
+    const trends = [...trendMap.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([bucket, stats]) => ({
+        bucket,
+        total: stats.total,
+        success: stats.success,
+        failed: stats.failed,
+        partial: stats.partial,
+        abandoned: stats.abandoned,
+        unknown: stats.unknown,
+      }))
+
+    const recent_interventions = recentInterventions
+      .sort((a, b) => Number(b.completed_at || 0) - Number(a.completed_at || 0))
+      .slice(0, 10)
+
     return NextResponse.json({
       timeframe,
       summary,
       by_agent: byAgent,
       by_priority: byPriority,
       common_errors: commonErrors,
+      trends,
+      recent_interventions,
       record_count: rows.length,
     })
   } catch (error) {
