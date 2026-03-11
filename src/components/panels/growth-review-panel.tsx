@@ -908,7 +908,7 @@ function DraftCard({
             disabled={saving}
             className="rounded-lg border border-cyan-500/20 px-3 py-2 text-xs font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/10 disabled:opacity-60"
           >
-            Rewrite With Direction
+            {saving ? 'Rewriting…' : 'Rewrite With Direction'}
           </button>
         </div>
         <textarea
@@ -1588,7 +1588,7 @@ export function GrowthReviewPanel() {
                       disabled={actionState.status === 'saving'}
                       className="rounded-lg border border-cyan-500/20 px-3 py-2 text-xs font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/10 disabled:opacity-60"
                     >
-                      Rewrite With Direction
+                      {actionState.status === 'saving' ? 'Rewriting…' : 'Rewrite With Direction'}
                     </button>
                   </div>
                 </>
@@ -1623,8 +1623,8 @@ export function GrowthReviewPanel() {
                     saving={actionState.status === 'saving'}
                   />
                   <OpportunityLane
-                    title="Standalone ideas"
-                    subtitle="Only shown when they clear the bar after reactive moves are ranked."
+                    title="Fallback original posts"
+                    subtitle="These only appear when reply and quote opportunities do not clear the bar in the current research window."
                     opportunities={standaloneOpportunities}
                     feedbackDrafts={opportunityFeedback}
                     onFeedbackChange={(opportunityId, value) => setOpportunityFeedback((current) => ({ ...current, [opportunityId]: value }))}

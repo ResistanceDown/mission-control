@@ -222,6 +222,24 @@ function trimSentence(value: unknown) {
   return String(value || '').replace(/\s+/g, ' ').trim().replace(/[.?!]+$/, '')
 }
 
+function ensureTerminalPeriod(value: string) {
+  const trimmed = trimSentence(value)
+  return trimmed ? `${trimmed}.` : ''
+}
+
+function buildSharperHook(text: string) {
+  const trimmed = trimSentence(text)
+  if (!trimmed) return ''
+  const lower = trimmed.charAt(0).toLowerCase() + trimmed.slice(1)
+  return `The failure usually starts earlier than people think: ${lower}.`
+}
+
+function buildSourceSpecificRewrite(sourceLead: string, fallback: string) {
+  const lead = trimSentence(sourceLead)
+  if (!lead) return ensureTerminalPeriod(fallback)
+  return `${lead} — but the real break is usually when the plan takes more interpretation than the work itself.`
+}
+
 function buildDraftPackMarkdown(weekId: string, drafts: Array<Record<string, unknown>>) {
   const lines = [
     '# M92 Draft Pack',
@@ -271,7 +289,10 @@ function rewriteDraftText(draft: Record<string, any>, feedback: string) {
     if (/trust|control|unsupervised|delegate|assistant/.test(sourceContext)) {
       return 'Capability is not the line. The line is whether the system stays legible once it changes the plan without asking first.'
     }
-    return `The real issue is usually simpler than the post makes it sound: ${currentText.charAt(0).toLowerCase()}${currentText.slice(1)}.`
+    const sharper = buildSharperHook(currentText)
+    return sharper && normalizeFeedbackText(sharper) !== normalizeFeedbackText(currentText)
+      ? sharper
+      : 'The real issue is usually simpler than the post makes it sound: the plan starts costing more interpretation than the work itself.'
   }
 
   if (normalizedFeedback.includes('use source context') || normalizedFeedback.includes('source context')) {
@@ -291,7 +312,7 @@ function rewriteDraftText(draft: Record<string, any>, feedback: string) {
       return 'That is usually the real line. People accept more automation when they can still understand why the plan changed and take control back quickly.'
     }
     if (sourceLead) {
-      return `${sourceLead.replace(/[.?!]+$/, '')} matters less than where the plan started costing more interpretation than it saved.`
+      return buildSourceSpecificRewrite(sourceLead, currentText)
     }
   }
 
@@ -314,11 +335,12 @@ function rewriteDraftText(draft: Record<string, any>, feedback: string) {
   }
 
   if (normalizedFeedback.includes('less product-y') || normalizedFeedback.includes('too product-y')) {
-    return currentText
+    const lessProduct = currentText
       .replace(/\b(product|tool|system)\b/gi, 'approach')
       .replace(/\bHabi\b/gi, '')
       .replace(/\s{2,}/g, ' ')
-      .trim() + '.'
+      .trim()
+    return ensureTerminalPeriod(lessProduct)
   }
 
   if (normalizedFeedback.includes('good direction, rewrite') || normalizedFeedback.includes('rewrite')) {
@@ -334,9 +356,13 @@ function rewriteDraftText(draft: Record<string, any>, feedback: string) {
     if (distributionType === 'quote') {
       return 'The stronger product move is not more automation in theory. It is a plan people can still read and trust under a messy week.'
     }
+    const rewritten = buildSharperHook(currentText)
+    if (rewritten && normalizeFeedbackText(rewritten) !== normalizeFeedbackText(currentText)) {
+      return rewritten
+    }
   }
 
-  return `${currentText}.`
+  return buildSharperHook(currentText) || ensureTerminalPeriod(currentText)
 }
 
 function nextDraftNumber(drafts: Array<Record<string, any>>) {
