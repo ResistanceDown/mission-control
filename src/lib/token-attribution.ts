@@ -14,7 +14,7 @@ const BACKGROUND_AGENTS = new Set([
 ])
 
 const BACKGROUND_AGENT_OPERATIONS = new Map<string, Set<string>>([
-  ['habi-control', new Set(['cron', 'discord'])],
+  ['habi-control', new Set(['cron', 'channel'])],
 ])
 
 const INFER_FROM_ACTIVE_ASSIGNMENT_AGENTS = new Set([

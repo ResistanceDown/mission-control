@@ -81,8 +81,18 @@ function inferSessionTaskId(agentName: string, sessionMeta: Record<string, any>)
     if (cached && cached.mtimeMs === stats.mtimeMs) return cached.taskId
 
     const raw = fs.readFileSync(transcriptPath, 'utf-8')
-    const matches = [...raw.matchAll(/Task:\s*#(\d+)/g)]
-    const taskId = matches.length > 0 ? Number(matches[matches.length - 1][1]) : null
+    const directMatches = [...raw.matchAll(/Task:\s*#(\d+)/g)]
+    let taskId = directMatches.length > 0 ? Number(directMatches[directMatches.length - 1][1]) : null
+
+    if (!taskId) {
+      const refsMatch = [...raw.matchAll(/Task refs:\s*([^\n]+)/g)]
+      const lastRefs = refsMatch.length > 0 ? refsMatch[refsMatch.length - 1][1] : null
+      if (lastRefs) {
+        const ids = [...lastRefs.matchAll(/#?(\d+)/g)].map((match) => Number(match[1])).filter((value) => Number.isFinite(value) && value > 0)
+        if (ids.length > 0) taskId = ids[ids.length - 1]
+      }
+    }
+
     sessionTaskIdCache.set(transcriptPath, { mtimeMs: stats.mtimeMs, taskId })
     return taskId
   } catch {
