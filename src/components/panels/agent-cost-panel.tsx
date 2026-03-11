@@ -68,6 +68,9 @@ export function AgentCostPanel() {
   const worstAttributionAgent = sortedAgents
     .filter(([, a]) => a.unattributed.requestCount > 0)
     .sort(([, a], [, b]) => b.unattributed.totalCost - a.unattributed.totalCost)[0]
+  const nextAttributionAgents = sortedAgents
+    .filter(([, a]) => a.unattributed.requestCount > 0)
+    .slice(0, 3)
 
   const mostExpensive = sortedAgents[0]
   const mostEfficient = agents.length > 0
@@ -197,6 +200,28 @@ export function AgentCostPanel() {
             <div className="bg-card border border-border rounded-lg p-4 text-sm text-muted-foreground">
               <span className="font-medium text-foreground">Attribution hint:</span>{' '}
               {worstAttributionAgent[0]} is currently the biggest unattributed spender. Prioritize task-id attribution in that agent's session/task reporting path.
+            </div>
+          )}
+
+          {nextAttributionAgents.length > 0 && (
+            <div className="bg-card border border-border rounded-lg p-4">
+              <h2 className="text-sm font-semibold text-foreground">Attribution priority queue</h2>
+              <div className="mt-3 space-y-2">
+                {nextAttributionAgents.map(([name, agent], index) => (
+                  <div key={name} className="flex items-center justify-between rounded-md border border-border bg-secondary/20 px-3 py-2 text-sm">
+                    <div>
+                      <div className="font-medium text-foreground">#{index + 1} {name}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {agent.unattributed.requestCount} unattributed requests · {formatNumber(agent.unattributed.totalTokens)} tokens
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="font-medium text-foreground">{formatCost(agent.unattributed.totalCost)}</div>
+                      <div className="text-xs text-muted-foreground">needs task_id wiring</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 

@@ -683,6 +683,12 @@ export function TaskBoardPanel() {
       if (b.success_rate !== a.success_rate) return b.success_rate - a.success_rate
       return b.total - a.total
     })
+  const regressionBaseline = regression?.windows?.baseline
+  const regressionPost = regression?.windows?.post
+  const interventionDeltaPoints = regression ? regression.deltas.intervention_rate * 100 : null
+  const latencyDeltaMinutes = regression?.deltas.p95_latency_seconds != null
+    ? regression.deltas.p95_latency_seconds / 60
+    : null
   const unattributedShare = taskCosts && (taskCosts.summary.requestCount + taskCosts.unattributed.requestCount) > 0
     ? taskCosts.unattributed.requestCount / (taskCosts.summary.requestCount + taskCosts.unattributed.requestCount)
     : 0
@@ -691,6 +697,15 @@ export function TaskBoardPanel() {
     : unattributedShare > 0.1
       ? 'A meaningful share of spend is still unattributed. Check agent/session flows that write token usage without a task ID.'
       : 'Task attribution coverage is healthy.'
+  const regressionGuidance = !regression
+    ? 'Regression comparison will appear once there is enough completed-task history in both windows.'
+    : latencyDeltaMinutes == null && interventionDeltaPoints == null
+      ? 'Not enough comparable samples yet. Keep collecting completed tasks in both windows.'
+      : latencyDeltaMinutes != null && latencyDeltaMinutes > 10
+        ? 'Latency has drifted up materially. Inspect recent intervention-heavy tasks first.'
+        : interventionDeltaPoints != null && interventionDeltaPoints > 5
+          ? 'Intervention rate is rising. Check retry-heavy and partial tasks before queue throughput slips further.'
+          : 'Execution quality is stable relative to the baseline window.'
 
   // Drag and drop handlers
   const handleDragStart = (e: React.DragEvent, task: Task) => {
@@ -1001,6 +1016,62 @@ export function TaskBoardPanel() {
                   <span className="text-muted-foreground">Unattributed usage</span>
                   <span className="font-semibold text-foreground">{taskCosts?.unattributed.requestCount ?? '—'}</span>
                 </div>
+              </div>
+            </section>
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+            <section className="min-w-0 rounded-lg border border-border bg-card p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-foreground">Regression comparison</h3>
+                  <p className="mt-1 text-xs text-muted-foreground">Current window against the selected baseline range.</p>
+                </div>
+                <div className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                  {regressionLookbackDays}d baseline
+                </div>
+              </div>
+              <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                <div className="rounded-md border border-border bg-surface-1/40 px-3 py-3">
+                  <div className="text-xs uppercase tracking-wide text-muted-foreground">Baseline p95</div>
+                  <div className="mt-1 text-lg font-semibold text-foreground">
+                    {regressionBaseline?.latency_seconds.p95 != null ? `${Math.round(regressionBaseline.latency_seconds.p95 / 60)}m` : '—'}
+                  </div>
+                  <div className="mt-1 text-[11px] text-muted-foreground">{regressionBaseline?.sample_size ?? 0} completed tasks</div>
+                </div>
+                <div className="rounded-md border border-border bg-surface-1/40 px-3 py-3">
+                  <div className="text-xs uppercase tracking-wide text-muted-foreground">Current p95</div>
+                  <div className="mt-1 text-lg font-semibold text-foreground">
+                    {regressionPost?.latency_seconds.p95 != null ? `${Math.round(regressionPost.latency_seconds.p95 / 60)}m` : '—'}
+                  </div>
+                  <div className="mt-1 text-[11px] text-muted-foreground">{regressionPost?.sample_size ?? 0} completed tasks</div>
+                </div>
+                <div className="rounded-md border border-border bg-surface-1/40 px-3 py-3">
+                  <div className="text-xs uppercase tracking-wide text-muted-foreground">Latency delta</div>
+                  <div className={`mt-1 text-lg font-semibold ${latencyDeltaMinutes != null && latencyDeltaMinutes > 0 ? 'text-amber-400' : 'text-foreground'}`}>
+                    {latencyDeltaMinutes != null ? `${latencyDeltaMinutes > 0 ? '+' : ''}${Math.round(latencyDeltaMinutes)}m` : '—'}
+                  </div>
+                  <div className="mt-1 text-[11px] text-muted-foreground">p95 change vs baseline</div>
+                </div>
+                <div className="rounded-md border border-border bg-surface-1/40 px-3 py-3">
+                  <div className="text-xs uppercase tracking-wide text-muted-foreground">Intervention delta</div>
+                  <div className={`mt-1 text-lg font-semibold ${interventionDeltaPoints != null && interventionDeltaPoints > 0 ? 'text-amber-400' : 'text-foreground'}`}>
+                    {interventionDeltaPoints != null ? `${interventionDeltaPoints > 0 ? '+' : ''}${interventionDeltaPoints.toFixed(1)} pts` : '—'}
+                  </div>
+                  <div className="mt-1 text-[11px] text-muted-foreground">retry/error rate change</div>
+                </div>
+              </div>
+            </section>
+
+            <section className="min-w-0 rounded-lg border border-border bg-card p-4">
+              <h3 className="text-sm font-semibold text-foreground">Diagnostics readout</h3>
+              <div className="mt-4 rounded-md border border-dashed border-border/60 bg-surface-1/20 px-3 py-3 text-sm text-muted-foreground">
+                {regressionGuidance}
+              </div>
+              <div className="mt-3 space-y-2 text-xs text-muted-foreground">
+                <div>Baseline interventions: {regressionBaseline ? `${(regressionBaseline.interventions.rate * 100).toFixed(1)}%` : '—'}</div>
+                <div>Current interventions: {regressionPost ? `${(regressionPost.interventions.rate * 100).toFixed(1)}%` : '—'}</div>
+                <div>Unattributed usage share: {(unattributedShare * 100).toFixed(0)}%</div>
               </div>
             </section>
           </div>

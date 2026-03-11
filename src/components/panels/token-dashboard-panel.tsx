@@ -282,6 +282,20 @@ export function TokenDashboardPanel() {
         ? 'Some spend is still unattributed. Review agent/session flows that write token usage without a task ID.'
         : 'Task attribution coverage is healthy.'
     : null
+  const worstUnattributedAgent = taskCosts?.topUnattributedAgents?.[0] || null
+  const attributionChecklist = taskCosts
+    ? [
+        worstUnattributedAgent
+          ? `Patch ${worstUnattributedAgent.agent} to emit task_id on token usage writes first.`
+          : null,
+        taskCosts.unattributed.requestCount > 0
+          ? 'Check background session flows that are writing usage outside a task lifecycle.'
+          : null,
+        taskCosts.attributionRate < 0.9
+          ? 'Verify task creation, assignment, and completion paths all preserve task_id through agent execution.'
+          : null,
+      ].filter(Boolean) as string[]
+    : []
 
   return (
     <div className="p-6 space-y-6">
@@ -406,6 +420,19 @@ export function TokenDashboardPanel() {
                 {attributionAlert && (
                   <div className="mt-4 rounded-lg border border-dashed border-border bg-secondary/10 px-3 py-3 text-xs text-muted-foreground">
                     {attributionAlert}
+                  </div>
+                )}
+                {attributionChecklist.length > 0 && (
+                  <div className="mt-4 rounded-lg border border-border bg-secondary/20 p-4">
+                    <h3 className="text-sm font-semibold text-foreground">Remediation</h3>
+                    <div className="mt-3 space-y-2 text-xs text-muted-foreground">
+                      {attributionChecklist.map((item) => (
+                        <div key={item} className="flex gap-2">
+                          <span className="text-foreground">•</span>
+                          <span>{item}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>
