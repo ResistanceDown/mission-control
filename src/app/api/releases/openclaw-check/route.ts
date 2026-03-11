@@ -47,8 +47,8 @@ function resolveOpenclawBin(): string {
   return '/opt/homebrew/bin/openclaw'
 }
 
-function parseInstalledVersion(stdout: string): string {
-  const match = stdout.match(/OpenClaw\s+([0-9]+\.[0-9]+\.[0-9]+)/i)
+function parseInstalledVersion(output: string): string {
+  const match = output.match(/OpenClaw\s+([0-9]+\.[0-9]+\.[0-9]+)/i)
   return match?.[1] || ''
 }
 
@@ -65,7 +65,7 @@ export async function GET(request: Request) {
       timeout: 6000,
       maxBuffer: 256 * 1024,
     })
-    const currentVersion = parseInstalledVersion(versionResult.stdout || '')
+    const currentVersion = parseInstalledVersion(`${versionResult.stdout || ''}\n${versionResult.stderr || ''}`)
 
     const { stdout } = await execFileAsync(openclawBin, ['update', '--dry-run', '--json'], {
       cwd: safeCwd,
