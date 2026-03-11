@@ -385,23 +385,6 @@ function cx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(' ')
 }
 
-function MetricCard({ label, value, subtitle, accent = 'cyan' }: { label: string; value: string | number; subtitle?: string; accent?: 'cyan' | 'emerald' | 'amber' | 'violet' | 'rose' }) {
-  const accentMap = {
-    cyan: 'border-cyan-500/20 bg-cyan-500/8 text-cyan-100',
-    emerald: 'border-emerald-500/20 bg-emerald-500/8 text-emerald-100',
-    amber: 'border-amber-500/20 bg-amber-500/8 text-amber-100',
-    violet: 'border-violet-500/20 bg-violet-500/8 text-violet-100',
-    rose: 'border-rose-500/20 bg-rose-500/8 text-rose-100',
-  }
-  return (
-    <div className={cx('rounded-xl border px-3 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]', accentMap[accent])}>
-      <div className="text-[11px] uppercase tracking-[0.12em] text-current/70">{label}</div>
-      <div className="mt-1 text-2xl font-semibold text-foreground">{value}</div>
-      {subtitle ? <div className="mt-1 text-[11px] text-foreground/60">{subtitle}</div> : null}
-    </div>
-  )
-}
-
 function FieldChip({ children }: { children: ReactNode }) {
   return <span className="rounded-full border border-white/10 bg-black/20 px-2.5 py-1 text-[11px] text-muted-foreground">{children}</span>
 }
@@ -492,24 +475,6 @@ function isNonReplyablePublishError(message?: string | null) {
     text.includes('not been mentioned or otherwise engaged') ||
     text.includes('only people mentioned') ||
     text.includes('only users mentioned')
-  )
-}
-
-function QueueBadge({ label, value, tone = 'neutral' }: { label: string; value: string; tone?: 'neutral' | 'urgent' | 'ready' | 'active' }) {
-  const toneClass =
-    tone === 'urgent'
-      ? 'border-rose-500/20 bg-rose-500/8 text-rose-100'
-      : tone === 'ready'
-        ? 'border-emerald-500/20 bg-emerald-500/8 text-emerald-100'
-        : tone === 'active'
-          ? 'border-cyan-500/20 bg-cyan-500/8 text-cyan-100'
-          : 'border-white/10 bg-black/20 text-foreground/80'
-
-  return (
-    <div className={cx('rounded-xl border px-3 py-3', toneClass)}>
-      <div className="text-[11px] uppercase tracking-[0.12em] text-current/70">{label}</div>
-      <div className="mt-1 text-sm font-medium text-foreground">{value}</div>
-    </div>
   )
 }
 
@@ -1173,7 +1138,9 @@ export function GrowthReviewPanel() {
     })
   }, [reactiveOpportunities])
   const retryableFailedPosts = approvedPosts.filter((post) => post.status === 'failed' && !isNonReplyablePublishError(post.publishError))
-  const readyPosts = approvedPosts.filter((post) => post.status === 'approved').concat(retryableFailedPosts)
+  const readyApprovedPosts = approvedPosts.filter((post) => post.status === 'approved')
+  const failedPosts = retryableFailedPosts
+  const readyPosts = readyApprovedPosts.concat(failedPosts)
   const scheduledPosts = useMemo(() => approvedPosts.filter((post) => post.status === 'scheduled'), [approvedPosts])
   const publishedPosts = approvedPosts.filter((post) => post.status === 'published')
   const candidateCount = growth?.stateIntegrity?.draftCandidateCount ?? growth?.draftCandidates.length ?? 0
@@ -1181,14 +1148,10 @@ export function GrowthReviewPanel() {
   const readyToSchedule = readyPosts.length
   const scheduledCount = scheduledPosts.length
   const lowConfidenceCount = growth?.freshness?.lowConfidenceClusters?.length ?? 0
-  const topReplyCount = selectedOpportunities.filter((opportunity) => opportunity.distributionType === 'reply').length
   const publishedCount = publishedPosts.length || growth?.resultsSummary?.postedCount || 0
-  const researchRunCount = Number(growth?.researchHistory?.runs?.length || 0)
   const syncedPublishedCount = Number(growth?.resultsSummary?.syncedPostCount || growth?.strategyMemory?.performance?.syncedPostCount || 0)
   const publishAttempts = Number(growth?.resultsSummary?.publishAttempts || growth?.strategyMemory?.performance?.publishAttempts || 0)
   const todayBestMove = growth?.strategy?.todayBestMove || null
-  const weeklyMix = growth?.strategy?.weeklyMixRecommendation || null
-  const distributionPriority = growth?.strategy?.distributionPriority?.length ? growth.strategy.distributionPriority.join(' → ') : 'reply → quote → original'
   const topOpportunity = useMemo(() => {
     const ranked = [...selectedOpportunities].sort((left, right) => {
       const leftReactiveBoost = left.distributionType === 'reply' ? 8 : left.distributionType === 'quote' ? 4 : 0
@@ -1228,6 +1191,18 @@ export function GrowthReviewPanel() {
         : topOpportunity
           ? 'Generate drafts from the current top opportunity'
           : 'Refresh research or select opportunities'
+  const growthStatus = growth?.externalStatus || 'unknown'
+  const researchStatusLine = lowConfidenceCount
+    ? `${growthStatus} • ${opportunityCount} selected • ${lowConfidenceCount} low-confidence cluster${lowConfidenceCount === 1 ? '' : 's'}`
+    : `${growthStatus} • ${opportunityCount} selected`
+  const topDraftSummary = topDraft
+    ? `${topDraft.distribution_type || 'draft'}${topDraft.source_account ? ` • ${topDraft.source_account}` : ''}`
+    : 'No draft yet'
+  const nextScheduledSummary = nextScheduledPost
+    ? `${nextScheduledPost.distributionType || 'scheduled'} • ${formatPacificTime(nextScheduledPost.scheduledAtPt || nextScheduledPost.scheduledAt || null)}`
+    : readyToSchedule
+      ? `${readyToSchedule} ready to publish`
+      : 'Nothing scheduled'
 
   const patchAccountTargetState = useCallback((usernameInput: string, nextState: 'watch' | 'prioritize' | 'mute' | 'engage_this_week', note: string) => {
     const normalized = displayUsername(usernameInput).replace(/^@/, '').trim().toLowerCase()
@@ -1354,7 +1329,7 @@ export function GrowthReviewPanel() {
         <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
           <div>
             <div className="text-sm font-semibold text-foreground">Growth</div>
-            <div className="mt-1 max-w-3xl text-sm text-muted-foreground">Use this page like an editorial desk: refresh listening, choose the right participation move, approve exact post text, schedule it, then learn from outcomes.</div>
+            <div className="mt-1 max-w-3xl text-sm text-muted-foreground">Review the next move, decide on exact post text, then push it into the publishing queue.</div>
           </div>
           <div className="flex flex-wrap gap-2">
             <button onClick={() => void runGrowthAction('refresh_research')} disabled={actionState.status === 'saving'} className="rounded-lg bg-cyan-500/15 px-3 py-2 text-xs font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/20 disabled:opacity-60">Refresh Research</button>
@@ -1364,42 +1339,9 @@ export function GrowthReviewPanel() {
           </div>
         </div>
 
-        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
-          <MetricCard label="Research" value={growth.externalStatus} subtitle={formatPacificTime(growth.freshness?.lastXPullAt || growth.researchGeneratedAt || null)} accent="cyan" />
-          <MetricCard label="Research memory" value={researchRunCount} subtitle="stacked listening runs" accent="cyan" />
-          <MetricCard label="Opportunities" value={opportunityCount} subtitle="Selected participation moves" accent="violet" />
-          <MetricCard label="Candidates" value={candidateCount} subtitle="Drafts from selected opportunities" accent="violet" />
-          <MetricCard label="Ready to schedule" value={readyToSchedule} subtitle="Approved posts and transient failures" accent="emerald" />
-          <MetricCard label="Reply opportunities" value={topReplyCount} subtitle="Best for follower growth" accent="amber" />
-          <MetricCard label="Published" value={publishedCount} subtitle={growth.strategy?.accountStage || 'Tracked in results loop'} accent={publishedCount ? 'emerald' : lowConfidenceCount ? 'rose' : 'cyan'} />
-        </div>
-
-        <div className="mt-4 grid gap-3 lg:grid-cols-4">
-          <QueueBadge
-            label="Waiting on you"
-            value={readyToSchedule ? `${readyToSchedule} approved post${readyToSchedule === 1 ? '' : 's'} ready to schedule` : candidateCount ? `${candidateCount} candidate${candidateCount === 1 ? '' : 's'} ready for review` : 'Refresh research or generate a new pack'}
-            tone={readyToSchedule ? 'ready' : candidateCount ? 'active' : 'neutral'}
-          />
-          <QueueBadge
-            label="Best next move"
-            value={topMoveActionText}
-            tone="active"
-          />
-          <QueueBadge
-            label="Scheduling lane"
-            value={scheduledCount ? `${scheduledCount} post${scheduledCount === 1 ? '' : 's'} scheduled` : 'Nothing scheduled yet'}
-            tone={scheduledCount ? 'ready' : 'neutral'}
-          />
-          <QueueBadge
-            label="Research risk"
-            value={lowConfidenceCount ? `${lowConfidenceCount} low-confidence cluster${lowConfidenceCount === 1 ? '' : 's'}` : 'No major confidence warnings'}
-            tone={lowConfidenceCount ? 'urgent' : 'neutral'}
-          />
-        </div>
-
         <div className="mt-4 rounded-xl border border-cyan-500/15 bg-gradient-to-br from-cyan-500/8 via-surface-2/80 to-surface-2/80 p-4">
-          <div className="grid gap-4 xl:grid-cols-[1.35fr_0.65fr]">
-            <div className="max-w-3xl">
+          <div className="grid gap-4 xl:grid-cols-[1.45fr_0.55fr]">
+            <div className="max-w-4xl">
               <div className="text-[11px] uppercase tracking-[0.14em] text-cyan-100/70">Today’s best move</div>
               <div className="mt-1 text-base font-semibold text-foreground">
                 {topMoveTitle}
@@ -1443,16 +1385,19 @@ export function GrowthReviewPanel() {
               </div>
             </div>
             <div className="grid gap-3">
-              <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3 text-xs text-muted-foreground">
-                {actionState.message || topMoveActionText}
+              <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
+                <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Research status</div>
+                <div className="mt-2 text-sm text-foreground/90">{researchStatusLine}</div>
+                <div className="mt-1 text-xs text-muted-foreground">{formatPacificTime(growth.freshness?.lastXPullAt || growth.researchGeneratedAt || null)}</div>
               </div>
               <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
-                <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Strategy lane</div>
-                <div className="mt-2 space-y-2 text-xs text-foreground/85">
-                  {growth.strategy?.cadenceModel ? <div>Cadence: {growth.strategy.cadenceModel}</div> : null}
-                  <div>Priority: {distributionPriority}</div>
-                  {growth.strategy?.prioritizedAccounts?.length ? <div>Focus accounts: {growth.strategy.prioritizedAccounts.join(' • ')}</div> : null}
-                </div>
+                <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Top draft</div>
+                <div className="mt-2 text-sm text-foreground/90">{topDraftSummary}</div>
+                <div className="mt-1 text-xs text-muted-foreground">{actionState.message || topMoveActionText}</div>
+              </div>
+              <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
+                <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Next scheduled</div>
+                <div className="mt-2 text-sm text-foreground/90">{nextScheduledSummary}</div>
               </div>
             </div>
           </div>
@@ -1477,146 +1422,18 @@ export function GrowthReviewPanel() {
               ) : null}
             </div>
           ) : null}
-          {weeklyMix?.targetMix?.length || growth.strategy?.scheduleGuidance ? (
-            <div className="mt-4 grid gap-3 xl:grid-cols-2">
-              <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
-                <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Recommended weekly mix</div>
-                {weeklyMix?.targetMix?.length ? (
-                  <div className="mt-2 space-y-2">
-                    {weeklyMix.targetMix.map((item) => (
-                      <div key={`mix-${item.type}`} className="rounded-lg border border-white/8 bg-black/15 px-3 py-2">
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="text-sm font-medium text-foreground capitalize">{item.type}</div>
-                          <FieldChip>{item.share}</FieldChip>
-                        </div>
-                        <div className="mt-1 text-xs text-foreground/80">{item.reason}</div>
-                      </div>
-                    ))}
-                    <div className="text-xs text-muted-foreground">
-                      Available now: replies {weeklyMix.availableOpportunityBalance.reply} • quotes {weeklyMix.availableOpportunityBalance.quote} • originals {weeklyMix.availableOpportunityBalance.original}
-                    </div>
-                    <div className="text-xs text-foreground/80">{weeklyMix.currentBias}</div>
-                  </div>
-                ) : <div className="mt-2 text-sm text-muted-foreground">No weekly mix guidance yet.</div>}
-              </div>
-              <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
-                <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Scheduling guidance</div>
-                {growth.strategy?.scheduleGuidance ? (
-                  <div className="mt-2 space-y-2 text-sm text-foreground/85">
-                    <div>{growth.strategy.scheduleGuidance.recommendation}</div>
-                    <div className="text-xs text-muted-foreground">{growth.strategy.scheduleGuidance.timing}</div>
-                  </div>
-                ) : <div className="mt-2 text-sm text-muted-foreground">No scheduling guidance generated yet.</div>}
-              </div>
-            </div>
-          ) : null}
         </div>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[1.25fr_0.75fr]">
-        <div className="space-y-4">
-          <div className="grid gap-3 xl:grid-cols-3">
-            <div className="rounded-xl border border-cyan-500/15 bg-[#10161f] p-4">
-              <div className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Top opportunity</div>
-              {topOpportunity ? (
-                <>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {topOpportunity.distributionType ? <FieldChip>{topOpportunity.distributionType}</FieldChip> : null}
-                    <FieldChip>growth {topOpportunity.growthScore}</FieldChip>
-                    <FieldChip>timeliness {topOpportunity.timelinessScore}</FieldChip>
-                    {topOpportunity.accountState && topOpportunity.accountState !== 'available' ? <FieldChip>{topOpportunity.accountState.replace(/_/g, ' ')}</FieldChip> : null}
-                  </div>
-                  <div className="mt-3 text-sm font-medium text-foreground whitespace-pre-wrap">{topOpportunity.title}</div>
-                  <div className="mt-2 text-xs text-foreground/75">{topOpportunity.selectionReason || topOpportunity.whyNow}</div>
-                  {topOpportunity.selectionFactors?.length ? (
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {topOpportunity.selectionFactors.map((factor, index) => <FieldChip key={`top-opportunity-factor-${index}`}>{factor}</FieldChip>)}
-                    </div>
-                  ) : null}
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {topOpportunity.sourceUrl ? (
-                      <a href={topOpportunity.sourceUrl} target="_blank" rel="noreferrer" className="rounded-lg border border-cyan-500/20 bg-cyan-500/10 px-3 py-2 text-xs font-medium text-cyan-100 hover:bg-cyan-500/20">
-                        Open source
-                      </a>
-                    ) : null}
-                    <button
-                      type="button"
-                      onClick={() => void runGrowthAction('reject_opportunity', topOpportunity.id, { feedback: opportunityFeedback[topOpportunity.id] || 'Top card reject' })}
-                      disabled={actionState.status === 'saving'}
-                      className="rounded-lg border border-white/10 px-3 py-2 text-xs font-medium text-muted-foreground transition-smooth hover:bg-surface-2 disabled:opacity-60"
-                    >
-                      Reject
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void runGrowthAction('archive_opportunity', topOpportunity.id, { feedback: opportunityFeedback[topOpportunity.id] || 'Top card archive' })}
-                      disabled={actionState.status === 'saving'}
-                      className="rounded-lg border border-amber-500/20 px-3 py-2 text-xs font-medium text-amber-200 transition-smooth hover:bg-amber-500/10 disabled:opacity-60"
-                    >
-                      Archive
-                    </button>
-                  </div>
-                </>
-              ) : <div className="mt-3 text-sm text-muted-foreground">No live opportunity selected yet.</div>}
-            </div>
-            <div className="rounded-xl border border-violet-500/15 bg-[#10161f] p-4">
-              <div className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Top draft</div>
-              {topDraft ? (
-                <>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {topDraft.distribution_type ? <FieldChip>{topDraft.distribution_type}</FieldChip> : null}
-                    {typeof topDraft.follower_growth_score === 'number' ? <FieldChip>growth {topDraft.follower_growth_score}</FieldChip> : null}
-                    {typeof topDraft.brand_building_score === 'number' ? <FieldChip>brand {topDraft.brand_building_score}</FieldChip> : null}
-                  </div>
-                  <div className="mt-3 text-sm font-medium text-foreground whitespace-pre-wrap">{topDraft.text}</div>
-                  <textarea
-                    className="mt-3 min-h-20 w-full rounded-xl border border-white/8 bg-black/15 px-3 py-2 text-sm text-foreground outline-none transition-smooth focus:border-cyan-500/30"
-                    placeholder="Rewrite direction for the top draft: sharper hook, more contrarian, tighter, less product-y, use source context."
-                    value={topDraftRewritePrompt}
-                    onChange={(event) => setTopDraftRewritePrompt(event.target.value)}
-                  />
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => scrollToId('growth-drafts')}
-                      className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2"
-                    >
-                      Open draft
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void runGrowthAction('rewrite_draft', topDraft.id, { feedback: topDraftRewritePrompt || feedbackDrafts[topDraft.id] || 'Rewrite from top draft card' })}
-                      disabled={actionState.status === 'saving'}
-                      className="rounded-lg border border-cyan-500/20 px-3 py-2 text-xs font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/10 disabled:opacity-60"
-                    >
-                      {actionState.status === 'saving' ? 'Rewriting…' : 'Rewrite With Direction'}
-                    </button>
-                  </div>
-                </>
-              ) : <div className="mt-3 text-sm text-muted-foreground">Generate drafts after selecting opportunities.</div>}
-            </div>
-            <div className="rounded-xl border border-amber-500/15 bg-[#10161f] p-4">
-              <div className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">Next publish</div>
-              {nextScheduledPost ? (
-                <>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {nextScheduledPost.distributionType ? <FieldChip>{nextScheduledPost.distributionType}</FieldChip> : null}
-                    {nextScheduledPost.scheduledAtPt ? <FieldChip>{formatPacificTime(nextScheduledPost.scheduledAtPt)}</FieldChip> : nextScheduledPost.scheduledAt ? <FieldChip>{formatPacificTime(nextScheduledPost.scheduledAt)}</FieldChip> : null}
-                  </div>
-                  <div className="mt-3 text-sm font-medium text-foreground whitespace-pre-wrap">{nextScheduledPost.text}</div>
-                </>
-              ) : readyToSchedule ? <div className="mt-3 text-sm text-muted-foreground">Approved posts are waiting in the scheduling lane.</div> : <div className="mt-3 text-sm text-muted-foreground">Nothing scheduled yet.</div>}
-            </div>
-          </div>
-
-          <div id="growth-opportunities">
-          <CollapsibleSection title="Opportunities" subtitle="Choose the participation move first. Drafting should only happen after the source and move are worth it." defaultOpen>
+      <div className="space-y-4">
+        <div id="growth-opportunities">
+          <CollapsibleSection title="Opportunities" subtitle="Choose the move before you draft." defaultOpen>
             <div className="space-y-4">
               {selectedOpportunities.length ? (
                 <div className="space-y-3">
                   <OpportunityFamilyLane
                     title="Reactive moves"
-                    subtitle="Grouped by source family so you can reject weak sources before they turn into draft churn."
+                    subtitle="Grouped by source family so you can scan live moves quickly."
                     families={reactiveOpportunityFamilies}
                     feedbackDrafts={opportunityFeedback}
                     onFeedbackChange={(opportunityId, value) => setOpportunityFeedback((current) => ({ ...current, [opportunityId]: value }))}
@@ -1660,10 +1477,10 @@ export function GrowthReviewPanel() {
               ) : null}
             </div>
           </CollapsibleSection>
-          </div>
+        </div>
 
-          <div id="growth-drafts">
-          <CollapsibleSection title="Draft candidates" subtitle="Review exact post text, source basis, and why the system selected it." defaultOpen>
+        <div id="growth-drafts">
+          <CollapsibleSection title="Drafts" subtitle="Review exact post text first. Open details only when you need more context." defaultOpen>
             <div className="space-y-4">
               {groupedDraftCandidates.length ? groupedDraftCandidates.map((group, groupIndex) => {
                 const leader = group[0]
@@ -1702,209 +1519,221 @@ export function GrowthReviewPanel() {
               }) : <div className="rounded-xl border border-white/10 bg-[#10161f] px-4 py-4 text-sm text-muted-foreground">Research is ready. Generate a fresh candidate pack when you want posts to review.</div>}
             </div>
           </CollapsibleSection>
-          </div>
+        </div>
 
-          <div id="growth-ready-to-schedule">
-          <CollapsibleSection title="Ready to schedule" subtitle="Approved posts and transient failures stay here until you schedule them." defaultOpen>
-            <div className="space-y-3">
-              {readyPosts.length ? readyPosts.map((post) => {
-                const suggested = buildSuggestedSchedule(post)
-                const scheduleState = scheduleDrafts[post.id] || { when: post.scheduledAt || suggested.when, note: post.scheduleNote || suggested.note }
-                const publishState = publishDrafts[post.id] || { tweetUrl: post.tweetUrl || '', tweetId: post.tweetId || '' }
-                return (
-                  <div key={post.id} className="rounded-2xl border border-emerald-500/15 bg-[#10161f] p-4 shadow-[0_16px_36px_rgba(0,0,0,0.24)]">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="text-sm font-semibold text-foreground">{post.pillar || 'Approved post'}{post.angle ? `: ${post.angle}` : ''}</div>
-                        <div className="mt-1 flex flex-wrap gap-2">
-                          <FieldChip>{post.status}</FieldChip>
-                          {post.distributionType ? <FieldChip>{post.distributionType}</FieldChip> : null}
-                          {post.sourceType ? <FieldChip>{post.sourceType}</FieldChip> : null}
-                          {post.approvedAtPt ? <FieldChip>approved {formatPacificTime(post.approvedAtPt)}</FieldChip> : null}
-                          {post.publishError ? <FieldChip>failed publish</FieldChip> : null}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="mt-4 rounded-xl border border-emerald-500/15 bg-black/20 px-4 py-4 text-[15px] leading-7 text-foreground whitespace-pre-wrap">{post.text}</div>
-                    {post.selectionReason ? <div className="mt-3 text-sm text-foreground/80">{post.selectionReason}</div> : null}
-                    {post.publishError ? (
-                      <div className="mt-3 rounded-lg border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-100">
-                        Last auto-publish failure: {post.publishError}
-                      </div>
-                    ) : null}
-                    <div className="mt-4 grid gap-3 xl:grid-cols-2">
-                      <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Schedule</div>
-                            <div className="mt-1 text-xs text-foreground/75">
-                              {post.distributionType === 'reply'
-                                ? 'The system prefers a warm-window reply.'
-                                : post.distributionType === 'quote'
-                                  ? 'The system prefers a quote window with active traction.'
-                                  : 'The system prefers a calmer standalone slot.'}
-                            </div>
+        <div id="growth-ready-to-schedule">
+          <CollapsibleSection title="Publishing queue" subtitle="Move approved posts into the schedule, monitor scheduled items, and catch failures in one place." defaultOpen>
+            <div className="space-y-5">
+              <div className="space-y-3">
+                <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Ready to publish</div>
+                {readyApprovedPosts.length ? readyApprovedPosts.map((post) => {
+                  const suggested = buildSuggestedSchedule(post)
+                  const scheduleState = scheduleDrafts[post.id] || { when: post.scheduledAt || suggested.when, note: post.scheduleNote || suggested.note }
+                  const publishState = publishDrafts[post.id] || { tweetUrl: post.tweetUrl || '', tweetId: post.tweetId || '' }
+                  return (
+                    <div key={post.id} className="rounded-2xl border border-emerald-500/15 bg-[#10161f] p-4 shadow-[0_16px_36px_rgba(0,0,0,0.24)]">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="text-sm font-semibold text-foreground">{post.pillar || 'Approved post'}{post.angle ? `: ${post.angle}` : ''}</div>
+                          <div className="mt-1 flex flex-wrap gap-2">
+                            <FieldChip>{post.status}</FieldChip>
+                            {post.distributionType ? <FieldChip>{post.distributionType}</FieldChip> : null}
+                            {post.sourceType ? <FieldChip>{post.sourceType}</FieldChip> : null}
+                            {post.approvedAtPt ? <FieldChip>approved {formatPacificTime(post.approvedAtPt)}</FieldChip> : null}
+                            {post.publishError ? <FieldChip>failed publish</FieldChip> : null}
                           </div>
-                          <button
-                            onClick={() => setScheduleDrafts((current) => ({
-                              ...current,
-                              [post.id]: { when: suggested.when, note: suggested.note },
-                            }))}
-                            type="button"
-                            className="rounded-lg border border-white/10 px-2.5 py-1.5 text-[11px] text-foreground/80 transition-smooth hover:bg-surface-2"
-                          >
-                            Use suggested time
-                          </button>
-                        </div>
-                        <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_1fr]">
-                          <label className="text-xs text-muted-foreground">When
-                            <input type="datetime-local" value={scheduleState.when} onChange={(event) => setScheduleDrafts((current) => ({ ...current, [post.id]: { ...scheduleState, when: event.target.value } }))} className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground" />
-                          </label>
-                          <label className="text-xs text-muted-foreground">Note
-                            <input value={scheduleState.note} onChange={(event) => setScheduleDrafts((current) => ({ ...current, [post.id]: { ...scheduleState, note: event.target.value } }))} className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground" placeholder="optional schedule note" />
-                          </label>
-                        </div>
-                        <div className="mt-2 rounded-lg border border-emerald-500/15 bg-emerald-500/5 px-3 py-2 text-xs text-foreground/80">
-                          Suggested: <span className="text-foreground">{formatPacificTime(suggested.when)}</span>
-                          {suggested.note ? <span className="text-muted-foreground"> • {suggested.note}</span> : null}
-                        </div>
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          <button onClick={() => void runGrowthAction('schedule_draft', post.id, { scheduledAt: scheduleState.when, scheduleNote: scheduleState.note, scheduleSource: scheduleState.when === suggested.when ? 'machine_suggested' : 'user_selected' })} disabled={actionState.status === 'saving' || !scheduleState.when} className="rounded-lg bg-emerald-500/15 px-3 py-2 text-xs font-medium text-emerald-200 transition-smooth hover:bg-emerald-500/20 disabled:opacity-60">Schedule</button>
-                          <button onClick={() => void runGrowthAction('post_now', post.id)} disabled={actionState.status === 'saving'} className="rounded-lg bg-cyan-500/15 px-3 py-2 text-xs font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/20 disabled:opacity-60">Post now</button>
-                          {post.status === 'scheduled' ? (
-                            <button onClick={() => void runGrowthAction('unschedule_draft', post.id)} disabled={actionState.status === 'saving'} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2 disabled:opacity-60">Unschedule</button>
-                          ) : null}
                         </div>
                       </div>
-                      <details className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
-                        <summary className="cursor-pointer list-none text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Manual fallback: link an external publish</summary>
-                        <div className="mt-2 text-xs text-foreground/75">
-                          Use this only if scheduler publishing fails or you posted outside Mission Control.
+                      <div className="mt-4 rounded-xl border border-emerald-500/15 bg-black/20 px-4 py-4 text-[15px] leading-7 text-foreground whitespace-pre-wrap">{post.text}</div>
+                      {post.selectionReason ? <div className="mt-3 text-sm text-foreground/80">{post.selectionReason}</div> : null}
+                      {post.publishError ? (
+                        <div className="mt-3 rounded-lg border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-100">
+                          Last auto-publish failure: {post.publishError}
                         </div>
-                        <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_1fr]">
-                          <label className="text-xs text-muted-foreground">Tweet URL
-                            <input value={publishState.tweetUrl} onChange={(event) => setPublishDrafts((current) => ({ ...current, [post.id]: { ...publishState, tweetUrl: event.target.value } }))} className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground" placeholder="https://x.com/.../status/..." />
-                          </label>
-                          <label className="text-xs text-muted-foreground">Tweet ID
-                            <input value={publishState.tweetId} onChange={(event) => setPublishDrafts((current) => ({ ...current, [post.id]: { ...publishState, tweetId: event.target.value } }))} className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground" placeholder="optional if URL is present" />
-                          </label>
+                      ) : null}
+                      <div className="mt-4 grid gap-3 xl:grid-cols-2">
+                        <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Schedule</div>
+                              <div className="mt-1 text-xs text-foreground/75">
+                                {post.distributionType === 'reply'
+                                  ? 'The system prefers a warm-window reply.'
+                                  : post.distributionType === 'quote'
+                                    ? 'The system prefers a quote window with active traction.'
+                                    : 'The system prefers a calmer standalone slot.'}
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => setScheduleDrafts((current) => ({
+                                ...current,
+                                [post.id]: { when: suggested.when, note: suggested.note },
+                              }))}
+                              type="button"
+                              className="rounded-lg border border-white/10 px-2.5 py-1.5 text-[11px] text-foreground/80 transition-smooth hover:bg-surface-2"
+                            >
+                              Use suggested time
+                            </button>
+                          </div>
+                          <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_1fr]">
+                            <label className="text-xs text-muted-foreground">When
+                              <input type="datetime-local" value={scheduleState.when} onChange={(event) => setScheduleDrafts((current) => ({ ...current, [post.id]: { ...scheduleState, when: event.target.value } }))} className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground" />
+                            </label>
+                            <label className="text-xs text-muted-foreground">Note
+                              <input value={scheduleState.note} onChange={(event) => setScheduleDrafts((current) => ({ ...current, [post.id]: { ...scheduleState, note: event.target.value } }))} className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground" placeholder="optional schedule note" />
+                            </label>
+                          </div>
+                          <div className="mt-2 rounded-lg border border-emerald-500/15 bg-emerald-500/5 px-3 py-2 text-xs text-foreground/80">
+                            Suggested: <span className="text-foreground">{formatPacificTime(suggested.when)}</span>
+                            {suggested.note ? <span className="text-muted-foreground"> • {suggested.note}</span> : null}
+                          </div>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <button onClick={() => void runGrowthAction('schedule_draft', post.id, { scheduledAt: scheduleState.when, scheduleNote: scheduleState.note, scheduleSource: scheduleState.when === suggested.when ? 'machine_suggested' : 'user_selected' })} disabled={actionState.status === 'saving' || !scheduleState.when} className="rounded-lg bg-emerald-500/15 px-3 py-2 text-xs font-medium text-emerald-200 transition-smooth hover:bg-emerald-500/20 disabled:opacity-60">Schedule</button>
+                            <button onClick={() => void runGrowthAction('post_now', post.id)} disabled={actionState.status === 'saving'} className="rounded-lg bg-cyan-500/15 px-3 py-2 text-xs font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/20 disabled:opacity-60">Post now</button>
+                            {post.status === 'scheduled' ? (
+                              <button onClick={() => void runGrowthAction('unschedule_draft', post.id)} disabled={actionState.status === 'saving'} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2 disabled:opacity-60">Unschedule</button>
+                            ) : null}
+                          </div>
                         </div>
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          <button onClick={() => void runGrowthAction('link_manual_publish', post.id, { tweetUrl: publishState.tweetUrl, tweetId: publishState.tweetId })} disabled={actionState.status === 'saving' || (!publishState.tweetUrl && !publishState.tweetId)} className="rounded-lg bg-cyan-500/15 px-3 py-2 text-xs font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/20 disabled:opacity-60">Link Manual Publish</button>
-                        </div>
-                      </details>
+                        <details className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
+                          <summary className="cursor-pointer list-none text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Manual fallback: link an external publish</summary>
+                          <div className="mt-2 text-xs text-foreground/75">
+                            Use this only if scheduler publishing fails or you posted outside Mission Control.
+                          </div>
+                          <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_1fr]">
+                            <label className="text-xs text-muted-foreground">Tweet URL
+                              <input value={publishState.tweetUrl} onChange={(event) => setPublishDrafts((current) => ({ ...current, [post.id]: { ...publishState, tweetUrl: event.target.value } }))} className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground" placeholder="https://x.com/.../status/..." />
+                            </label>
+                            <label className="text-xs text-muted-foreground">Tweet ID
+                              <input value={publishState.tweetId} onChange={(event) => setPublishDrafts((current) => ({ ...current, [post.id]: { ...publishState, tweetId: event.target.value } }))} className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground" placeholder="optional if URL is present" />
+                            </label>
+                          </div>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <button onClick={() => void runGrowthAction('link_manual_publish', post.id, { tweetUrl: publishState.tweetUrl, tweetId: publishState.tweetId })} disabled={actionState.status === 'saving' || (!publishState.tweetUrl && !publishState.tweetId)} className="rounded-lg bg-cyan-500/15 px-3 py-2 text-xs font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/20 disabled:opacity-60">Link Manual Publish</button>
+                          </div>
+                        </details>
+                      </div>
                     </div>
-                  </div>
-                )
-              }) : <div className="rounded-xl border border-white/10 bg-[#10161f] px-4 py-4 text-sm text-muted-foreground">No approved or retryable posts are waiting for scheduling right now.</div>}
-            </div>
-          </CollapsibleSection>
-          </div>
+                  )
+                }) : <div className="rounded-xl border border-white/10 bg-[#10161f] px-4 py-4 text-sm text-muted-foreground">No approved posts are waiting for scheduling right now.</div>}
+              </div>
 
-          <CollapsibleSection title="Scheduled" subtitle="Auto-publish runs every 15 minutes between 6:00 AM and 9:00 PM PT." defaultOpen>
-            <div className="space-y-3">
-              {scheduledPosts.length ? scheduledPosts.map((post) => (
-                <div key={`scheduled-${post.id}`} className="rounded-2xl border border-amber-500/15 bg-[#10161f] p-4 shadow-[0_16px_36px_rgba(0,0,0,0.24)]">
-                  <div className="flex flex-wrap gap-2">
-                    <FieldChip>scheduled</FieldChip>
-                    <FieldChip>auto-publish active</FieldChip>
-                    {post.distributionType ? <FieldChip>{post.distributionType}</FieldChip> : null}
-                    {post.sourceType ? <FieldChip>{post.sourceType}</FieldChip> : null}
-                    {post.scheduledAtPt ? <FieldChip>due {formatPacificTime(post.scheduledAtPt)}</FieldChip> : post.scheduledAt ? <FieldChip>due {formatPacificTime(post.scheduledAt)}</FieldChip> : null}
+              <div className="space-y-3">
+                <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Scheduled</div>
+                {scheduledPosts.length ? scheduledPosts.map((post) => (
+                  <div key={`scheduled-${post.id}`} className="rounded-2xl border border-amber-500/15 bg-[#10161f] p-4 shadow-[0_16px_36px_rgba(0,0,0,0.24)]">
+                    <div className="flex flex-wrap gap-2">
+                      <FieldChip>scheduled</FieldChip>
+                      <FieldChip>auto-publish active</FieldChip>
+                      {post.distributionType ? <FieldChip>{post.distributionType}</FieldChip> : null}
+                      {post.sourceType ? <FieldChip>{post.sourceType}</FieldChip> : null}
+                      {post.scheduledAtPt ? <FieldChip>due {formatPacificTime(post.scheduledAtPt)}</FieldChip> : post.scheduledAt ? <FieldChip>due {formatPacificTime(post.scheduledAt)}</FieldChip> : null}
+                    </div>
+                    <div className="mt-4 rounded-xl border border-amber-500/15 bg-black/20 px-4 py-4 text-[15px] leading-7 text-foreground whitespace-pre-wrap">{post.text}</div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button onClick={() => void runGrowthAction('unschedule_draft', post.id)} disabled={actionState.status === 'saving'} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2 disabled:opacity-60">Unschedule</button>
+                    </div>
                   </div>
-                  <div className="mt-4 rounded-xl border border-amber-500/15 bg-black/20 px-4 py-4 text-[15px] leading-7 text-foreground whitespace-pre-wrap">{post.text}</div>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <button onClick={() => void runGrowthAction('unschedule_draft', post.id)} disabled={actionState.status === 'saving'} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2 disabled:opacity-60">Unschedule</button>
-                  </div>
-                </div>
-              )) : <div className="rounded-xl border border-white/10 bg-[#10161f] px-4 py-4 text-sm text-muted-foreground">No scheduled posts right now.</div>}
-            </div>
-          </CollapsibleSection>
+                )) : <div className="rounded-xl border border-white/10 bg-[#10161f] px-4 py-4 text-sm text-muted-foreground">No scheduled posts right now.</div>}
+              </div>
 
-          <CollapsibleSection title="Published + learning" subtitle="Once a post is live, results sync should update strategy memory and ranking bias." defaultOpen={false}>
-            <div className="space-y-4">
-              {growth.resultsSummary?.postedCount ? (
-                <div className="grid gap-3 xl:grid-cols-2">
-                  <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
-                    <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">{syncedPublishedCount ? 'What is working' : 'Published state'}</div>
-                    {syncedPublishedCount ? (
-                      <div className="mt-2 space-y-1 text-sm text-foreground/90">
-                        {growth.resultsSummary.winningDistributionTypes?.length ? <div>Winning distribution: {growth.resultsSummary.winningDistributionTypes.join(' • ')}</div> : null}
-                        {growth.resultsSummary.winningSourceTypes?.length ? <div>Winning sources: {growth.resultsSummary.winningSourceTypes.join(' • ')}</div> : null}
-                        {growth.resultsSummary.winningPillars?.length ? <div>Winning pillars: {growth.resultsSummary.winningPillars.join(' • ')}</div> : null}
-                        {growth.resultsSummary.winningArchetypes?.length ? <div>Winning archetypes: {growth.resultsSummary.winningArchetypes.join(' • ')}</div> : null}
-                        {growth.resultsSummary.timingBias?.length ? <div>Timing bias: {growth.resultsSummary.timingBias.join(' • ')}</div> : null}
-                      </div>
-                    ) : (
-                      <div className="mt-2 space-y-1 text-sm text-foreground/85">
-                        <div>{publishedCount} post{publishedCount === 1 ? '' : 's'} published or linked.</div>
-                        <div>Waiting on live X metrics before the engine promotes any format, source, or timing pattern as a winner.</div>
-                        {publishAttempts ? <div className="text-xs text-muted-foreground">{publishAttempts} publish update{publishAttempts === 1 ? '' : 's'} recorded so far.</div> : null}
-                      </div>
-                    )}
-                  </div>
-                  <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
-                    <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Strategy notes</div>
-                    <div className="mt-2 space-y-1 text-sm text-foreground/90">
-                      {growth.resultsSummary.strategyNotes.map((note, index) => <div key={`result-note-${index}`} className="flex gap-2"><span>•</span><span>{note}</span></div>)}
+              <div className="space-y-3">
+                <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Failed</div>
+                {failedPosts.length ? failedPosts.map((post) => (
+                  <div key={`failed-${post.id}`} className="rounded-2xl border border-rose-500/15 bg-[#10161f] p-4 shadow-[0_16px_36px_rgba(0,0,0,0.24)]">
+                    <div className="flex flex-wrap gap-2">
+                      <FieldChip>failed</FieldChip>
+                      {post.distributionType ? <FieldChip>{post.distributionType}</FieldChip> : null}
+                      {post.sourceType ? <FieldChip>{post.sourceType}</FieldChip> : null}
+                    </div>
+                    <div className="mt-4 rounded-xl border border-rose-500/15 bg-black/20 px-4 py-4 text-[15px] leading-7 text-foreground whitespace-pre-wrap">{post.text}</div>
+                    {post.publishError ? <div className="mt-3 text-xs text-rose-100/85">{post.publishError}</div> : null}
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button onClick={() => void runGrowthAction('post_now', post.id)} disabled={actionState.status === 'saving'} className="rounded-lg bg-cyan-500/15 px-3 py-2 text-xs font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/20 disabled:opacity-60">Retry now</button>
                     </div>
                   </div>
-                  <div className="rounded-xl border border-cyan-500/15 bg-cyan-500/5 px-3 py-3">
-                    <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Operator takeaway</div>
-                    <div className="mt-2 text-sm text-foreground/90">
-                      {syncedPublishedCount
-                        ? 'Use this section to see which source types, formats, and timing patterns are actually winning. The next pack should reflect these outcomes.'
-                        : 'Once the first scheduled post publishes and syncs results, this lane will start showing what the system is promoting or demoting based on performance.'}
-                    </div>
-                  </div>
-                </div>
-              ) : <div className="rounded-xl border border-white/10 bg-[#10161f] px-4 py-4 text-sm text-muted-foreground">No published post results yet. Once the first scheduled post publishes and syncs, the results loop should start influencing future ranking.</div>}
-              {publishedPosts.length ? (
-                <div className="space-y-3">
-                  {publishedPosts.map((post) => (
-                    <div key={`published-${post.id}`} className="rounded-2xl border border-cyan-500/15 bg-[#10161f] p-4 shadow-[0_16px_36px_rgba(0,0,0,0.24)]">
-                      <div className="flex flex-wrap gap-2">
-                        <FieldChip>{post.status}</FieldChip>
-                        {post.distributionType ? <FieldChip>{post.distributionType}</FieldChip> : null}
-                        {post.sourceType ? <FieldChip>{post.sourceType}</FieldChip> : null}
-                        {post.scheduledAtPt ? <FieldChip>scheduled {formatPacificTime(post.scheduledAtPt)}</FieldChip> : null}
-                      </div>
-                      <div className="mt-4 rounded-xl border border-cyan-500/15 bg-black/20 px-4 py-4 text-[15px] leading-7 text-foreground whitespace-pre-wrap">{post.text}</div>
-                      <div className="mt-3 flex flex-wrap gap-3 text-xs text-muted-foreground">
-                        {post.selectionReason ? <span>{post.selectionReason}</span> : null}
-                        {post.tweetId ? <span>tweet {post.tweetId}</span> : null}
-                      </div>
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        {post.tweetUrl ? <a href={post.tweetUrl} target="_blank" rel="noreferrer" className="inline-block text-xs text-cyan-200 hover:text-cyan-100">Open published post</a> : null}
-                        <button
-                          onClick={() => void runGrowthAction('reopen_published', post.id)}
-                          disabled={actionState.status === 'saving'}
-                          className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2 disabled:opacity-60"
-                        >
-                          Reopen
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-              {growth.publishLog?.length ? (
-                <div className="space-y-2">
-                  {growth.publishLog.map((entry, index) => (
-                    <div key={`publish-log-${index}`} className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
-                      <div className="flex flex-wrap gap-2 text-[11px] text-muted-foreground">
-                        {entry.pillar ? <FieldChip>{String(entry.pillar)}</FieldChip> : null}
-                        {entry.distribution_type ? <FieldChip>{String(entry.distribution_type)}</FieldChip> : null}
-                        {entry.posted_at_pt ? <FieldChip>{formatPacificTime(String(entry.posted_at_pt))}</FieldChip> : null}
-                      </div>
-                      {entry.tweet_url ? <a href={String(entry.tweet_url)} target="_blank" rel="noreferrer" className="mt-2 inline-block text-xs text-cyan-200 hover:text-cyan-100">Open published post</a> : null}
-                    </div>
-                  ))}
-                </div>
-              ) : null}
+                )) : <div className="rounded-xl border border-white/10 bg-[#10161f] px-4 py-4 text-sm text-muted-foreground">No failed publish attempts right now.</div>}
+              </div>
             </div>
           </CollapsibleSection>
         </div>
+
+        <CollapsibleSection title="Published + learning" subtitle="Keep this compact. Look here after something ships and syncs." defaultOpen={false}>
+          <div className="space-y-4">
+            {growth.resultsSummary?.postedCount ? (
+              <div className="grid gap-3 xl:grid-cols-2">
+                <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
+                  <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">{syncedPublishedCount ? 'Latest result summary' : 'Published state'}</div>
+                  {syncedPublishedCount ? (
+                    <div className="mt-2 space-y-1 text-sm text-foreground/90">
+                      {growth.resultsSummary.winningDistributionTypes?.length ? <div>Winning distribution: {growth.resultsSummary.winningDistributionTypes.join(' • ')}</div> : null}
+                      {growth.resultsSummary.winningSourceTypes?.length ? <div>Winning sources: {growth.resultsSummary.winningSourceTypes.join(' • ')}</div> : null}
+                      {growth.resultsSummary.winningPillars?.length ? <div>Winning pillars: {growth.resultsSummary.winningPillars.join(' • ')}</div> : null}
+                      {growth.resultsSummary.winningArchetypes?.length ? <div>Winning archetypes: {growth.resultsSummary.winningArchetypes.join(' • ')}</div> : null}
+                      {growth.resultsSummary.timingBias?.length ? <div>Timing bias: {growth.resultsSummary.timingBias.join(' • ')}</div> : null}
+                    </div>
+                  ) : (
+                    <div className="mt-2 space-y-1 text-sm text-foreground/85">
+                      <div>{publishedCount} post{publishedCount === 1 ? '' : 's'} published or linked.</div>
+                      <div>Waiting on live X metrics before the engine promotes any format, source, or timing pattern as a winner.</div>
+                      {publishAttempts ? <div className="text-xs text-muted-foreground">{publishAttempts} publish update{publishAttempts === 1 ? '' : 's'} recorded so far.</div> : null}
+                    </div>
+                  )}
+                </div>
+                <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
+                  <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Strategy notes</div>
+                  <div className="mt-2 space-y-1 text-sm text-foreground/90">
+                    {(growth.resultsSummary.strategyNotes || []).slice(0, 1).map((note, index) => <div key={`result-note-${index}`} className="flex gap-2"><span>•</span><span>{note}</span></div>)}
+                  </div>
+                </div>
+              </div>
+            ) : <div className="rounded-xl border border-white/10 bg-[#10161f] px-4 py-4 text-sm text-muted-foreground">No published post results yet. Once the first scheduled post publishes and syncs, the results loop should start influencing future ranking.</div>}
+            {publishedPosts.length ? (
+              <div className="space-y-3">
+                {publishedPosts.map((post) => (
+                  <div key={`published-${post.id}`} className="rounded-2xl border border-cyan-500/15 bg-[#10161f] p-4 shadow-[0_16px_36px_rgba(0,0,0,0.24)]">
+                    <div className="flex flex-wrap gap-2">
+                      <FieldChip>{post.status}</FieldChip>
+                      {post.distributionType ? <FieldChip>{post.distributionType}</FieldChip> : null}
+                      {post.sourceType ? <FieldChip>{post.sourceType}</FieldChip> : null}
+                      {post.scheduledAtPt ? <FieldChip>scheduled {formatPacificTime(post.scheduledAtPt)}</FieldChip> : null}
+                    </div>
+                    <div className="mt-4 rounded-xl border border-cyan-500/15 bg-black/20 px-4 py-4 text-[15px] leading-7 text-foreground whitespace-pre-wrap">{post.text}</div>
+                    <div className="mt-3 flex flex-wrap gap-3 text-xs text-muted-foreground">
+                      {post.selectionReason ? <span>{post.selectionReason}</span> : null}
+                      {post.tweetId ? <span>tweet {post.tweetId}</span> : null}
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {post.tweetUrl ? <a href={post.tweetUrl} target="_blank" rel="noreferrer" className="inline-block text-xs text-cyan-200 hover:text-cyan-100">Open published post</a> : null}
+                      <button
+                        onClick={() => void runGrowthAction('reopen_published', post.id)}
+                        disabled={actionState.status === 'saving'}
+                        className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2 disabled:opacity-60"
+                      >
+                        Reopen
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            {growth.publishLog?.length ? (
+              <div className="space-y-2">
+                {growth.publishLog.map((entry, index) => (
+                  <div key={`publish-log-${index}`} className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
+                    <div className="flex flex-wrap gap-2 text-[11px] text-muted-foreground">
+                      {entry.pillar ? <FieldChip>{String(entry.pillar)}</FieldChip> : null}
+                      {entry.distribution_type ? <FieldChip>{String(entry.distribution_type)}</FieldChip> : null}
+                      {entry.posted_at_pt ? <FieldChip>{formatPacificTime(String(entry.posted_at_pt))}</FieldChip> : null}
+                    </div>
+                    {entry.tweet_url ? <a href={String(entry.tweet_url)} target="_blank" rel="noreferrer" className="mt-2 inline-block text-xs text-cyan-200 hover:text-cyan-100">Open published post</a> : null}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        </CollapsibleSection>
+      </div>
 
         <div className="space-y-4">
           <CollapsibleSection title="Listening" subtitle="Market signal, research diagnostics, and live conversation quality." defaultOpen={false}>
@@ -2131,7 +1960,6 @@ export function GrowthReviewPanel() {
             </div>
           </CollapsibleSection>
         </div>
-      </div>
     </div>
   )
 }
