@@ -409,6 +409,16 @@ function displayUsername(username: string) {
   return username.startsWith('@') ? username : `@${username}`
 }
 
+function extractOpportunityUsername(opportunity: {
+  sourceAccount?: string | null
+  title?: string | null
+}) {
+  const sourceAccount = String(opportunity.sourceAccount || '').trim()
+  if (sourceAccount) return sourceAccount.replace(/^@/, '')
+  const match = String(opportunity.title || '').match(/@([A-Za-z0-9_]+)/)
+  return match ? match[1] : ''
+}
+
 function CollapsibleSection({ title, subtitle, defaultOpen = true, children }: { title: string; subtitle?: string; defaultOpen?: boolean; children: ReactNode }) {
   return (
     <details open={defaultOpen} className="rounded-xl border border-white/10 bg-[#0f141b] shadow-[0_18px_45px_rgba(0,0,0,0.28)] group">
@@ -1936,9 +1946,33 @@ export function GrowthReviewPanel() {
                     These are low-confidence watch items and account targets, not live posting opportunities.
                   </div>
                   <div className="mt-3 space-y-3">
-                    {watchOnlyOpportunities.map((opportunity) => (
-                      <OpportunityCard key={`watch-${opportunity.id}`} opportunity={opportunity} blocked />
-                    ))}
+                    {watchOnlyOpportunities.map((opportunity) => {
+                      const username = extractOpportunityUsername(opportunity)
+                      return (
+                        <div key={`watch-${opportunity.id}`} className="space-y-3">
+                          <OpportunityCard opportunity={opportunity} blocked />
+                          {username ? (
+                            <div className="mt-2 flex flex-wrap gap-1">
+                              {(['watch', 'prioritize', 'mute', 'engage_this_week'] as const).map((state) => (
+                                <button
+                                  key={`${opportunity.id}-${state}`}
+                                  onClick={() => void runGrowthAction('set_account_target_state', undefined, { accountUsername: username, accountState: state, feedback: opportunity.selectionReason || opportunity.whyNow || opportunity.title || '' })}
+                                  disabled={actionState.status === 'saving'}
+                                  className={cx(
+                                    'rounded-full border px-2 py-1 text-[10px] uppercase tracking-[0.12em] transition-smooth',
+                                    opportunity.accountState === state
+                                      ? 'border-cyan-500/25 bg-cyan-500/10 text-cyan-200'
+                                      : 'border-white/10 text-muted-foreground hover:bg-surface-2',
+                                  )}
+                                >
+                                  {state.replaceAll('_', ' ')}
+                                </button>
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
+                      )
+                    })}
                   </div>
                 </details>
               ) : null}
