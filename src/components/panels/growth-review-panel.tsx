@@ -389,6 +389,28 @@ function FieldChip({ children }: { children: ReactNode }) {
   return <span className="rounded-full border border-white/10 bg-black/20 px-2.5 py-1 text-[11px] text-muted-foreground">{children}</span>
 }
 
+function CommandChip({
+  label,
+  tone = 'neutral',
+}: {
+  label: string
+  tone?: 'neutral' | 'live' | 'queue' | 'warning'
+}) {
+  return (
+    <span
+      className={cx(
+        'rounded-full border px-2.5 py-1 text-[11px] font-medium',
+        tone === 'live' && 'border-cyan-500/20 bg-cyan-500/10 text-cyan-100',
+        tone === 'queue' && 'border-emerald-500/20 bg-emerald-500/10 text-emerald-100',
+        tone === 'warning' && 'border-amber-500/20 bg-amber-500/10 text-amber-100',
+        tone === 'neutral' && 'border-white/10 bg-black/20 text-muted-foreground',
+      )}
+    >
+      {label}
+    </span>
+  )
+}
+
 function displayUsername(username: string) {
   return username.startsWith('@') ? username : `@${username}`
 }
@@ -1343,7 +1365,7 @@ export function GrowthReviewPanel() {
 
   return (
     <div className="space-y-5 p-5">
-      <div className="rounded-2xl border border-white/10 bg-[#0f141b] p-5 shadow-[0_24px_60px_rgba(0,0,0,0.35)]">
+      <div className="rounded-2xl border border-white/10 bg-[linear-gradient(135deg,rgba(15,20,27,0.98),rgba(11,16,23,0.98))] p-5 shadow-[0_24px_60px_rgba(0,0,0,0.35)]">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
           <div>
             <div className="text-sm font-semibold text-foreground">Growth</div>
@@ -1365,14 +1387,14 @@ export function GrowthReviewPanel() {
                 </button>
               ))}
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-2 rounded-2xl border border-white/8 bg-black/20 p-2">
               {utilityActions.map((item) => (
                 <button
                   key={item.key}
                   type="button"
                   onClick={item.action}
                   disabled={actionState.status === 'saving'}
-                  className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2 disabled:opacity-60"
+                  className="rounded-lg border border-white/10 bg-[#121922] px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2 disabled:opacity-60"
                 >
                   {item.label}
                 </button>
@@ -1392,11 +1414,11 @@ export function GrowthReviewPanel() {
                 {topMoveBody}
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
-                {topOpportunity?.distributionType ? <FieldChip>{topOpportunity.distributionType}</FieldChip> : todayBestMove?.distributionType ? <FieldChip>{todayBestMove.distributionType}</FieldChip> : null}
-                {growth.strategy?.accountStage ? <FieldChip>{growth.strategy.accountStage}</FieldChip> : null}
-                {topOpportunity?.clusterLabel ? <FieldChip>{topOpportunity.clusterLabel}</FieldChip> : todayBestMove?.clusterLabel ? <FieldChip>{todayBestMove.clusterLabel}</FieldChip> : null}
-                {topOpportunity?.sourceAccount ? <FieldChip>{topOpportunity.sourceAccount}</FieldChip> : todayBestMove?.sourceAccount ? <FieldChip>{todayBestMove.sourceAccount}</FieldChip> : null}
-                {topOpportunity?.confidence ? <FieldChip>{topOpportunity.confidence}</FieldChip> : todayBestMove?.confidence ? <FieldChip>{todayBestMove.confidence}</FieldChip> : null}
+                {topOpportunity?.distributionType ? <CommandChip label={topOpportunity.distributionType} tone="live" /> : todayBestMove?.distributionType ? <CommandChip label={todayBestMove.distributionType} tone="live" /> : null}
+                {growth.strategy?.accountStage ? <CommandChip label={growth.strategy.accountStage} /> : null}
+                {topOpportunity?.clusterLabel ? <CommandChip label={topOpportunity.clusterLabel} /> : todayBestMove?.clusterLabel ? <CommandChip label={todayBestMove.clusterLabel} /> : null}
+                {topOpportunity?.sourceAccount ? <CommandChip label={topOpportunity.sourceAccount} /> : todayBestMove?.sourceAccount ? <CommandChip label={todayBestMove.sourceAccount} /> : null}
+                {topOpportunity?.confidence ? <CommandChip label={topOpportunity.confidence} tone={topOpportunity.confidence === 'high' ? 'queue' : topOpportunity.confidence === 'low' ? 'warning' : 'neutral'} /> : todayBestMove?.confidence ? <CommandChip label={todayBestMove.confidence} tone={todayBestMove.confidence === 'high' ? 'queue' : todayBestMove.confidence === 'low' ? 'warning' : 'neutral'} /> : null}
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
                 {topOpportunity?.sourceUrl || todayBestMove?.sourceUrl ? (
@@ -2011,9 +2033,9 @@ export function GrowthReviewPanel() {
       {deskMode === 'queue' ? (
         <div className="space-y-4">
           <div id="growth-ready-to-schedule">
-            <CollapsibleSection title="Publishing queue" subtitle="Ready, scheduled, failed, and published states live here." defaultOpen>
-              <div className="space-y-5">
-                <div className="space-y-3">
+          <CollapsibleSection title="Publishing queue" subtitle="Ready, scheduled, failed, and published states live here." defaultOpen>
+            <div className="grid gap-4 xl:grid-cols-3">
+              <div className="space-y-3 rounded-2xl border border-white/8 bg-[#0f151d] p-4">
                   <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Ready</div>
                   {readyApprovedPosts.length ? readyApprovedPosts.map((post) => {
                     const suggested = buildSuggestedSchedule(post)
@@ -2066,7 +2088,7 @@ export function GrowthReviewPanel() {
                   }) : <div className="rounded-xl border border-white/10 bg-[#10161f] px-4 py-4 text-sm text-muted-foreground">Nothing is ready to publish yet.</div>}
                 </div>
 
-                <div className="space-y-3">
+              <div className="space-y-3 rounded-2xl border border-white/8 bg-[#0f151d] p-4">
                   <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Scheduled</div>
                   {scheduledPosts.length ? scheduledPosts.map((post) => (
                     <div key={`scheduled-${post.id}`} className="rounded-2xl border border-cyan-500/15 bg-[#10161f] p-4">
@@ -2084,7 +2106,7 @@ export function GrowthReviewPanel() {
                   )) : <div className="rounded-xl border border-white/10 bg-[#10161f] px-4 py-4 text-sm text-muted-foreground">Nothing is scheduled.</div>}
                 </div>
 
-                <div className="space-y-3">
+              <div className="space-y-3 rounded-2xl border border-white/8 bg-[#0f151d] p-4">
                   <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Failed</div>
                   {failedPosts.length ? failedPosts.map((post) => (
                     <div key={`failed-${post.id}`} className="rounded-2xl border border-rose-500/15 bg-[#161014] p-4">
