@@ -78,9 +78,13 @@ export default function Home() {
             releaseUrl: data.releaseUrl,
             releaseNotes: data.releaseNotes,
           })
+        } else {
+          setUpdateAvailable(null)
         }
       })
-      .catch(() => {})
+      .catch(() => {
+        setUpdateAvailable(null)
+      })
 
     // Check for available OpenClaw core updates
     fetch('/api/releases/openclaw-check')
@@ -91,9 +95,13 @@ export default function Home() {
             currentVersion: data.currentVersion,
             latestVersion: data.latestVersion,
           })
+        } else {
+          setOpenclawUpdateAvailable(null)
         }
       })
-      .catch(() => {})
+      .catch(() => {
+        setOpenclawUpdateAvailable(null)
+      })
 
     // Check capabilities, then conditionally connect to gateway
     const connectWithConfiguredGateway = () => {
