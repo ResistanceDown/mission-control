@@ -11,6 +11,8 @@ export type TokenAttributionRecord<T extends { taskId?: number | null; agentName
 const BACKGROUND_AGENTS = new Set([
   'ops-cron',
   'habi-foreman',
+  'ops-heartbeat',
+  'habi-qc',
 ])
 
 const BACKGROUND_AGENT_OPERATIONS = new Map<string, Set<string>>([
