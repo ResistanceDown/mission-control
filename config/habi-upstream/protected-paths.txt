@@ -1,0 +1,13 @@
+package.json
+src/app/[[...panel]]/page.tsx
+src/app/api/founder/
+src/app/api/tasks/
+src/components/panels/founder-cockpit-panel.tsx
+src/components/panels/growth-review-panel.tsx
+src/components/panels/office-panel.tsx
+src/components/panels/task-board-panel.tsx
+src/lib/habi-
+src/lib/time-format.ts
+src/lib/validation.ts
+src/lib/websocket.ts
+src/store/index.ts
