@@ -73,19 +73,20 @@ export async function GET(request: Request) {
       maxBuffer: 1024 * 1024,
     })
     const parsed = JSON.parse(stdout) as OpenclawDryRunResult
+    const currentVersionResolved = currentVersion || String(parsed.currentVersion || '').trim()
     const latestVersion = String(parsed.targetVersion || '').trim()
 
-    if (!currentVersion || !latestVersion) {
+    if (!currentVersionResolved || !latestVersion) {
       return NextResponse.json(
-        { updateAvailable: false, currentVersion, latestVersion },
+        { updateAvailable: false, currentVersion: currentVersionResolved, latestVersion },
         { headers: { 'Cache-Control': 'no-store' } }
       )
     }
 
     return NextResponse.json(
       {
-        updateAvailable: compareSemver(latestVersion, currentVersion) > 0,
-        currentVersion,
+        updateAvailable: compareSemver(latestVersion, currentVersionResolved) > 0,
+        currentVersion: currentVersionResolved,
         latestVersion,
       },
       { headers: { 'Cache-Control': 'no-store' } }
