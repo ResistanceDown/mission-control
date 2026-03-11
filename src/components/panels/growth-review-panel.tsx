@@ -19,6 +19,7 @@ type GrowthAction =
   | 'archive_draft'
   | 'clear_current_drafts'
   | 'schedule_draft'
+  | 'post_now'
   | 'unschedule_draft'
   | 'mark_published'
   | 'link_manual_publish'
@@ -1769,6 +1770,7 @@ export function GrowthReviewPanel() {
                         </div>
                         <div className="mt-3 flex flex-wrap gap-2">
                           <button onClick={() => void runGrowthAction('schedule_draft', post.id, { scheduledAt: scheduleState.when, scheduleNote: scheduleState.note, scheduleSource: scheduleState.when === suggested.when ? 'machine_suggested' : 'user_selected' })} disabled={actionState.status === 'saving' || !scheduleState.when} className="rounded-lg bg-emerald-500/15 px-3 py-2 text-xs font-medium text-emerald-200 transition-smooth hover:bg-emerald-500/20 disabled:opacity-60">Schedule</button>
+                          <button onClick={() => void runGrowthAction('post_now', post.id)} disabled={actionState.status === 'saving'} className="rounded-lg bg-cyan-500/15 px-3 py-2 text-xs font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/20 disabled:opacity-60">Post now</button>
                           {post.status === 'scheduled' ? (
                             <button onClick={() => void runGrowthAction('unschedule_draft', post.id)} disabled={actionState.status === 'saving'} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2 disabled:opacity-60">Unschedule</button>
                           ) : null}

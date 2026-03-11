@@ -28,6 +28,7 @@ type GrowthAction =
   | 'reset_to_research'
   | 'clear_current_drafts'
   | 'schedule_draft'
+  | 'post_now'
   | 'unschedule_draft'
   | 'mark_published'
   | 'link_manual_publish'
@@ -196,6 +197,14 @@ function buildDraftQueueMarkdown(weekId: string, researchPath: string, drafts: A
 
 async function runGrowthCommand(script: string, week: string) {
   const { stdout, stderr } = await execFileAsync('pnpm', [script, '--', '--week', week], {
+    cwd: HABI_ROOT,
+    env: process.env,
+  })
+  return { stdout, stderr }
+}
+
+async function postGrowthDraftNow(week: string, draftId: string) {
+  const { stdout, stderr } = await execFileAsync('pnpm', ['growth:m92:publish-approved:keychain', '--', '--week', week, '--max-posts', '1', '--draft-id', draftId], {
     cwd: HABI_ROOT,
     env: process.env,
   })
@@ -1222,6 +1231,24 @@ export async function POST(request: NextRequest) {
         }
 
         return NextResponse.json({ status: 'ok', action: body.action, week, draftId })
+      }
+      case 'post_now': {
+        const draftId = String(body.draftId || '').trim()
+        if (!draftId) {
+          return NextResponse.json({ error: 'draftId is required.' }, { status: 400 })
+        }
+        const approvedPosts = (await readJsonOrNull<Array<Record<string, any>>>(approvedPostsPath)) || []
+        const target = approvedPosts.find((entry) => entry.id === draftId)
+        if (!target) {
+          return NextResponse.json({ error: 'Approved draft not found.' }, { status: 404 })
+        }
+        if (!['approved', 'failed', 'scheduled'].includes(String(target.status || '').trim().toLowerCase())) {
+          return NextResponse.json({ error: 'Draft is not in a publishable state.' }, { status: 400 })
+        }
+        const result = await postGrowthDraftNow(week, draftId)
+        const refreshedApprovedPosts = (await readJsonOrNull<Array<Record<string, any>>>(approvedPostsPath)) || []
+        const refreshedTarget = refreshedApprovedPosts.find((entry) => entry.id === draftId) || null
+        return NextResponse.json({ status: 'ok', action: body.action, week, draftId, publishResult: result.stdout ? JSON.parse(result.stdout) : null, draft: refreshedTarget })
       }
       case 'schedule_draft': {
         const draftId = String(body.draftId || '').trim()
