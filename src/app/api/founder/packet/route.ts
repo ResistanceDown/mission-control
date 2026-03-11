@@ -837,6 +837,20 @@ function growthDraftFamilyKey(draft: Record<string, any>) {
   return opportunityId ? `${distributionType}::${opportunityId}` : ''
 }
 
+
+function filterConsumedGrowthOpportunities(
+  opportunities: Array<Record<string, any>>,
+  approvedPosts: Array<Record<string, any>>,
+) {
+  const consumedFamilies = new Set(
+    approvedPosts
+      .map((post) => String(post.variant_family_id || '').trim().toLowerCase())
+      .filter(Boolean),
+  )
+  if (!consumedFamilies.size) return opportunities
+  return opportunities.filter((opportunity) => !consumedFamilies.has(growthOpportunityFamilyKey(opportunity)))
+}
+
 function reconcileGrowthDraftCandidates(
   selectedOpportunities: Array<Record<string, any>>,
   draftCandidates: Array<Record<string, any>>,
@@ -1572,10 +1586,19 @@ export async function GET(request: NextRequest) {
       growthSourceMemory,
     )
 
-    const normalizedSelectedOpportunities = normalizeSelectedOpportunities(growthOpportunityPack?.selected)
-    const normalizedBlockedOpportunities = normalizeSelectedOpportunities(growthOpportunityPack?.blocked)
-    const normalizedWatchOnlyOpportunities = normalizeSelectedOpportunities(growthOpportunityPack?.watchOnly)
     const normalizedApprovedPosts = normalizeApprovedPosts(growthApprovedPosts)
+    const normalizedSelectedOpportunities = filterConsumedGrowthOpportunities(
+      normalizeSelectedOpportunities(growthOpportunityPack?.selected),
+      normalizedApprovedPosts,
+    )
+    const normalizedBlockedOpportunities = filterConsumedGrowthOpportunities(
+      normalizeSelectedOpportunities(growthOpportunityPack?.blocked),
+      normalizedApprovedPosts,
+    )
+    const normalizedWatchOnlyOpportunities = filterConsumedGrowthOpportunities(
+      normalizeSelectedOpportunities(growthOpportunityPack?.watchOnly),
+      normalizedApprovedPosts,
+    )
     const reconciledGrowthState = reconcileGrowthDraftCandidates(
       normalizedSelectedOpportunities,
       normalizeDraftCandidates(growthDraftPack?.drafts),
