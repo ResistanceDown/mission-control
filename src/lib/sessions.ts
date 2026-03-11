@@ -2,6 +2,8 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { config } from './config'
 
+const sessionTaskIdCache = new Map<string, { mtimeMs: number; taskId: number | null }>()
+
 export interface GatewaySession {
   /** Session store key, e.g. "agent:<agent>:main" */
   key: string
@@ -17,6 +19,12 @@ export interface GatewaySession {
   outputTokens: number
   contextTokens: number
   active: boolean
+  taskId?: number | null
+}
+
+function inferChatTypeFromKey(key: string): string {
+  const parts = String(key).split(':').filter(Boolean)
+  return parts.length >= 3 ? parts[2] : 'unknown'
 }
 
 function getGatewaySessionStoreFiles(): string[] {
@@ -54,6 +62,34 @@ function getGatewaySessionStoreFiles(): string[] {
  * Each file is a JSON object keyed by session key (e.g. "agent:<agent>:main")
  * with session metadata as values.
  */
+
+function getSessionTranscriptPath(agentName: string, sessionMeta: Record<string, any>): string | null {
+  const configured = typeof sessionMeta.sessionFile === 'string' ? sessionMeta.sessionFile.trim() : ''
+  if (configured) return configured
+  const sessionId = typeof sessionMeta.sessionId === 'string' ? sessionMeta.sessionId.trim() : ''
+  if (!sessionId || !config.openclawStateDir) return null
+  return path.join(config.openclawStateDir, 'agents', agentName, 'sessions', `${sessionId}.jsonl`)
+}
+
+function inferSessionTaskId(agentName: string, sessionMeta: Record<string, any>): number | null {
+  const transcriptPath = getSessionTranscriptPath(agentName, sessionMeta)
+  if (!transcriptPath || !fs.existsSync(transcriptPath)) return null
+
+  try {
+    const stats = fs.statSync(transcriptPath)
+    const cached = sessionTaskIdCache.get(transcriptPath)
+    if (cached && cached.mtimeMs === stats.mtimeMs) return cached.taskId
+
+    const raw = fs.readFileSync(transcriptPath, 'utf-8')
+    const matches = [...raw.matchAll(/Task:\s*#(\d+)/g)]
+    const taskId = matches.length > 0 ? Number(matches[matches.length - 1][1]) : null
+    sessionTaskIdCache.set(transcriptPath, { mtimeMs: stats.mtimeMs, taskId })
+    return taskId
+  } catch {
+    return null
+  }
+}
+
 export function getAllGatewaySessions(activeWithinMs = 60 * 60 * 1000): GatewaySession[] {
   const sessions: GatewaySession[] = []
   const now = Date.now()
@@ -66,12 +102,15 @@ export function getAllGatewaySessions(activeWithinMs = 60 * 60 * 1000): GatewayS
       for (const [key, entry] of Object.entries(data)) {
         const s = entry as Record<string, any>
         const updatedAt = s.updatedAt || 0
+        const chatType = typeof s.chatType === 'string' && s.chatType.trim()
+          ? s.chatType.trim()
+          : inferChatTypeFromKey(key)
         sessions.push({
           key,
           agent: agentName,
           sessionId: s.sessionId || '',
           updatedAt,
-          chatType: s.chatType || 'unknown',
+          chatType,
           channel: s.deliveryContext?.channel || s.lastChannel || s.channel || '',
           model: typeof s.model === 'object' && s.model?.primary ? String(s.model.primary) : String(s.model || ''),
           totalTokens: s.totalTokens || 0,
@@ -79,6 +118,7 @@ export function getAllGatewaySessions(activeWithinMs = 60 * 60 * 1000): GatewayS
           outputTokens: s.outputTokens || 0,
           contextTokens: s.contextTokens || 0,
           active: (now - updatedAt) < activeWithinMs,
+          taskId: inferSessionTaskId(agentName, s),
         })
       }
     } catch {

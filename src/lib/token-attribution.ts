@@ -2,7 +2,7 @@ import { getDatabase } from '@/lib/db'
 
 export type TokenAttributionKind = 'task' | 'background' | 'unattributed'
 
-export type TokenAttributionRecord<T extends { taskId?: number | null; agentName: string; sessionId: string }> = T & {
+export type TokenAttributionRecord<T extends { taskId?: number | null; agentName: string; sessionId: string; operation?: string }> = T & {
   taskId: number | null
   attributionKind: TokenAttributionKind
   attributionReason: string
@@ -11,6 +11,10 @@ export type TokenAttributionRecord<T extends { taskId?: number | null; agentName
 const BACKGROUND_AGENTS = new Set([
   'ops-cron',
   'habi-foreman',
+])
+
+const BACKGROUND_AGENT_OPERATIONS = new Map<string, Set<string>>([
+  ['habi-control', new Set(['cron', 'discord'])],
 ])
 
 const INFER_FROM_ACTIVE_ASSIGNMENT_AGENTS = new Set([
@@ -42,7 +46,7 @@ function loadActiveAssignments(workspaceId: number): Map<string, number[]> {
   return out
 }
 
-export function classifyTokenAttribution<T extends { taskId?: number | null; agentName: string; sessionId: string }>(
+export function classifyTokenAttribution<T extends { taskId?: number | null; agentName: string; sessionId: string; operation?: string }>(
   records: T[],
   workspaceId: number,
 ): Array<TokenAttributionRecord<T>> {
@@ -65,6 +69,16 @@ export function classifyTokenAttribution<T extends { taskId?: number | null; age
         taskId: null,
         attributionKind: 'background' as const,
         attributionReason: 'background_agent',
+      }
+    }
+
+    const backgroundOps = BACKGROUND_AGENT_OPERATIONS.get(record.agentName)
+    if (backgroundOps && backgroundOps.has(String(record.operation || '').trim())) {
+      return {
+        ...record,
+        taskId: null,
+        attributionKind: 'background' as const,
+        attributionReason: 'background_agent_operation',
       }
     }
 

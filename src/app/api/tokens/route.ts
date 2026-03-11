@@ -214,7 +214,7 @@ function deriveFromSessions(workspaceId: number, providerSubscriptions: Record<s
       totalTokens,
       cost,
       operation: session.chatType || 'chat',
-      taskId: null,
+      taskId: session.taskId ?? null,
       workspaceId,
     })
   }
