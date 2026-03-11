@@ -206,7 +206,7 @@ export function AgentCostPanel() {
           {worstAttributionAgent && (
             <div className="bg-card border border-border rounded-lg p-4 text-sm text-muted-foreground">
               <span className="font-medium text-foreground">Attribution hint:</span>{' '}
-              {worstAttributionAgent[0]} is currently the biggest actionable unattributed spender. Prioritize task-id attribution in that agent's session/task reporting path.
+              {worstAttributionAgent[0]} is currently the biggest actionable unattributed spender. Prioritize task-id attribution in that agent&apos;s session/task reporting path.
             </div>
           )}
 

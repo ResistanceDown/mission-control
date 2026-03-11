@@ -1131,10 +1131,10 @@ export function GrowthReviewPanel() {
       [...group].sort((left, right) => Number(left.variant_position || 999) - Number(right.variant_position || 999)),
     )
   }, [growth?.draftCandidates])
-  const approvedPosts = growth?.approvedPosts || []
-  const selectedOpportunities = growth?.selectedOpportunities || []
-  const blockedOpportunities = growth?.blockedOpportunities || []
-  const watchOnlyOpportunities = growth?.watchOnlyOpportunities || []
+  const approvedPosts = useMemo(() => growth?.approvedPosts || [], [growth])
+  const selectedOpportunities = useMemo(() => growth?.selectedOpportunities || [], [growth])
+  const blockedOpportunities = useMemo(() => growth?.blockedOpportunities || [], [growth])
+  const watchOnlyOpportunities = useMemo(() => growth?.watchOnlyOpportunities || [], [growth])
   const reactiveOpportunities = selectedOpportunities.filter((opportunity) => opportunity.distributionType === 'reply' || opportunity.distributionType === 'quote')
   const standaloneOpportunities = selectedOpportunities.filter((opportunity) => opportunity.distributionType === 'original')
   const reactiveOpportunityFamilies = useMemo(() => {
@@ -1163,7 +1163,7 @@ export function GrowthReviewPanel() {
   }, [reactiveOpportunities])
   const retryableFailedPosts = approvedPosts.filter((post) => post.status === 'failed' && !isNonReplyablePublishError(post.publishError))
   const readyPosts = approvedPosts.filter((post) => post.status === 'approved').concat(retryableFailedPosts)
-  const scheduledPosts = approvedPosts.filter((post) => post.status === 'scheduled')
+  const scheduledPosts = useMemo(() => approvedPosts.filter((post) => post.status === 'scheduled'), [approvedPosts])
   const publishedPosts = approvedPosts.filter((post) => post.status === 'published')
   const candidateCount = growth?.stateIntegrity?.draftCandidateCount ?? growth?.draftCandidates.length ?? 0
   const opportunityCount = growth?.stateIntegrity?.selectedOpportunityCount ?? selectedOpportunities.length
@@ -1195,7 +1195,7 @@ export function GrowthReviewPanel() {
       if (matched) return matched
     }
     return sortedForGrowth[0] || growth.draftCandidates[0] || null
-  }, [growth?.draftCandidates, sortedForGrowth, topOpportunity?.sourceUrl])
+  }, [growth, sortedForGrowth, topOpportunity])
   useEffect(() => {
     setTopDraftRewritePrompt('')
   }, [topDraft?.id])
