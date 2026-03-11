@@ -78,6 +78,40 @@ async function findLatestGrowthWeek(root: string): Promise<string | null> {
   return weekNames[0] ?? null
 }
 
+function resolveOperationalWeekName() {
+  const week1Start = new Date('2026-03-02T00:00:00-08:00')
+  const now = new Date()
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Los_Angeles',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  })
+  const parts = formatter.formatToParts(now)
+  const year = Number(parts.find((part) => part.type === 'year')?.value || '2026')
+  const month = Number(parts.find((part) => part.type === 'month')?.value || '3')
+  const day = Number(parts.find((part) => part.type === 'day')?.value || '2')
+  const localMidnight = new Date(Date.UTC(year, month - 1, day, 8, 0, 0))
+  const weekday = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', weekday: 'short' }).format(localMidnight)
+    .replace('Sun', '0').replace('Mon', '1').replace('Tue', '2').replace('Wed', '3').replace('Thu', '4').replace('Fri', '5').replace('Sat', '6'))
+  const monday = new Date(localMidnight)
+  monday.setUTCDate(monday.getUTCDate() - ((weekday + 6) % 7))
+  const diffMs = monday.getTime() - week1Start.getTime()
+  const week = Math.max(1, Math.floor(diffMs / (7 * 24 * 60 * 60 * 1000)) + 1)
+  return `week-${week}`
+}
+
+async function resolveGrowthWeek(root: string): Promise<string | null> {
+  const currentWeek = resolveOperationalWeekName()
+  try {
+    const stat = await fs.stat(path.join(root, currentWeek))
+    if (stat.isDirectory()) return currentWeek
+  } catch {
+    // fall back to highest existing week
+  }
+  return findLatestGrowthWeek(root)
+}
+
 function normalizeGrowthResearchSignals(input: unknown): string[] {
   if (!Array.isArray(input)) return []
 
@@ -1498,7 +1532,7 @@ export async function GET(request: NextRequest) {
     const signalLedger = (await readJsonOrNull<any[]>(SIGNAL_LEDGER_PATH)) || []
     const productProofLedger = (await readJsonOrNull<any[]>(PRODUCT_PROOF_PATH)) || []
     const adoption = await readJsonOrNull<any>(ADOPTION_SCORECARD_PATH)
-    const latestGrowthWeek = await findLatestGrowthWeek(GROWTH_WEEKS_ROOT)
+    const latestGrowthWeek = await resolveGrowthWeek(GROWTH_WEEKS_ROOT)
     const growthPaths = latestGrowthWeek
       ? {
           researchBriefPath: path.join(GROWTH_WEEKS_ROOT, latestGrowthWeek, 'research-brief.json'),
