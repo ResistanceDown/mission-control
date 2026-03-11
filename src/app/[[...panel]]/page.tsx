@@ -69,7 +69,7 @@ export default function Home() {
       .catch(() => {})
 
     // Check for available updates
-    fetch('/api/releases/check')
+    fetch('/api/releases/check', { cache: 'no-store' })
       .then(res => res.ok ? res.json() : null)
       .then(data => {
         if (data?.updateAvailable) {
@@ -87,7 +87,7 @@ export default function Home() {
       })
 
     // Check for available OpenClaw core updates
-    fetch('/api/releases/openclaw-check')
+    fetch('/api/releases/openclaw-check', { cache: 'no-store' })
       .then(res => res.ok ? res.json() : null)
       .then(data => {
         if (data?.updateAvailable) {

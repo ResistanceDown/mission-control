@@ -1,6 +1,27 @@
 'use client'
 
 import { useMissionControl } from '@/store'
+import { APP_VERSION } from '@/lib/version'
+
+function normalizeVersion(value: string | null | undefined): number[] {
+  return String(value || '')
+    .replace(/^v/, '')
+    .split('-')[0]
+    .split('.')
+    .map((part) => Number(part) || 0)
+}
+
+function isVersionNewer(latest: string | null | undefined, current: string | null | undefined): boolean {
+  const a = normalizeVersion(latest)
+  const b = normalizeVersion(current)
+  for (let i = 0; i < Math.max(a.length, b.length); i += 1) {
+    const av = a[i] ?? 0
+    const bv = b[i] ?? 0
+    if (av > bv) return true
+    if (av < bv) return false
+  }
+  return false
+}
 
 export function UpdateBanner() {
   const {
@@ -13,7 +34,9 @@ export function UpdateBanner() {
   } = useMissionControl()
 
   const showMissionControlUpdate = Boolean(
-    updateAvailable && updateDismissedVersion !== updateAvailable.latestVersion
+    updateAvailable &&
+    updateDismissedVersion !== updateAvailable.latestVersion &&
+    isVersionNewer(updateAvailable.latestVersion, updateAvailable.currentVersion || APP_VERSION)
   )
   const showOpenclawUpdate = Boolean(
     openclawUpdateAvailable &&
