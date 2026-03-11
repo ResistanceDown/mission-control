@@ -12,7 +12,8 @@ import { parseHabiTaskMetadata } from '@/lib/habi-task-contract'
 
 import { AgentAvatar } from '@/components/ui/agent-avatar'
 import { MarkdownRenderer } from '@/components/markdown-renderer'
-import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { CartesianGrid, Line, LineChart, Tooltip, XAxis, YAxis } from 'recharts'
+import { ChartFrame } from '@/components/ui/chart-frame'
 
 const log = createClientLogger('TaskBoard')
 
@@ -970,7 +971,7 @@ export function TaskBoardPanel() {
           </div>
 
           <div className="grid gap-4 lg:grid-cols-2">
-            <section className="rounded-lg border border-border bg-card p-4">
+            <section className="min-w-0 rounded-lg border border-border bg-card p-4">
               <h3 className="text-sm font-semibold text-foreground">Outcome mix</h3>
               <div className="mt-3 grid grid-cols-2 gap-3">
                 {Object.entries(outcomes?.summary.by_outcome || {}).map(([key, value]) => (
@@ -981,7 +982,7 @@ export function TaskBoardPanel() {
                 ))}
               </div>
             </section>
-            <section className="rounded-lg border border-border bg-card p-4">
+            <section className="min-w-0 rounded-lg border border-border bg-card p-4">
               <h3 className="text-sm font-semibold text-foreground">Queue diagnostics</h3>
               <div className="mt-3 space-y-2">
                 <div className="flex items-center justify-between rounded-md border border-border bg-surface-1/40 px-3 py-2 text-sm">
@@ -1005,7 +1006,7 @@ export function TaskBoardPanel() {
           </div>
 
           <div className="grid gap-4 lg:grid-cols-2">
-            <section className="rounded-lg border border-border bg-card p-4">
+            <section className="min-w-0 rounded-lg border border-border bg-card p-4">
               <h3 className="text-sm font-semibold text-foreground">By agent</h3>
               <div className="mt-3 space-y-2">
                 {topOutcomeAgents.slice(0, 6).map((entry) => (
@@ -1025,7 +1026,7 @@ export function TaskBoardPanel() {
                 )}
               </div>
             </section>
-            <section className="rounded-lg border border-border bg-card p-4">
+            <section className="min-w-0 rounded-lg border border-border bg-card p-4">
               <h3 className="text-sm font-semibold text-foreground">By priority</h3>
               <div className="mt-3 space-y-2">
                 {topOutcomePriorities.map((entry) => (
@@ -1048,7 +1049,7 @@ export function TaskBoardPanel() {
           </div>
 
           <div className="grid gap-4 lg:grid-cols-2">
-            <section className="rounded-lg border border-border bg-card p-4">
+            <section className="min-w-0 rounded-lg border border-border bg-card p-4">
               <h3 className="text-sm font-semibold text-foreground">Common failure reasons</h3>
               <div className="mt-3 space-y-2">
                 {(outcomes?.common_errors || []).slice(0, 5).map((item) => (
@@ -1062,7 +1063,7 @@ export function TaskBoardPanel() {
                 )}
               </div>
             </section>
-            <section className="rounded-lg border border-border bg-card p-4">
+            <section className="min-w-0 rounded-lg border border-border bg-card p-4">
               <h3 className="text-sm font-semibold text-foreground">Top costly tasks</h3>
               <div className="mt-3 space-y-2">
                 {topCostTasks.map((entry) => (
@@ -1084,31 +1085,32 @@ export function TaskBoardPanel() {
           </div>
 
           <div className="grid gap-4 lg:grid-cols-[1.35fr_1fr]">
-            <section className="rounded-lg border border-border bg-card p-4">
+            <section className="min-w-0 rounded-lg border border-border bg-card p-4">
               <h3 className="text-sm font-semibold text-foreground">Outcome trend</h3>
               <p className="mt-1 text-xs text-muted-foreground">Success, failure, and partial outcomes across the selected window.</p>
-              <div className="mt-4 h-64">
-                {outcomes?.trends?.length ? (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={outcomes.trends}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.15)" />
-                      <XAxis dataKey="bucket" tick={{ fill: 'currentColor', fontSize: 12 }} />
-                      <YAxis tick={{ fill: 'currentColor', fontSize: 12 }} />
-                      <Tooltip />
-                      <Line type="monotone" dataKey="success" stroke="#22c55e" strokeWidth={2} dot={false} />
-                      <Line type="monotone" dataKey="failed" stroke="#ef4444" strokeWidth={2} dot={false} />
-                      <Line type="monotone" dataKey="partial" stroke="#f59e0b" strokeWidth={2} dot={false} />
-                    </LineChart>
-                  </ResponsiveContainer>
+              <ChartFrame
+                className="mt-4 h-64 min-w-0 w-full"
+                empty={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">No outcome trend data yet.</div>}
+              >
+                {(size) => outcomes?.trends?.length ? (
+                  <LineChart width={size.width} height={size.height} data={outcomes.trends}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.15)" />
+                    <XAxis dataKey="bucket" tick={{ fill: 'currentColor', fontSize: 12 }} />
+                    <YAxis tick={{ fill: 'currentColor', fontSize: 12 }} />
+                    <Tooltip />
+                    <Line type="monotone" dataKey="success" stroke="#22c55e" strokeWidth={2} dot={false} />
+                    <Line type="monotone" dataKey="failed" stroke="#ef4444" strokeWidth={2} dot={false} />
+                    <Line type="monotone" dataKey="partial" stroke="#f59e0b" strokeWidth={2} dot={false} />
+                  </LineChart>
                 ) : (
                   <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
                     No outcome trend data yet.
                   </div>
                 )}
-              </div>
+              </ChartFrame>
             </section>
 
-            <section className="rounded-lg border border-border bg-card p-4">
+            <section className="min-w-0 rounded-lg border border-border bg-card p-4">
               <h3 className="text-sm font-semibold text-foreground">Recent interventions</h3>
               <p className="mt-1 text-xs text-muted-foreground">Completed tasks that needed retries or landed in a non-success state.</p>
               <div className="mt-4 space-y-2">

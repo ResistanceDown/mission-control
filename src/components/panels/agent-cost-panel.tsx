@@ -4,8 +4,9 @@ import { useState, useEffect, useCallback } from 'react'
 import { createClientLogger } from '@/lib/client-logger'
 import {
   PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, CartesianGrid,
-  Tooltip, Legend, ResponsiveContainer,
+  Tooltip, Legend,
 } from 'recharts'
+import { ChartFrame } from '@/components/ui/chart-frame'
 
 const log = createClientLogger('AgentCostPanel')
 
@@ -151,20 +152,20 @@ export function AgentCostPanel() {
         <div className="space-y-6">
           {/* Summary Cards */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-            <div className="bg-card border border-border rounded-lg p-6">
+            <div className="min-w-0 bg-card border border-border rounded-lg p-6">
               <div className="text-3xl font-bold text-foreground">{totalAgents}</div>
               <div className="text-sm text-muted-foreground">Total Agents</div>
             </div>
-            <div className="bg-card border border-border rounded-lg p-6">
+            <div className="min-w-0 bg-card border border-border rounded-lg p-6">
               <div className="text-3xl font-bold text-foreground">{formatCost(totalCost)}</div>
               <div className="text-sm text-muted-foreground">Total Cost ({selectedTimeframe})</div>
             </div>
-            <div className="bg-card border border-border rounded-lg p-6">
+            <div className="min-w-0 bg-card border border-border rounded-lg p-6">
               <div className="text-3xl font-bold text-orange-500">{mostExpensive?.[0] || '-'}</div>
               <div className="text-sm text-muted-foreground">Most Expensive Agent</div>
               {mostExpensive && <div className="text-xs text-muted-foreground mt-1">{formatCost(mostExpensive[1].stats.totalCost)}</div>}
             </div>
-            <div className="bg-card border border-border rounded-lg p-6">
+            <div className="min-w-0 bg-card border border-border rounded-lg p-6">
               <div className="text-3xl font-bold text-green-500">{mostEfficient?.[0] || '-'}</div>
               <div className="text-sm text-muted-foreground">Most Efficient Agent</div>
               {mostEfficient && (
@@ -176,15 +177,15 @@ export function AgentCostPanel() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="bg-card border border-border rounded-lg p-6">
+            <div className="min-w-0 bg-card border border-border rounded-lg p-6">
               <div className="text-3xl font-bold text-foreground">{totalAttributedRequests}</div>
               <div className="text-sm text-muted-foreground">Attributed requests</div>
             </div>
-            <div className="bg-card border border-border rounded-lg p-6">
+            <div className="min-w-0 bg-card border border-border rounded-lg p-6">
               <div className="text-3xl font-bold text-foreground">{totalUnattributedRequests}</div>
               <div className="text-sm text-muted-foreground">Unattributed requests</div>
             </div>
-            <div className="bg-card border border-border rounded-lg p-6">
+            <div className="min-w-0 bg-card border border-border rounded-lg p-6">
               <div className="text-3xl font-bold text-foreground">
                 {data.recordCount > 0 ? `${Math.round((data.attributedRecordCount / data.recordCount) * 100)}%` : '0%'}
               </div>
@@ -202,53 +203,49 @@ export function AgentCostPanel() {
           {/* Charts */}
           <div className="grid lg:grid-cols-2 gap-6">
             {/* Cost Distribution Pie */}
-            <div className="bg-card border border-border rounded-lg p-6">
+            <div className="min-w-0 bg-card border border-border rounded-lg p-6">
               <h2 className="text-xl font-semibold mb-4">Cost Distribution by Agent</h2>
-              <div className="h-64">
-                {pieData.length === 0 ? (
+              <ChartFrame className="h-64 min-w-0 w-full">
+                {(size) => pieData.length === 0 ? (
                   <div className="h-full flex items-center justify-center text-muted-foreground text-sm">No cost data</div>
                 ) : (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie data={pieData} cx="50%" cy="50%" innerRadius={40} outerRadius={80} paddingAngle={5} dataKey="value">
-                        {pieData.map((_, i) => (
-                          <Cell key={`cell-${i}`} fill={COLORS[i % COLORS.length]} />
-                        ))}
-                      </Pie>
-                      <Tooltip formatter={(value) => formatCost(Number(value))} />
-                      <Legend />
-                    </PieChart>
-                  </ResponsiveContainer>
+                  <PieChart width={size.width} height={size.height}>
+                    <Pie data={pieData} cx="50%" cy="50%" innerRadius={40} outerRadius={80} paddingAngle={5} dataKey="value">
+                      {pieData.map((_, i) => (
+                        <Cell key={`cell-${i}`} fill={COLORS[i % COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip formatter={(value) => formatCost(Number(value))} />
+                    <Legend />
+                  </PieChart>
                 )}
-              </div>
+              </ChartFrame>
             </div>
 
             {/* Cost Trend Lines */}
-            <div className="bg-card border border-border rounded-lg p-6">
+            <div className="min-w-0 bg-card border border-border rounded-lg p-6">
               <h2 className="text-xl font-semibold mb-4">Cost Trends (Top 5 Agents)</h2>
-              <div className="h-64">
-                {trendData.length === 0 ? (
+              <ChartFrame className="h-64 min-w-0 w-full">
+                {(size) => trendData.length === 0 ? (
                   <div className="h-full flex items-center justify-center text-muted-foreground text-sm">No trend data</div>
                 ) : (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={trendData}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="date" />
-                      <YAxis />
-                      <Tooltip formatter={(value) => formatCost(Number(value))} />
-                      <Legend />
-                      {top5.map((name, i) => (
-                        <Line key={name} type="monotone" dataKey={name} stroke={COLORS[i % COLORS.length]} strokeWidth={2} dot={false} />
-                      ))}
-                    </LineChart>
-                  </ResponsiveContainer>
+                  <LineChart width={size.width} height={size.height} data={trendData}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="date" />
+                    <YAxis />
+                    <Tooltip formatter={(value) => formatCost(Number(value))} />
+                    <Legend />
+                    {top5.map((name, i) => (
+                      <Line key={name} type="monotone" dataKey={name} stroke={COLORS[i % COLORS.length]} strokeWidth={2} dot={false} />
+                    ))}
+                  </LineChart>
                 )}
-              </div>
+              </ChartFrame>
             </div>
           </div>
 
           {/* Cost Efficiency Comparison */}
-          <div className="bg-card border border-border rounded-lg p-6">
+          <div className="min-w-0 bg-card border border-border rounded-lg p-6">
             <h2 className="text-xl font-semibold mb-4">Cost Efficiency ($/1K Tokens per Agent)</h2>
             <div className="space-y-2">
               {efficiencyData.map(({ name, costPer1k }) => (
@@ -269,7 +266,7 @@ export function AgentCostPanel() {
           </div>
 
           {/* Agent Cost Ranking Table */}
-          <div className="bg-card border border-border rounded-lg p-6">
+          <div className="min-w-0 bg-card border border-border rounded-lg p-6">
             <h2 className="text-xl font-semibold mb-4">Agent Cost Ranking</h2>
             <div className="space-y-2 max-h-[500px] overflow-y-auto">
               {sortedAgents.map(([name, a], index) => (

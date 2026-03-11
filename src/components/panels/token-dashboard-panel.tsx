@@ -3,7 +3,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useMissionControl } from '@/store'
 import { createClientLogger } from '@/lib/client-logger'
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell } from 'recharts'
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, BarChart, Bar, PieChart, Pie, Cell } from 'recharts'
+import { ChartFrame } from '@/components/ui/chart-frame'
 
 const log = createClientLogger('TokenDashboard')
 
@@ -319,7 +320,7 @@ export function TokenDashboardPanel() {
         <div className="space-y-6">
           {/* Overview Stats */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-            <div className="bg-card border border-border rounded-lg p-6">
+            <div className="min-w-0 bg-card border border-border rounded-lg p-6">
               <div className="text-3xl font-bold text-foreground">
                 {formatNumber(usageStats.summary.totalTokens)}
               </div>
@@ -328,7 +329,7 @@ export function TokenDashboardPanel() {
               </div>
             </div>
 
-            <div className="bg-card border border-border rounded-lg p-6">
+            <div className="min-w-0 bg-card border border-border rounded-lg p-6">
               <div className="text-3xl font-bold text-foreground">
                 {formatCost(usageStats.summary.totalCost)}
               </div>
@@ -337,7 +338,7 @@ export function TokenDashboardPanel() {
               </div>
             </div>
 
-            <div className="bg-card border border-border rounded-lg p-6">
+            <div className="min-w-0 bg-card border border-border rounded-lg p-6">
               <div className="text-3xl font-bold text-foreground">
                 {formatNumber(usageStats.summary.requestCount)}
               </div>
@@ -346,7 +347,7 @@ export function TokenDashboardPanel() {
               </div>
             </div>
 
-            <div className="bg-card border border-border rounded-lg p-6">
+            <div className="min-w-0 bg-card border border-border rounded-lg p-6">
               <div className="text-3xl font-bold text-foreground">
                 {formatNumber(usageStats.summary.avgTokensPerRequest)}
               </div>
@@ -358,7 +359,7 @@ export function TokenDashboardPanel() {
 
           {taskCosts && (
             <div className="grid grid-cols-1 lg:grid-cols-[1.4fr_1fr] gap-6">
-              <div className="bg-card border border-border rounded-lg p-6">
+              <div className="min-w-0 bg-card border border-border rounded-lg p-6">
                 <div className="flex items-center justify-between mb-4">
                   <div>
                     <h2 className="text-xl font-semibold">Task Attribution Health</h2>
@@ -385,7 +386,7 @@ export function TokenDashboardPanel() {
                 </div>
               </div>
 
-              <div className="bg-card border border-border rounded-lg p-6">
+              <div className="min-w-0 bg-card border border-border rounded-lg p-6">
                 <h2 className="text-xl font-semibold mb-4">Top Unattributed Agents</h2>
                 <div className="space-y-3">
                   {taskCosts.topUnattributedAgents.length === 0 ? (
@@ -416,12 +417,11 @@ export function TokenDashboardPanel() {
             {/* Usage Trends Chart */}
             <div className="bg-card border border-border rounded-lg p-6 lg:col-span-2">
               <h2 className="text-xl font-semibold mb-4">Usage Trends (Last 24h)</h2>
-              <div className="h-64">
-                {prepareTrendChartData().length === 0 ? (
+              <ChartFrame className="h-64 min-w-0 w-full">
+                {(size) => prepareTrendChartData().length === 0 ? (
                   <div className="h-full flex items-center justify-center text-muted-foreground text-sm">No trend data for this timeframe</div>
                 ) : (
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={prepareTrendChartData()}>
+                  <LineChart width={size.width} height={size.height} data={prepareTrendChartData()}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="time" />
                     <YAxis />
@@ -442,20 +442,18 @@ export function TokenDashboardPanel() {
                       name="Requests"
                     />
                   </LineChart>
-                </ResponsiveContainer>
                 )}
-              </div>
+              </ChartFrame>
             </div>
 
             {/* Model Usage Bar Chart */}
-            <div className="bg-card border border-border rounded-lg p-6">
+            <div className="min-w-0 bg-card border border-border rounded-lg p-6">
               <h2 className="text-xl font-semibold mb-4">Token Usage by Model</h2>
-              <div className="h-64">
-                {prepareModelChartData().length === 0 ? (
+              <ChartFrame className="h-64 min-w-0 w-full">
+                {(size) => prepareModelChartData().length === 0 ? (
                   <div className="h-full flex items-center justify-center text-muted-foreground text-sm">No model usage data yet</div>
                 ) : (
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={prepareModelChartData()}>
+                  <BarChart width={size.width} height={size.height} data={prepareModelChartData()}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis 
                       dataKey="name" 
@@ -468,20 +466,18 @@ export function TokenDashboardPanel() {
                     <Tooltip formatter={(value, name) => [formatNumber(Number(value)), name]} />
                     <Bar dataKey="tokens" fill="#8884d8" name="Tokens" />
                   </BarChart>
-                </ResponsiveContainer>
                 )}
-              </div>
+              </ChartFrame>
             </div>
 
             {/* Cost Distribution Pie Chart */}
-            <div className="bg-card border border-border rounded-lg p-6">
+            <div className="min-w-0 bg-card border border-border rounded-lg p-6">
               <h2 className="text-xl font-semibold mb-4">Cost Distribution by Model</h2>
-              <div className="h-64">
-                {preparePieChartData().length === 0 ? (
+              <ChartFrame className="h-64 min-w-0 w-full">
+                {(size) => preparePieChartData().length === 0 ? (
                   <div className="h-full flex items-center justify-center text-muted-foreground text-sm">No cost data yet</div>
                 ) : (
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
+                  <PieChart width={size.width} height={size.height}>
                     <Pie
                       data={preparePieChartData()}
                       cx="50%"
@@ -498,14 +494,13 @@ export function TokenDashboardPanel() {
                     <Tooltip formatter={(value) => formatCost(Number(value))} />
                     <Legend />
                   </PieChart>
-                </ResponsiveContainer>
                 )}
-              </div>
+              </ChartFrame>
             </div>
           </div>
 
           {/* Export Section */}
-          <div className="bg-card border border-border rounded-lg p-6">
+          <div className="min-w-0 bg-card border border-border rounded-lg p-6">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-semibold">Export Data</h2>
               <div className="flex space-x-2">
@@ -531,7 +526,7 @@ export function TokenDashboardPanel() {
           </div>
 
           {taskCosts && (
-            <div className="bg-card border border-border rounded-lg p-6">
+            <div className="min-w-0 bg-card border border-border rounded-lg p-6">
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <h2 className="text-xl font-semibold">Top Costly Tasks</h2>
@@ -563,7 +558,7 @@ export function TokenDashboardPanel() {
 
           {/* Performance Insights */}
           {performanceMetrics && (
-            <div className="bg-card border border-border rounded-lg p-6">
+            <div className="min-w-0 bg-card border border-border rounded-lg p-6">
               <h2 className="text-xl font-semibold mb-4">Performance Insights</h2>
               
               {/* Alerts */}
@@ -664,7 +659,7 @@ export function TokenDashboardPanel() {
           {/* Detailed Statistics */}
           <div className="grid lg:grid-cols-2 gap-6">
             {/* Model Statistics */}
-            <div className="bg-card border border-border rounded-lg p-6">
+            <div className="min-w-0 bg-card border border-border rounded-lg p-6">
               <h2 className="text-xl font-semibold mb-4">Model Performance</h2>
               
               <div className="space-y-3 max-h-96 overflow-y-auto">
@@ -710,7 +705,7 @@ export function TokenDashboardPanel() {
             </div>
 
             {/* Session Statistics */}
-            <div className="bg-card border border-border rounded-lg p-6">
+            <div className="min-w-0 bg-card border border-border rounded-lg p-6">
               <h2 className="text-xl font-semibold mb-4">Top Sessions by Cost</h2>
               
               <div className="space-y-3 max-h-96 overflow-y-auto">
