@@ -6,8 +6,15 @@ const GITHUB_RELEASES_URL =
 
 /** Simple semver compare: returns 1 if a > b, -1 if a < b, 0 if equal. */
 function compareSemver(a: string, b: string): number {
-  const pa = a.replace(/^v/, '').split('.').map(Number)
-  const pb = b.replace(/^v/, '').split('.').map(Number)
+  const normalize = (value: string) =>
+    value
+      .replace(/^v/, '')
+      .split('-')[0]
+      .split('.')
+      .map(Number)
+
+  const pa = normalize(a)
+  const pb = normalize(b)
   for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
     const na = pa[i] ?? 0
     const nb = pb[i] ?? 0

@@ -2,6 +2,22 @@
 
 All notable changes to Mission Control are documented in this file.
 
+## [2.0.0-habi.1] - 2026-03-11
+
+### Added
+- Habi upstream sync workflow for selective upstream porting without destabilizing founder, growth, and task-specific surfaces.
+- `pnpm sync:report` and supporting manifests to classify divergence into protected Habi surfaces, safe-first port candidates, and review-needed paths.
+- Clean upstream-sync worktree preparation script for isolated upgrade work.
+
+### Changed
+- Mission Control now identifies as a `2.0.0`-based Habi fork (`2.0.0-habi.1`) instead of an older `1.3.x` line.
+- Release-check version comparison now understands fork suffixes so `2.0.0-habi.1` is treated as current relative to upstream `2.0.0`.
+- Gateway connection bootstrap now uses the shared URL normalization path instead of constructing websocket URLs ad hoc in the app shell.
+
+### Fixed
+- Local gateway websocket targets now normalize correctly for loopback, explicit proxy paths, pasted dashboard URLs, and token-bearing URLs.
+- Reconnect path now reuses normalized gateway URLs instead of reconnecting through raw, potentially malformed URLs.
+
 ## [1.3.1] - 2026-03-04
 
 ### Added
