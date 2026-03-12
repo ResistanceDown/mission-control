@@ -536,13 +536,13 @@ function OpportunityCard({
     )}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-sm font-semibold text-foreground">{opportunity.title || 'Opportunity'}</div>
-          <div className="mt-1 text-xs text-foreground/70">{summaryReason}</div>
-          <div className="mt-2 flex flex-wrap gap-2">
-            {opportunity.distributionType ? <FieldChip>{opportunity.distributionType}</FieldChip> : null}
-            {opportunity.confidence ? <FieldChip>{opportunity.confidence}</FieldChip> : null}
-            {opportunity.sourceAccount ? <FieldChip>{opportunity.sourceAccount}</FieldChip> : null}
+          <div className="flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
+            {opportunity.sourceAccount ? <span>{opportunity.sourceAccount}</span> : null}
+            {opportunity.distributionType ? <span>{opportunity.distributionType}</span> : null}
+            {opportunity.confidence ? <span>{opportunity.confidence}</span> : null}
           </div>
+          <div className="mt-2 text-sm font-semibold leading-6 text-foreground">{opportunity.title || 'Opportunity'}</div>
+          <div className="mt-1 line-clamp-2 text-xs leading-5 text-foreground/72">{summaryReason}</div>
         </div>
         <span className={cx(
           'rounded-full border px-2 py-1 text-[10px] uppercase tracking-[0.16em]',
@@ -552,8 +552,14 @@ function OpportunityCard({
         </span>
       </div>
       {opportunity.sourceText ? (
-        <div className="mt-4 rounded-xl border border-white/8 bg-black/15 px-3 py-3 text-sm leading-6 text-foreground/88 whitespace-pre-wrap">
-          {opportunity.sourceText}
+        <div className="mt-4 rounded-xl border border-white/8 bg-black/20 px-4 py-4">
+          <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.12em] text-cyan-100/70">
+            <span className="text-cyan-200">Source tweet</span>
+            {opportunity.clusterLabel ? <span className="text-muted-foreground">{opportunity.clusterLabel}</span> : null}
+          </div>
+          <div className="mt-3 border-l-2 border-cyan-500/35 pl-3 text-sm leading-6 text-foreground/88 whitespace-pre-wrap">
+            {opportunity.sourceText}
+          </div>
         </div>
       ) : null}
       <div className="mt-4 flex flex-wrap gap-2">
@@ -734,6 +740,7 @@ function OpportunityFamilyGroup({
     <article className="rounded-2xl border border-cyan-500/15 bg-[#0f151d] p-4 shadow-[0_18px_40px_rgba(0,0,0,0.26)]">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
+          <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Source family</div>
           <div className="mt-1 text-sm font-semibold text-foreground">{sourceLabel}</div>
           <div className="mt-1 line-clamp-1 text-xs text-muted-foreground">{leader.selectionReason || leader.whyNow || 'Review this source before drafting.'}</div>
         </div>
@@ -837,8 +844,8 @@ function DraftCard({
           <div className="text-sm font-semibold text-foreground">{draft.pillar}: {draft.angle}</div>
           <div className="mt-2 flex flex-wrap gap-2">
             {draft.distribution_type ? <FieldChip>{draft.distribution_type}</FieldChip> : null}
-            {draft.confidence ? <FieldChip>confidence {draft.confidence}</FieldChip> : null}
             {draft.source_account ? <FieldChip>{draft.source_account}</FieldChip> : null}
+            {draft.confidence ? <FieldChip>{draft.confidence}</FieldChip> : null}
           </div>
         </div>
         <span className={cx(
@@ -852,6 +859,17 @@ function DraftCard({
 
       <div className="mt-4 grid gap-4 xl:grid-cols-[1.25fr_0.75fr]">
         <div className="rounded-xl border border-cyan-500/15 bg-[#0c1219] px-4 py-4">
+          {draft.source_tweet?.text ? (
+            <div className="mb-3 rounded-xl border border-white/8 bg-black/20 px-3 py-3">
+              <div className="flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-[0.12em] text-cyan-100/70">
+                <span>Source context</span>
+                {draft.source_account ? <span className="text-muted-foreground">{draft.source_account}</span> : null}
+              </div>
+              <div className="mt-2 border-l-2 border-cyan-500/35 pl-3 text-sm leading-6 text-foreground/82">
+                {draft.source_tweet.text}
+              </div>
+            </div>
+          ) : null}
           <div className="mb-2 flex items-center justify-between gap-3">
             <div>
               <div className="text-[11px] uppercase tracking-[0.12em] text-cyan-100/70">Exact post text</div>
@@ -1021,10 +1039,6 @@ function SourceVariantGroup({
 }) {
   if (!drafts.length) return null
   const leader = drafts[0]
-  const sourceLikes = getSourceMetric(leader, 'like_count')
-  const sourceReplies = getSourceMetric(leader, 'reply_count')
-  const sourceReposts = getSourceMetric(leader, 'retweet_count')
-  const sourceFollowers = getSourceAuthorFollowers(leader)
   return (
     <details
       open={defaultOpen}
@@ -1034,15 +1048,11 @@ function SourceVariantGroup({
         <div className="min-w-0">
           <div className="text-[11px] uppercase tracking-[0.14em] text-cyan-100/70">{familyLabel}</div>
           <div className="mt-1 text-sm font-semibold text-foreground">{sourceLabel}</div>
-          <div className="mt-1 text-xs text-muted-foreground">
-            {drafts.length} variants from the same source.
-          </div>
+          <div className="mt-1 text-xs text-muted-foreground">{drafts.length} variants from the same source.</div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {leader.distribution_type ? <FieldChip>{leader.distribution_type}</FieldChip> : null}
           {leader.source_account ? <FieldChip>{leader.source_account}</FieldChip> : null}
-          {sourceReplies ? <FieldChip>{sourceReplies} replies</FieldChip> : null}
-          {sourceFollowers ? <FieldChip>{sourceFollowers.toLocaleString()} followers</FieldChip> : null}
           <button
             type="button"
             onClick={(event) => {
