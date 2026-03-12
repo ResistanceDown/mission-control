@@ -1100,6 +1100,81 @@ function DraftCard({
   )
 }
 
+function OpportunitySelectorCard({
+  opportunity,
+  selected,
+  onSelect,
+}: {
+  opportunity: GrowthApiResponse['growth']['selectedOpportunities'][number]
+  selected: boolean
+  onSelect: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className={cx(
+        'w-full rounded-2xl border p-4 text-left shadow-[0_16px_32px_rgba(0,0,0,0.18)] transition-smooth',
+        selected ? 'border-cyan-500/25 bg-cyan-500/8' : 'border-white/8 bg-black/20 hover:bg-surface-2/70',
+      )}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
+            {opportunity.sourceAccount ? <span>{opportunity.sourceAccount}</span> : null}
+            {opportunity.distributionType ? <span>{opportunity.distributionType}</span> : null}
+            {opportunity.confidence ? <span>{opportunity.confidence}</span> : null}
+          </div>
+          <div className="mt-2 text-sm font-semibold leading-5 text-foreground">{opportunity.title || 'Opportunity'}</div>
+          <div className="mt-1 text-xs leading-5 text-foreground/72">{opportunity.selectionReason || opportunity.whyNow || 'Review this move.'}</div>
+        </div>
+        {selected ? <FieldChip>Selected</FieldChip> : null}
+      </div>
+      {opportunity.sourceText ? (
+        <div className="mt-3 rounded-xl border border-white/8 bg-black/15 px-3 py-3">
+          <div className="mb-2 text-[11px] uppercase tracking-[0.12em] text-cyan-100/70">Source tweet</div>
+          <div className="border-l-2 border-cyan-500/35 pl-3 text-[13px] leading-5 text-foreground/84 whitespace-pre-wrap">
+          {opportunity.sourceText}
+          </div>
+        </div>
+      ) : null}
+    </button>
+  )
+}
+
+function DraftSelectorCard({
+  draft,
+  selected,
+  onSelect,
+}: {
+  draft: GrowthApiResponse['growth']['draftCandidates'][number]
+  selected: boolean
+  onSelect: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className={cx(
+        'w-full rounded-xl border p-4 text-left transition-smooth',
+        selected ? 'border-cyan-500/25 bg-cyan-500/8' : 'border-white/8 bg-black/15 hover:bg-surface-2/70',
+      )}
+    >
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">{draft.variant_label || 'Draft'}</div>
+        <div className="flex flex-wrap gap-2">
+          {draft.approval ? <FieldChip>{draft.approval}</FieldChip> : null}
+          {selected ? <FieldChip>Selected</FieldChip> : null}
+        </div>
+      </div>
+      <div className="mt-3 text-[15px] leading-7 text-foreground whitespace-pre-wrap">{draft.text}</div>
+      {(draft.selection_reason || draft.why_now || draft.rationale) ? (
+        <div className="mt-3 text-xs leading-5 text-muted-foreground">{draft.selection_reason || draft.why_now || draft.rationale}</div>
+      ) : null}
+    </button>
+  )
+}
+
 function SourceVariantGroup({
   familyLabel,
   sourceLabel,
@@ -1653,8 +1728,8 @@ export function GrowthReviewPanel() {
         </div>
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
-        <div className="space-y-4">
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_460px] xl:items-start">
+        <div className="space-y-5">
           <section className="rounded-2xl border border-cyan-500/15 bg-[#10161f] p-4 shadow-[0_18px_40px_rgba(0,0,0,0.26)]">
             <div className="text-[11px] uppercase tracking-[0.14em] text-cyan-100/70">Top move</div>
             <div className="mt-1 text-base font-semibold text-foreground">{topMoveTitle}</div>
@@ -1675,40 +1750,17 @@ export function GrowthReviewPanel() {
               </div>
               <FieldChip>{selectedOpportunities.length}</FieldChip>
             </div>
-            <div className="mt-4 space-y-3">
+            <div className="mt-4 grid gap-3 xl:grid-cols-2">
               {compactOpportunities.length ? compactOpportunities.map((family) => {
                 const leader = family.opportunities[0]
                 const isSelected = selectedOpportunitySourceFamilyKey === (leader.sourceFamilyKey || leader.sourceUrl || leader.id)
                 return (
-                  <button
+                  <OpportunitySelectorCard
                     key={family.key}
-                    type="button"
-                    onClick={() => setSelection({ kind: 'opportunity', id: leader.id })}
-                    className={cx(
-                      'w-full rounded-2xl border p-4 text-left shadow-[0_16px_32px_rgba(0,0,0,0.18)] transition-smooth',
-                      isSelected ? 'border-cyan-500/25 bg-cyan-500/8' : 'border-white/8 bg-black/20 hover:bg-surface-2/70',
-                    )}
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
-                          {leader.sourceAccount ? <span>{leader.sourceAccount}</span> : null}
-                          {leader.distributionType ? <span>{leader.distributionType}</span> : null}
-                          {leader.confidence ? <span>{leader.confidence}</span> : null}
-                        </div>
-                        <div className="mt-2 text-sm font-semibold text-foreground">{leader.title || family.sourceLabel}</div>
-                        <div className="mt-1 text-xs text-foreground/70">{leader.selectionReason || leader.whyNow || 'Review this move.'}</div>
-                      </div>
-                      {family.opportunities.length > 1 ? <FieldChip>{family.opportunities.length} moves</FieldChip> : null}
-                    </div>
-                    {leader.sourceText ? (
-                      <div className="mt-4 rounded-xl border border-white/8 bg-black/20 px-4 py-4">
-                        <div className="border-l-2 border-cyan-500/35 pl-3 text-sm leading-6 text-foreground/88 whitespace-pre-wrap">
-                          {leader.sourceText}
-                        </div>
-                      </div>
-                    ) : null}
-                  </button>
+                    opportunity={leader}
+                    selected={isSelected}
+                    onSelect={() => setSelection({ kind: 'opportunity', id: leader.id })}
+                  />
                 )
               }) : (
                 <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-4 text-sm text-muted-foreground">
@@ -1772,27 +1824,12 @@ export function GrowthReviewPanel() {
                       {family.drafts.map((draft) => {
                         const isSelected = selectedDraft?.id === draft.id
                         return (
-                          <button
+                          <DraftSelectorCard
                             key={draft.id}
-                            type="button"
-                            onClick={() => setSelection({ kind: 'draft', familyId: family.familyId, draftId: draft.id })}
-                            className={cx(
-                              'w-full rounded-xl border p-4 text-left transition-smooth',
-                              isSelected ? 'border-cyan-500/25 bg-cyan-500/8' : 'border-white/8 bg-black/15 hover:bg-surface-2/70',
-                            )}
-                          >
-                            <div className="flex items-center justify-between gap-3">
-                              <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">{draft.variant_label || 'Draft'}</div>
-                              <div className="flex flex-wrap gap-2">
-                                {draft.approval ? <FieldChip>{draft.approval}</FieldChip> : null}
-                                {draft.voice_profile ? <FieldChip>{draft.voice_profile}</FieldChip> : null}
-                              </div>
-                            </div>
-                            <div className="mt-3 text-sm leading-6 text-foreground whitespace-pre-wrap">{draft.text}</div>
-                            {draft.selection_reason || draft.why_now || draft.rationale ? (
-                              <div className="mt-3 text-xs text-muted-foreground">{draft.selection_reason || draft.why_now || draft.rationale}</div>
-                            ) : null}
-                          </button>
+                            draft={draft}
+                            selected={isSelected}
+                            onSelect={() => setSelection({ kind: 'draft', familyId: family.familyId, draftId: draft.id })}
+                          />
                         )
                       })}
                     </div>
