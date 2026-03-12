@@ -10,6 +10,7 @@ const execFileAsync = promisify(execFile)
 
 const HABI_ROOT = process.env.HABI_ROOT || '/Users/kokoro/Coding/Habi'
 const GROWTH_WEEKS_ROOT = path.join(HABI_ROOT, 'output', 'growth', 'weeks')
+const FOUNDER_VOICE_PATH = path.join(HABI_ROOT, 'config', 'growth', 'founder-voice.json')
 
 type GrowthAction =
   | 'refresh_research'
@@ -236,6 +237,72 @@ function ensureTerminalPeriod(value: string) {
   return trimmed ? `${trimmed}.` : ''
 }
 
+type FounderVoiceProfile = {
+  id?: string
+  bannedPatterns?: string[]
+}
+
+async function loadFounderVoiceProfile(): Promise<FounderVoiceProfile> {
+  const profile = await readJsonOrNull<FounderVoiceProfile>(FOUNDER_VOICE_PATH)
+  return profile || { id: 'habi_founder_v1', bannedPatterns: [] }
+}
+
+function cleanupFounderSlop(text: string, founderVoiceProfile: FounderVoiceProfile) {
+  const bannedPatterns = Array.isArray(founderVoiceProfile?.bannedPatterns) ? founderVoiceProfile.bannedPatterns : []
+  let next = String(text || '').trim()
+  for (const pattern of bannedPatterns) {
+    if (!pattern) continue
+    const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    next = next.replace(new RegExp(`\\b${escaped}\\b`, 'gi'), '')
+  }
+  return next.replace(/\s+/g, ' ').replace(/\s+([.,!?;:])/g, '$1').trim()
+}
+
+function applyRewriteDirection(text: string, voiceDirection: string) {
+  const normalizedDirection = normalizeFeedbackText(voiceDirection)
+  if (!normalizedDirection) return ensureTerminalPeriod(text)
+
+  if (normalizedDirection.includes('more grounded')) {
+    return ensureTerminalPeriod(
+      trimSentence(text)
+        .replace(/\busually starts earlier than people think:?/gi, '')
+        .replace(/\bthe real issue\b/gi, 'the issue'),
+    )
+  }
+
+  if (normalizedDirection.includes('more cutting') || normalizedDirection.includes('quietly dangerous')) {
+    return buildSharperHook(text)
+  }
+
+  if (normalizedDirection.includes('less product-y')) {
+    return ensureTerminalPeriod(
+      trimSentence(text)
+        .replace(/\b(product|products|tool|tools|system|systems)\b/gi, 'software')
+        .replace(/\bHabi\b/gi, '')
+        .replace(/\s{2,}/g, ' ')
+        .trim(),
+    )
+  }
+
+  if (normalizedDirection.includes('more humane')) {
+    return ensureTerminalPeriod(`${trimSentence(text)} People feel the cost of that long before teams admit it`)
+  }
+
+  if (normalizedDirection.includes('more specific') || normalizedDirection.includes('less abstract')) {
+    return ensureTerminalPeriod(`${trimSentence(text)} That is usually where confidence starts leaking out of the workflow`)
+  }
+
+  if (normalizedDirection.includes('shorter')) {
+    return ensureTerminalPeriod(trimSentence(text).split(/[.?!]/)[0] || text)
+  }
+
+  if (normalizedDirection.includes('sharper hook') || normalizedDirection.includes('quote with more bite')) {
+    return buildSharperHook(text)
+  }
+
+  return ensureTerminalPeriod(text)
+}
+
 function buildSharperHook(text: string) {
   const trimmed = trimSentence(text)
   if (!trimmed) return ''
@@ -274,7 +341,12 @@ function buildDraftPackMarkdown(weekId: string, drafts: Array<Record<string, unk
   return `${lines.join('\n').trim()}\n`
 }
 
-function rewriteDraftText(draft: Record<string, any>, feedback: string) {
+function rewriteDraftText(
+  draft: Record<string, any>,
+  feedback: string,
+  voiceDirection: string,
+  founderVoiceProfile: FounderVoiceProfile,
+) {
   const currentText = trimSentence(draft.text)
   const sourceText = normalizeFeedbackText(draft.source_tweet?.text || '')
   const normalizedFeedback = normalizeFeedbackText(feedback)
@@ -284,63 +356,72 @@ function rewriteDraftText(draft: Record<string, any>, feedback: string) {
 
   if (!currentText) return ''
 
+  const finalize = (value: string) => ensureTerminalPeriod(
+    cleanupFounderSlop(
+      applyRewriteDirection(value, voiceDirection),
+      founderVoiceProfile,
+    ),
+  )
+
   if (normalizedFeedback.includes('contrarian')) {
     if (distributionType === 'reply') {
-      return 'The problem is usually not that people need more discipline. It is that the system still asks them to translate the plan before they can trust the next move.'
+      return finalize('The problem is usually not that people need more discipline. It is that the system still asks them to translate the plan before they can trust the next move.')
     }
-    return 'Most workflow advice still treats discipline as the bottleneck. The more common failure is a planning layer that costs too much interpretation before useful work starts.'
+    return finalize('Most workflow advice still treats discipline as the bottleneck. The more common failure is a planning layer that costs too much interpretation before useful work starts.')
   }
 
   if (normalizedFeedback.includes('sharper hook') || normalizedFeedback.includes('stronger hook')) {
     if (/shopping|tool|course|app|subscription/.test(sourceContext)) {
-      return 'People do not keep buying planning tools because they love planning. They keep buying certainty because the next move still does not feel clear enough to trust.'
+      return finalize('People do not keep buying planning tools because they love planning. They keep buying certainty because the next move still does not feel clear enough to trust.')
     }
     if (/trust|control|unsupervised|delegate|assistant/.test(sourceContext)) {
-      return 'Capability is not the line. The line is whether the system stays legible once it changes the plan without asking first.'
+      return finalize('Capability is not the line. The line is whether the system stays legible once it changes the plan without asking first.')
     }
     const sharper = buildSharperHook(currentText)
-    return sharper && normalizeFeedbackText(sharper) !== normalizeFeedbackText(currentText)
-      ? sharper
-      : 'The real issue is usually simpler than the post makes it sound: the plan starts costing more interpretation than the work itself.'
+    return finalize(
+      sharper && normalizeFeedbackText(sharper) !== normalizeFeedbackText(currentText)
+        ? sharper
+        : 'The real issue is usually simpler than the post makes it sound: the plan starts costing more interpretation than the work itself.',
+    )
   }
 
   if (normalizedFeedback.includes('use source context') || normalizedFeedback.includes('source context')) {
     if (/(reddit|subreddit|community)/.test(sourceContext) && /(join|invite|share|page|discuss)/.test(sourceContext)) {
-      return 'The useful part of a community like that is when people bring the messy edge cases. The real signal is usually where planning breaks on trust, recovery cost, and context rebuild.'
+      return finalize('The useful part of a community like that is when people bring the messy edge cases. The real signal is usually where planning breaks on trust, recovery cost, and context rebuild.')
     }
     if (/(course|tool|subscription|productivity app|panic-buying|spending money|momentum)/.test(sourceContext)) {
-      return 'That usually points to planning resentment, not a lack of options. People keep shopping when the next move still takes too much interpretation to trust.'
+      return finalize('That usually points to planning resentment, not a lack of options. People keep shopping when the next move still takes too much interpretation to trust.')
     }
     if (/(clients won.t go for it|adverse to change|want to control)/.test(sourceContext) && /(schedule|scheduling|calendar)/.test(sourceContext)) {
-      return 'That is usually the line. People accept more scheduling help when the change stays legible and easy to override.'
+      return finalize('That is usually the line. People accept more scheduling help when the change stays legible and easy to override.')
     }
     if (/(interrupt|interruption|context switching|attention residue)/.test(sourceContext)) {
-      return 'The hidden cost is not just the interruption itself. It is the work of rebuilding enough context to trust the next step.'
+      return finalize('The hidden cost is not just the interruption itself. It is the work of rebuilding enough context to trust the next step.')
     }
     if (/(automation|assistant|agent|delegate)/.test(sourceContext) && /(trust|control|safe|unsafe)/.test(sourceContext)) {
-      return 'That is usually the real line. People accept more automation when they can still understand why the plan changed and take control back quickly.'
+      return finalize('That is usually the real line. People accept more automation when they can still understand why the plan changed and take control back quickly.')
     }
     if (sourceLead) {
-      return buildSourceSpecificRewrite(sourceLead, currentText)
+      return finalize(buildSourceSpecificRewrite(sourceLead, currentText))
     }
   }
 
   if (normalizedFeedback.includes('too generic') || normalizedFeedback.includes('more specific')) {
     if (distributionType === 'reply') {
       if (/trust|control|unsupervised|delegate|assistant/.test(sourceContext)) {
-        return 'The trust break usually happens when the plan changes without staying legible. People will hand off more once they can understand the change and reverse it quickly.'
+        return finalize('The trust break usually happens when the plan changes without staying legible. People will hand off more once they can understand the change and reverse it quickly.')
       }
       if (/shopping|tool|course|app|subscription/.test(sourceContext)) {
-        return 'That is usually not a tooling problem. It is a signal that the planning layer still costs more interpretation than the person can tolerate.'
+        return finalize('That is usually not a tooling problem. It is a signal that the planning layer still costs more interpretation than the person can tolerate.')
       }
-      return `${currentText}. The part people usually miss is the recovery cost after the interruption or change, not just the visible disruption.`
+      return finalize(`${currentText}. The part people usually miss is the recovery cost after the interruption or change, not just the visible disruption.`)
     }
-    return `${currentText}. The important test is whether the plan still feels legible when the week gets messy.`
+    return finalize(`${currentText}. The important test is whether the plan still feels legible when the week gets messy.`)
   }
 
   if (normalizedFeedback.includes('shorter') || normalizedFeedback.includes('tighter')) {
     const sentence = currentText.split(/[.?!]/)[0]?.trim() || currentText
-    return `${sentence}.`
+    return finalize(`${sentence}.`)
   }
 
   if (normalizedFeedback.includes('less product-y') || normalizedFeedback.includes('too product-y')) {
@@ -349,29 +430,29 @@ function rewriteDraftText(draft: Record<string, any>, feedback: string) {
       .replace(/\bHabi\b/gi, '')
       .replace(/\s{2,}/g, ' ')
       .trim()
-    return ensureTerminalPeriod(lessProduct)
+    return finalize(lessProduct)
   }
 
   if (normalizedFeedback.includes('good direction, rewrite') || normalizedFeedback.includes('rewrite')) {
     if (distributionType === 'reply') {
       if (/trust|control|unsupervised|delegate|assistant/.test(sourceContext)) {
-        return 'Yes — and the trust break usually happens before the work itself. Once the plan changes without staying legible, people pull control back fast.'
+        return finalize('Yes — and the trust break usually happens before the work itself. Once the plan changes without staying legible, people pull control back fast.')
       }
       if (/shopping|tool|course|app|subscription/.test(sourceContext)) {
-        return 'Yes — and that usually points to planning resentment more than feature hunger. People keep shopping when the current plan still needs too much interpretation.'
+        return finalize('Yes — and that usually points to planning resentment more than feature hunger. People keep shopping when the current plan still needs too much interpretation.')
       }
-      return 'Yes — and the trust break usually happens before the work itself. Once the plan takes effort to reinterpret, people fall back to memory, notes, or calendar patchwork.'
+      return finalize('Yes — and the trust break usually happens before the work itself. Once the plan takes effort to reinterpret, people fall back to memory, notes, or calendar patchwork.')
     }
     if (distributionType === 'quote') {
-      return 'The stronger product move is not more automation in theory. It is a plan people can still read and trust under a messy week.'
+      return finalize('The stronger product move is not more automation in theory. It is a plan people can still read and trust under a messy week.')
     }
     const rewritten = buildSharperHook(currentText)
     if (rewritten && normalizeFeedbackText(rewritten) !== normalizeFeedbackText(currentText)) {
-      return rewritten
+      return finalize(rewritten)
     }
   }
 
-  return buildSharperHook(currentText) || ensureTerminalPeriod(currentText)
+  return finalize(buildSharperHook(currentText) || ensureTerminalPeriod(currentText))
 }
 
 function nextDraftNumber(drafts: Array<Record<string, any>>) {
@@ -718,6 +799,7 @@ export async function POST(request: NextRequest) {
       week?: string
       draftId?: string
       feedback?: string
+      voiceDirection?: string
       draftText?: string
       scheduledAt?: string
       scheduleNote?: string
@@ -883,17 +965,19 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ status: 'ok', action: 'refresh_research_and_select', week })
       }
       case 'refresh_research_and_generate': {
+        const voiceDirection = String(body.voiceDirection || '').trim()
         await sanitizeDraftPack(draftPackJsonPath)
         await runGrowthCommand('growth:m92:week-open', week)
         await runGrowthCommand('growth:m92:results-sync', week)
         await runGrowthCommand('growth:m92:research-brief', week, ['--force-refresh', 'true'])
         await runGrowthCommand('growth:m92:select-opportunities', week)
-        await runGrowthCommand('growth:m92:draft-pack', week)
+        await runGrowthCommand('growth:m92:draft-pack', week, voiceDirection ? ['--voice-direction', voiceDirection] : [])
         return NextResponse.json({ status: 'ok', action: 'refresh_research_and_generate', week })
       }
       case 'generate_drafts': {
+        const voiceDirection = String(body.voiceDirection || '').trim()
         await sanitizeDraftPack(draftPackJsonPath)
-        await runGrowthCommand('growth:m92:draft-pack', week)
+        await runGrowthCommand('growth:m92:draft-pack', week, voiceDirection ? ['--voice-direction', voiceDirection] : [])
         return NextResponse.json({ status: 'ok', action: 'generate_drafts', week })
       }
       case 'expand_family_variants': {
@@ -931,6 +1015,8 @@ export async function POST(request: NextRequest) {
             .filter(Boolean),
         )
         const prompts = familyExpansionPrompts(anchor, familyDrafts, String(body.feedback || ''))
+        const voiceDirection = String(body.voiceDirection || '').trim()
+        const founderVoiceProfile = await loadFounderVoiceProfile()
         let nextId = nextDraftNumber(draftPack.drafts)
         let added = 0
         const expansionAt = new Date().toISOString()
@@ -938,7 +1024,7 @@ export async function POST(request: NextRequest) {
 
         for (const prompt of prompts) {
           if (familyDrafts.length + added >= maxVariants) break
-          const rewritten = rewriteDraftText(anchor, prompt)
+          const rewritten = rewriteDraftText(anchor, prompt, voiceDirection, founderVoiceProfile)
           const normalized = normalizeFeedbackText(rewritten)
           if (!rewritten || !normalized || usedTexts.has(normalized)) continue
           usedTexts.add(normalized)
@@ -954,6 +1040,8 @@ export async function POST(request: NextRequest) {
             feedback: '',
             changed_since_last_run: 'expanded with alternate wording from the same source family',
             feedback_applied: [...baseFeedbackApplied, `family expansion: ${prompt}`].slice(-8),
+            voice_profile: founderVoiceProfile.id || 'habi_founder_v1',
+            voice_direction: voiceDirection || null,
             variant_position: variantPosition,
             expanded_from_draft_id: draftId,
             expanded_at: expansionAt,
@@ -1015,6 +1103,7 @@ export async function POST(request: NextRequest) {
       case 'update_draft_text':
       case 'rewrite_draft': {
         const draftId = String(body.draftId || '').trim()
+        const voiceDirection = String(body.voiceDirection || '').trim()
         if (!draftId) {
           return NextResponse.json({ error: 'draftId is required.' }, { status: 400 })
         }
@@ -1037,7 +1126,8 @@ export async function POST(request: NextRequest) {
           target.text = nextText
           target.changed_since_last_run = 'edited manually before approval'
         } else {
-          const nextText = rewriteDraftText(target, String(body.feedback || '').trim())
+          const founderVoiceProfile = await loadFounderVoiceProfile()
+          const nextText = rewriteDraftText(target, String(body.feedback || '').trim(), voiceDirection, founderVoiceProfile)
           if (!nextText) {
             return NextResponse.json({ error: 'Could not rewrite draft.' }, { status: 400 })
           }
@@ -1046,6 +1136,8 @@ export async function POST(request: NextRequest) {
           const existingFeedback = Array.isArray(target.feedback_applied) ? [...target.feedback_applied] : []
           if (body.feedback) existingFeedback.push(`rewrite: ${String(body.feedback).trim()}`)
           target.feedback_applied = dedupeFeedbackApplied(existingFeedback).slice(-6)
+          target.voice_profile = founderVoiceProfile.id || 'habi_founder_v1'
+          target.voice_direction = voiceDirection || null
         }
 
         target.approval = 'pending'

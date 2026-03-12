@@ -844,12 +844,16 @@ function OpportunityFamilyLane({
 function DraftCard({
   draft,
   feedbackValue,
+  voiceDirection,
+  onVoiceDirectionChange,
   onFeedbackChange,
   onAction,
   saving,
 }: {
   draft: GrowthApiResponse['growth']['draftCandidates'][number]
   feedbackValue: string
+  voiceDirection: string
+  onVoiceDirectionChange: (value: string) => void
   onFeedbackChange: (value: string) => void
   onAction: (action: GrowthAction, draftId: string, extra?: Record<string, unknown>) => void
   saving: boolean
@@ -933,7 +937,7 @@ function DraftCard({
                 Save Edit
               </button>
               <button
-                onClick={() => onAction('rewrite_draft', draft.id, { feedback: rewritePrompt.trim() || feedbackValue })}
+                onClick={() => onAction('rewrite_draft', draft.id, { feedback: rewritePrompt.trim() || feedbackValue, voiceDirection })}
                 disabled={saving}
                 className="rounded-lg border border-cyan-500/20 px-3 py-2 text-xs font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/10 disabled:opacity-60"
               >
@@ -948,6 +952,12 @@ function DraftCard({
               placeholder="Rewrite direction: sharpen the hook, lean more contrarian, or reference the source context more directly."
               value={rewritePrompt}
               onChange={(event) => setRewritePrompt(event.target.value)}
+            />
+            <input
+              className="mt-3 w-full rounded-xl border border-white/8 bg-black/15 px-3 py-2 text-sm text-foreground outline-none transition-smooth focus:border-cyan-500/30"
+              placeholder="Voice direction (optional): lean more quietly dangerous, less product-y, more humane."
+              value={voiceDirection}
+              onChange={(event) => onVoiceDirectionChange(event.target.value)}
             />
           </div>
           {(typeof draft.follower_growth_score === 'number' || typeof draft.brand_building_score === 'number' || typeof draft.timeliness_score === 'number') ? (
@@ -1052,6 +1062,8 @@ function SourceVariantGroup({
   sourceLabel,
   drafts,
   feedbackDrafts,
+  voiceDirection,
+  onVoiceDirectionChange,
   onFeedbackChange,
   onAction,
   onExpandFamily,
@@ -1062,6 +1074,8 @@ function SourceVariantGroup({
   sourceLabel: string
   drafts: GrowthApiResponse['growth']['draftCandidates']
   feedbackDrafts: Record<string, string>
+  voiceDirection: string
+  onVoiceDirectionChange: (value: string) => void
   onFeedbackChange: (draftId: string, value: string) => void
   onAction: (action: GrowthAction, draftId: string, extra?: Record<string, unknown>) => void
   onExpandFamily: (draftId: string) => void
@@ -1111,6 +1125,8 @@ function SourceVariantGroup({
             <DraftCard
               draft={draft}
               feedbackValue={feedbackDrafts[draft.id] || ''}
+              voiceDirection={voiceDirection}
+              onVoiceDirectionChange={onVoiceDirectionChange}
               onFeedbackChange={(value) => onFeedbackChange(draft.id, value)}
               onAction={onAction}
               saving={saving}
@@ -1127,6 +1143,7 @@ export function GrowthReviewPanel() {
   const [actionState, setActionState] = useState<{ status: 'idle' | 'saving' | 'error' | 'saved'; message?: string }>({ status: 'idle' })
   const [feedbackDrafts, setFeedbackDrafts] = useState<Record<string, string>>({})
   const [opportunityFeedback, setOpportunityFeedback] = useState<Record<string, string>>({})
+  const [voiceDirection, setVoiceDirection] = useState('')
   const [scheduleDrafts, setScheduleDrafts] = useState<Record<string, { when: string; note: string }>>({})
   const [publishDrafts, setPublishDrafts] = useState<Record<string, { tweetUrl: string; tweetId: string }>>({})
   const [topDraftRewritePrompt, setTopDraftRewritePrompt] = useState('')
@@ -1284,7 +1301,7 @@ export function GrowthReviewPanel() {
   const utilityActions = [
     { key: 'refresh', label: 'Refresh', action: () => void runGrowthAction('refresh_research') },
     { key: 'select', label: 'Select', action: () => void runGrowthAction('select_opportunities') },
-    { key: 'drafts', label: candidateCount ? 'Clear drafts' : 'Generate drafts', action: () => void runGrowthAction(candidateCount ? 'clear_current_drafts' : 'generate_drafts') },
+    { key: 'drafts', label: candidateCount ? 'Clear drafts' : 'Generate drafts', action: () => void runGrowthAction(candidateCount ? 'clear_current_drafts' : 'generate_drafts', undefined, candidateCount ? {} : { voiceDirection }) },
     { key: 'queue', label: 'Open queue', action: () => setDeskMode('queue') },
     { key: 'signals', label: 'Open signals', action: () => setDeskMode('signals') },
   ]
@@ -1445,6 +1462,13 @@ export function GrowthReviewPanel() {
                 </button>
               ))}
             </div>
+            <input
+              type="text"
+              value={voiceDirection}
+              onChange={(event) => setVoiceDirection(event.target.value)}
+              placeholder="Voice direction (optional)"
+              className="w-full rounded-xl border border-white/8 bg-black/20 px-3 py-2 text-sm text-foreground outline-none transition-smooth focus:border-cyan-500/30 xl:max-w-sm"
+            />
           </div>
         </div>
 
@@ -1482,7 +1506,7 @@ export function GrowthReviewPanel() {
                   </button>
                 ) : null}
                 {!candidateCount && topOpportunity ? (
-                  <button type="button" onClick={() => void runGrowthAction('generate_drafts')} disabled={actionState.status === 'saving'} className="rounded-lg border border-amber-500/20 bg-black/20 px-3 py-2 text-xs font-medium text-amber-200 transition-smooth hover:bg-amber-500/10 disabled:opacity-60">
+                  <button type="button" onClick={() => void runGrowthAction('generate_drafts', undefined, { voiceDirection })} disabled={actionState.status === 'saving'} className="rounded-lg border border-amber-500/20 bg-black/20 px-3 py-2 text-xs font-medium text-amber-200 transition-smooth hover:bg-amber-500/10 disabled:opacity-60">
                     Generate drafts
                   </button>
                 ) : null}
@@ -1589,6 +1613,8 @@ export function GrowthReviewPanel() {
                       drafts={group}
                       defaultOpen={groupIndex === 0}
                       feedbackDrafts={feedbackDrafts}
+                      voiceDirection={voiceDirection}
+                      onVoiceDirectionChange={setVoiceDirection}
                       onFeedbackChange={(draftId, value) => setFeedbackDrafts((current) => ({ ...current, [draftId]: value }))}
                       onAction={(action, draftId, extra) => void runGrowthAction(action, draftId, extra || {})}
                       onExpandFamily={(draftId) => void runGrowthAction('expand_family_variants', draftId, { feedback: feedbackDrafts[draftId] || '' })}
@@ -1602,6 +1628,8 @@ export function GrowthReviewPanel() {
                     key={draft.id}
                     draft={draft}
                     feedbackValue={feedbackDrafts[draft.id] || ''}
+                    voiceDirection={voiceDirection}
+                    onVoiceDirectionChange={setVoiceDirection}
                     onFeedbackChange={(value) => setFeedbackDrafts((current) => ({ ...current, [draft.id]: value }))}
                     onAction={(action, draftId, extra) => void runGrowthAction(action, draftId, extra || {})}
                     saving={actionState.status === 'saving'}
