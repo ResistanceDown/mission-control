@@ -1817,20 +1817,26 @@ export function GrowthReviewPanel() {
       {deskMode === 'queue' ? (
         <div className="space-y-4">
           <div id="growth-ready-to-schedule">
-          <CollapsibleSection title="Publishing queue" subtitle="Ready, scheduled, failed, and published states live here." defaultOpen>
-            <div className="grid gap-4 xl:grid-cols-4">
-              <div className="space-y-3 rounded-2xl border border-white/8 bg-[#0f151d] p-4">
-                  <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Ready</div>
+          <CollapsibleSection title="Publishing queue" subtitle="Move approved posts into the live queue, then monitor scheduled, failed, and published state here." defaultOpen>
+            <div className="grid gap-4 xl:grid-cols-2">
+              <div className="space-y-3 rounded-[1.4rem] border border-emerald-500/12 bg-[linear-gradient(180deg,rgba(16,28,24,0.96),rgba(9,15,18,0.98))] p-4 shadow-[0_16px_36px_rgba(0,0,0,0.22)]">
+                  <div className="flex items-start justify-between gap-3 border-b border-white/8 pb-3">
+                    <div>
+                      <div className="text-[11px] uppercase tracking-[0.14em] text-emerald-200/85">Ready</div>
+                      <div className="mt-1 text-xs text-muted-foreground">Approved posts waiting on a publish time or immediate send.</div>
+                    </div>
+                    <div className="rounded-full border border-emerald-400/20 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-medium text-emerald-100">{readyApprovedPosts.length}</div>
+                  </div>
                   {readyApprovedPosts.length ? readyApprovedPosts.map((post) => {
                     const suggested = buildSuggestedSchedule(post)
                     const scheduleState = scheduleDrafts[post.id] || { when: post.scheduledAt || suggested.when, note: post.scheduleNote || suggested.note }
                     const publishState = publishDrafts[post.id] || { tweetUrl: post.tweetUrl || '', tweetId: post.tweetId || '' }
                     return (
-                      <div key={post.id} className="rounded-2xl border border-emerald-500/15 bg-[#10161f] p-4 shadow-[0_16px_36px_rgba(0,0,0,0.24)]">
+                      <div key={post.id} className="rounded-[1.2rem] border border-emerald-500/15 bg-[#10161f] p-4 shadow-[0_12px_28px_rgba(0,0,0,0.18)]">
                         <div className="flex items-start justify-between gap-3">
                           <div>
-                            <div className="text-sm font-semibold text-foreground">{post.pillar || 'Approved post'}{post.angle ? `: ${post.angle}` : ''}</div>
-                            <div className="mt-1 flex flex-wrap gap-2">
+                            <div className="text-sm font-semibold leading-5 text-foreground">{post.pillar || 'Approved post'}{post.angle ? `: ${post.angle}` : ''}</div>
+                            <div className="mt-2 flex flex-wrap gap-2">
                               {post.distributionType ? <FieldChip>{post.distributionType}</FieldChip> : null}
                               {post.sourceType ? <FieldChip>{post.sourceType}</FieldChip> : null}
                               {post.approvedAtPt ? <FieldChip>{formatPacificTime(post.approvedAtPt)}</FieldChip> : null}
@@ -1869,15 +1875,21 @@ export function GrowthReviewPanel() {
                         </details>
                       </div>
                     )
-                  }) : <div className="rounded-xl border border-white/10 bg-[#10161f] px-4 py-4 text-sm text-muted-foreground">Nothing is ready to publish yet.</div>}
+                  }) : <div className="rounded-[1.1rem] border border-white/10 bg-[#10161f] px-4 py-4 text-sm text-muted-foreground">Nothing is ready to publish yet.</div>}
                 </div>
 
-              <div className="space-y-3 rounded-2xl border border-white/8 bg-[#0f151d] p-4">
-                  <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Scheduled</div>
+              <div className="space-y-3 rounded-[1.4rem] border border-cyan-500/12 bg-[linear-gradient(180deg,rgba(12,24,30,0.96),rgba(9,15,18,0.98))] p-4 shadow-[0_16px_36px_rgba(0,0,0,0.22)]">
+                  <div className="flex items-start justify-between gap-3 border-b border-white/8 pb-3">
+                    <div>
+                      <div className="text-[11px] uppercase tracking-[0.14em] text-cyan-200/85">Scheduled</div>
+                      <div className="mt-1 text-xs text-muted-foreground">Posts that already have a publish time and are waiting on the worker.</div>
+                    </div>
+                    <div className="rounded-full border border-cyan-400/20 bg-cyan-500/10 px-2.5 py-1 text-[11px] font-medium text-cyan-100">{scheduledPosts.length}</div>
+                  </div>
                   {scheduledPosts.length ? scheduledPosts.map((post) => (
-                    <div key={`scheduled-${post.id}`} className="rounded-2xl border border-cyan-500/15 bg-[#10161f] p-4">
-                      <div className="text-sm font-semibold text-foreground">{post.pillar || 'Scheduled post'}{post.angle ? `: ${post.angle}` : ''}</div>
-                      <div className="mt-1 flex flex-wrap gap-2">
+                    <div key={`scheduled-${post.id}`} className="rounded-[1.2rem] border border-cyan-500/15 bg-[#10161f] p-4 shadow-[0_12px_28px_rgba(0,0,0,0.18)]">
+                      <div className="text-sm font-semibold leading-5 text-foreground">{post.pillar || 'Scheduled post'}{post.angle ? `: ${post.angle}` : ''}</div>
+                      <div className="mt-2 flex flex-wrap gap-2">
                         <FieldChip>{post.distributionType || 'scheduled'}</FieldChip>
                         <FieldChip>{formatPacificTime(post.scheduledAtPt || post.scheduledAt || null)}</FieldChip>
                       </div>
@@ -1887,43 +1899,54 @@ export function GrowthReviewPanel() {
                         <button onClick={() => void runGrowthAction('unschedule_draft', post.id)} disabled={actionState.status === 'saving'} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2 disabled:opacity-60">Unschedule</button>
                       </div>
                     </div>
-                  )) : <div className="rounded-xl border border-white/10 bg-[#10161f] px-4 py-4 text-sm text-muted-foreground">Nothing is scheduled.</div>}
+                  )) : <div className="rounded-[1.1rem] border border-white/10 bg-[#10161f] px-4 py-4 text-sm text-muted-foreground">Nothing is scheduled.</div>}
                 </div>
 
-              <div className="space-y-3 rounded-2xl border border-white/8 bg-[#0f151d] p-4">
-                  <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Failed</div>
+              <div className="space-y-3 rounded-[1.4rem] border border-rose-500/12 bg-[linear-gradient(180deg,rgba(28,16,22,0.96),rgba(14,12,18,0.98))] p-4 shadow-[0_16px_36px_rgba(0,0,0,0.22)]">
+                  <div className="flex items-start justify-between gap-3 border-b border-white/8 pb-3">
+                    <div>
+                      <div className="text-[11px] uppercase tracking-[0.14em] text-rose-200/85">Failed</div>
+                      <div className="mt-1 text-xs text-muted-foreground">Items that need a retry, a rewrite, or a different source/account path.</div>
+                    </div>
+                    <div className="rounded-full border border-rose-400/20 bg-rose-500/10 px-2.5 py-1 text-[11px] font-medium text-rose-100">{failedPosts.length}</div>
+                  </div>
                   {failedPosts.length ? failedPosts.map((post) => (
-                    <div key={`failed-${post.id}`} className="rounded-2xl border border-rose-500/15 bg-[#161014] p-4">
-                      <div className="text-sm font-semibold text-foreground">{post.pillar || 'Failed post'}{post.angle ? `: ${post.angle}` : ''}</div>
-                      <div className="mt-3 text-xs text-rose-100/90">{post.publishError || 'Publish failed.'}</div>
+                    <div key={`failed-${post.id}`} className="rounded-[1.2rem] border border-rose-500/15 bg-[#161014] p-4 shadow-[0_12px_28px_rgba(0,0,0,0.18)]">
+                      <div className="text-sm font-semibold leading-5 text-foreground">{post.pillar || 'Failed post'}{post.angle ? `: ${post.angle}` : ''}</div>
+                      <div className="mt-3 rounded-lg border border-rose-500/15 bg-black/15 px-3 py-2 text-xs text-rose-100/90">{post.publishError || 'Publish failed.'}</div>
                       <div className="mt-3 rounded-xl border border-rose-500/15 bg-black/20 px-4 py-4 text-sm leading-6 text-foreground whitespace-pre-wrap">{post.text}</div>
                     </div>
-                  )) : <div className="rounded-xl border border-white/10 bg-[#10161f] px-4 py-4 text-sm text-muted-foreground">No failed publishes.</div>}
+                  )) : <div className="rounded-[1.1rem] border border-white/10 bg-[#10161f] px-4 py-4 text-sm text-muted-foreground">No failed publishes.</div>}
+                </div>
+
+              <div className="space-y-3 rounded-[1.4rem] border border-white/8 bg-[linear-gradient(180deg,rgba(17,18,23,0.96),rgba(9,15,18,0.98))] p-4 shadow-[0_16px_36px_rgba(0,0,0,0.22)] xl:col-span-2">
+                  <div className="flex items-start justify-between gap-3 border-b border-white/8 pb-3">
+                    <div>
+                      <div className="text-[11px] uppercase tracking-[0.14em] text-white/80">Published</div>
+                      <div className="mt-1 text-xs text-muted-foreground">Latest shipped posts and the most recent learning signal.</div>
+                    </div>
+                    <div className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] font-medium text-foreground">{publishedCount}</div>
+                  </div>
+                  {publishedCount ? (
+                    <div className="space-y-3">
+                      <div className="rounded-[1.2rem] border border-white/10 bg-[#10161f] p-4 shadow-[0_12px_28px_rgba(0,0,0,0.18)]">
+                        <div className="text-sm font-semibold leading-5 text-foreground">{(approvedPosts.find((post) => post.status === 'published' || post.status === 'linked')?.pillar) || 'Latest published post'}</div>
+                        <div className="mt-2 text-xs text-muted-foreground">{publishedCount} published or linked • {publishAttempts} publish update{publishAttempts === 1 ? '' : 's'}</div>
+                        {growth.resultsSummary?.winningDistributionTypes?.length || growth.resultsSummary?.winningSourceTypes?.length || (growth.resultsSummary?.strategyNotes || []).length ? (
+                          <div className="mt-3 space-y-2 rounded-xl border border-white/8 bg-black/20 px-3 py-3 text-xs text-foreground/85">
+                            {growth.resultsSummary?.winningDistributionTypes?.length ? <div>Winning distribution: {growth.resultsSummary.winningDistributionTypes.join(' • ')}</div> : null}
+                            {growth.resultsSummary?.winningSourceTypes?.length ? <div>Winning sources: {growth.resultsSummary.winningSourceTypes.join(' • ')}</div> : null}
+                            {(growth.resultsSummary?.strategyNotes || []).slice(0, 1).map((note, index) => <div key={`published-note-${index}`}>{note}</div>)}
+                          </div>
+                        ) : <div className="mt-3 rounded-xl border border-white/8 bg-black/20 px-3 py-3 text-xs text-muted-foreground">Learning will tighten once more published posts accumulate.</div>}
+                      </div>
+                    </div>
+                  ) : <div className="rounded-[1.1rem] border border-white/10 bg-[#10161f] px-4 py-4 text-sm text-muted-foreground">No published post results yet.</div>}
                 </div>
               </div>
             </CollapsibleSection>
           </div>
 
-          <CollapsibleSection title="Published + learning" subtitle="Latest shipped posts and the learning they created." defaultOpen={false}>
-            <div className="space-y-4">
-              {growth.resultsSummary?.postedCount ? (
-                <div className="grid gap-3 xl:grid-cols-2">
-                  <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
-                    <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Latest result summary</div>
-                    <div className="mt-2 space-y-1 text-sm text-foreground/90">
-                      {growth.resultsSummary.winningDistributionTypes?.length ? <div>Winning distribution: {growth.resultsSummary.winningDistributionTypes.join(' • ')}</div> : null}
-                      {growth.resultsSummary.winningSourceTypes?.length ? <div>Winning sources: {growth.resultsSummary.winningSourceTypes.join(' • ')}</div> : null}
-                      {(growth.resultsSummary.strategyNotes || []).slice(0, 1).map((note, index) => <div key={`result-note-${index}`}>{note}</div>)}
-                    </div>
-                  </div>
-                  <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
-                    <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Published count</div>
-                    <div className="mt-2 text-sm text-foreground/90">{publishedCount} published or linked • {publishAttempts} publish update{publishAttempts === 1 ? '' : 's'}</div>
-                  </div>
-                </div>
-              ) : <div className="rounded-xl border border-white/10 bg-[#10161f] px-4 py-4 text-sm text-muted-foreground">No published post results yet.</div>}
-            </div>
-          </CollapsibleSection>
         </div>
       ) : null}
     </div>
