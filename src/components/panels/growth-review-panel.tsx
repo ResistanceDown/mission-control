@@ -437,20 +437,27 @@ function formatSignedCount(value?: number | null) {
 function useGrowthData() {
   const [data, setData] = useState<GrowthApiResponse | null>(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     try {
       const response = await fetch('/api/founder/packet')
-      if (!response.ok) return
+      if (!response.ok) {
+        setError(`Growth packet failed to load (${response.status})`)
+        return
+      }
       const payload = await response.json()
       setData(payload)
+      setError(null)
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Growth packet failed to load')
     } finally {
       setLoading(false)
     }
   }, [])
 
   useSmartPoll(load, 60000, { pauseWhenConnected: true })
-  return { data, setData, loading, reload: load }
+  return { data, setData, loading, error, reload: load }
 }
 
 function cx(...parts: Array<string | false | null | undefined>) {
@@ -1180,7 +1187,7 @@ function SourceVariantGroup({
 }
 
 export function GrowthReviewPanel() {
-  const { data, setData, loading, reload } = useGrowthData()
+  const { data, setData, loading, error, reload } = useGrowthData()
   const [actionState, setActionState] = useState<{ status: 'idle' | 'saving' | 'error' | 'saved'; message?: string }>({ status: 'idle' })
   const [feedbackDrafts, setFeedbackDrafts] = useState<Record<string, string>>({})
   const [opportunityFeedback, setOpportunityFeedback] = useState<Record<string, string>>({})
@@ -1255,6 +1262,45 @@ export function GrowthReviewPanel() {
       }
     })
   }, [reactiveOpportunities])
+
+  if (loading && !growth) {
+    return (
+      <div className="rounded-2xl border border-white/10 bg-[#0f151d] p-6 text-sm text-muted-foreground shadow-[0_18px_40px_rgba(0,0,0,0.24)]">
+        Loading Growth desk…
+      </div>
+    )
+  }
+
+  if (!growth && error) {
+    return (
+      <div className="space-y-4">
+        <div className="rounded-2xl border border-rose-500/20 bg-rose-500/10 p-5 shadow-[0_18px_40px_rgba(0,0,0,0.24)]">
+          <div className="text-sm font-semibold text-rose-100">Growth desk unavailable</div>
+          <div className="mt-1 text-sm text-rose-100/80">{error}</div>
+          <div className="mt-4">
+            <button
+              type="button"
+              onClick={() => {
+                setActionState({ status: 'idle' })
+                void reload()
+              }}
+              className="rounded-lg border border-rose-400/25 bg-rose-500/10 px-3 py-2 text-xs font-medium text-rose-100 transition-smooth hover:bg-rose-500/20"
+            >
+              Retry load
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (!growth) {
+    return (
+      <div className="rounded-2xl border border-white/10 bg-[#0f151d] p-6 text-sm text-muted-foreground shadow-[0_18px_40px_rgba(0,0,0,0.24)]">
+        Growth data is unavailable right now.
+      </div>
+    )
+  }
   const retryableFailedPosts = approvedPosts.filter((post) => post.status === 'failed' && !isNonReplyablePublishError(post.publishError))
   const readyApprovedPosts = approvedPosts.filter((post) => post.status === 'approved')
   const failedPosts = retryableFailedPosts

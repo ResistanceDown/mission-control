@@ -3,6 +3,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
+import { pathToFileURL } from 'node:url'
 import { requireRole } from '@/lib/auth'
 import { logger } from '@/lib/logger'
 
@@ -10,7 +11,7 @@ const execFileAsync = promisify(execFile)
 
 const HABI_ROOT = process.env.HABI_ROOT || '/Users/kokoro/Coding/Habi'
 const GROWTH_WEEKS_ROOT = path.join(HABI_ROOT, 'output', 'growth', 'weeks')
-const FOUNDER_VOICE_PATH = path.join(HABI_ROOT, 'config', 'growth', 'founder-voice.json')
+const FOUNDER_VOICE_MODULE_PATH = path.join(HABI_ROOT, 'scripts', 'growth', 'founder-voice.mjs')
 
 type GrowthAction =
   | 'refresh_research'
@@ -242,72 +243,25 @@ type FounderVoiceProfile = {
   bannedPatterns?: string[]
 }
 
+let founderVoiceImportPromise: Promise<{
+  enforceFounderVoice: (text: string, options?: Record<string, unknown>) => string
+  loadFounderVoiceProfile: (cwd?: string) => Promise<FounderVoiceProfile>
+}> | null = null
+
 async function loadFounderVoiceProfile(): Promise<FounderVoiceProfile> {
-  const profile = await readJsonOrNull<FounderVoiceProfile>(FOUNDER_VOICE_PATH)
+  const founderVoiceModule = await loadFounderVoiceModule()
+  const profile = await founderVoiceModule.loadFounderVoiceProfile(HABI_ROOT)
   return profile || { id: 'habi_founder_v1', bannedPatterns: [] }
 }
 
-function cleanupFounderSlop(text: string, founderVoiceProfile: FounderVoiceProfile) {
-  const bannedPatterns = Array.isArray(founderVoiceProfile?.bannedPatterns) ? founderVoiceProfile.bannedPatterns : []
-  let next = String(text || '').trim()
-  for (const pattern of bannedPatterns) {
-    if (!pattern) continue
-    const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    next = next.replace(new RegExp(`\\b${escaped}\\b`, 'gi'), '')
+async function loadFounderVoiceModule() {
+  if (!founderVoiceImportPromise) {
+    founderVoiceImportPromise = import(pathToFileURL(FOUNDER_VOICE_MODULE_PATH).href) as Promise<{
+      enforceFounderVoice: (text: string, options?: Record<string, unknown>) => string
+      loadFounderVoiceProfile: (cwd?: string) => Promise<FounderVoiceProfile>
+    }>
   }
-  return next.replace(/\s+/g, ' ').replace(/\s+([.,!?;:])/g, '$1').trim()
-}
-
-function applyRewriteDirection(text: string, voiceDirection: string) {
-  const normalizedDirection = normalizeFeedbackText(voiceDirection)
-  if (!normalizedDirection) return ensureTerminalPeriod(text)
-
-  if (normalizedDirection.includes('more grounded')) {
-    return ensureTerminalPeriod(
-      trimSentence(text)
-        .replace(/\busually starts earlier than people think:?/gi, '')
-        .replace(/\bthe real issue\b/gi, 'the issue'),
-    )
-  }
-
-  if (normalizedDirection.includes('more cutting') || normalizedDirection.includes('quietly dangerous')) {
-    return buildSharperHook(text)
-  }
-
-  if (normalizedDirection.includes('less product-y')) {
-    return ensureTerminalPeriod(
-      trimSentence(text)
-        .replace(/\b(product|products|tool|tools|system|systems)\b/gi, 'software')
-        .replace(/\bHabi\b/gi, '')
-        .replace(/\s{2,}/g, ' ')
-        .trim(),
-    )
-  }
-
-  if (normalizedDirection.includes('more humane')) {
-    return ensureTerminalPeriod(`${trimSentence(text)} People feel the cost of that long before teams admit it`)
-  }
-
-  if (normalizedDirection.includes('more specific') || normalizedDirection.includes('less abstract')) {
-    return ensureTerminalPeriod(`${trimSentence(text)} That is usually where confidence starts leaking out of the workflow`)
-  }
-
-  if (normalizedDirection.includes('shorter')) {
-    return ensureTerminalPeriod(trimSentence(text).split(/[.?!]/)[0] || text)
-  }
-
-  if (normalizedDirection.includes('sharper hook') || normalizedDirection.includes('quote with more bite')) {
-    return buildSharperHook(text)
-  }
-
-  return ensureTerminalPeriod(text)
-}
-
-function buildSharperHook(text: string) {
-  const trimmed = trimSentence(text)
-  if (!trimmed) return ''
-  const lower = trimmed.charAt(0).toLowerCase() + trimmed.slice(1)
-  return `The failure usually starts earlier than people think: ${lower}.`
+  return founderVoiceImportPromise
 }
 
 function buildSourceSpecificRewrite(sourceLead: string, fallback: string) {
@@ -341,27 +295,35 @@ function buildDraftPackMarkdown(weekId: string, drafts: Array<Record<string, unk
   return `${lines.join('\n').trim()}\n`
 }
 
-function rewriteDraftText(
+async function rewriteDraftText(
   draft: Record<string, any>,
   feedback: string,
   voiceDirection: string,
   founderVoiceProfile: FounderVoiceProfile,
 ) {
   const currentText = trimSentence(draft.text)
-  const sourceText = normalizeFeedbackText(draft.source_tweet?.text || '')
+  const sourceText = String(draft.source_tweet?.text || '').trim()
   const normalizedFeedback = normalizeFeedbackText(feedback)
   const distributionType = String(draft.distribution_type || '').trim().toLowerCase()
-  const sourceContext = sourceText
+  const sourceContext = normalizeFeedbackText(sourceText)
   const sourceLead = trimSentence(draft.source_tweet?.text || '').split(/[.?!]/)[0]?.trim() || ''
 
   if (!currentText) return ''
 
-  const finalize = (value: string) => ensureTerminalPeriod(
-    cleanupFounderSlop(
-      applyRewriteDirection(value, voiceDirection),
-      founderVoiceProfile,
-    ),
-  )
+  const founderVoiceModule = await loadFounderVoiceModule()
+  const variantMode =
+    normalizedFeedback.includes('more grounded')
+      ? 'grounded'
+      : normalizedFeedback.includes('sharper hook') || normalizedFeedback.includes('stronger hook') || normalizedFeedback.includes('more cutting') || normalizedFeedback.includes('quote with more bite') || normalizeFeedbackText(voiceDirection).includes('sharper')
+        ? 'sharper'
+        : 'default'
+
+  const finalize = (value: string) => founderVoiceModule.enforceFounderVoice(value, {
+    profile: founderVoiceProfile,
+    variantMode,
+    sourceText,
+    voiceDirection,
+  })
 
   if (normalizedFeedback.includes('contrarian')) {
     if (distributionType === 'reply') {
@@ -377,12 +339,7 @@ function rewriteDraftText(
     if (/trust|control|unsupervised|delegate|assistant/.test(sourceContext)) {
       return finalize('Capability is not the line. The line is whether the system stays legible once it changes the plan without asking first.')
     }
-    const sharper = buildSharperHook(currentText)
-    return finalize(
-      sharper && normalizeFeedbackText(sharper) !== normalizeFeedbackText(currentText)
-        ? sharper
-        : 'The real issue is usually simpler than the post makes it sound: the plan starts costing more interpretation than the work itself.',
-    )
+    return finalize('The real issue is usually simpler than the post makes it sound: the plan starts costing more interpretation than the work itself.')
   }
 
   if (normalizedFeedback.includes('use source context') || normalizedFeedback.includes('source context')) {
@@ -446,13 +403,10 @@ function rewriteDraftText(
     if (distributionType === 'quote') {
       return finalize('The stronger product move is not more automation in theory. It is a plan people can still read and trust under a messy week.')
     }
-    const rewritten = buildSharperHook(currentText)
-    if (rewritten && normalizeFeedbackText(rewritten) !== normalizeFeedbackText(currentText)) {
-      return finalize(rewritten)
-    }
+    return finalize(currentText)
   }
 
-  return finalize(buildSharperHook(currentText) || ensureTerminalPeriod(currentText))
+  return finalize(currentText)
 }
 
 function nextDraftNumber(drafts: Array<Record<string, any>>) {
@@ -1024,7 +978,7 @@ export async function POST(request: NextRequest) {
 
         for (const prompt of prompts) {
           if (familyDrafts.length + added >= maxVariants) break
-          const rewritten = rewriteDraftText(anchor, prompt, voiceDirection, founderVoiceProfile)
+          const rewritten = await rewriteDraftText(anchor, prompt, voiceDirection, founderVoiceProfile)
           const normalized = normalizeFeedbackText(rewritten)
           if (!rewritten || !normalized || usedTexts.has(normalized)) continue
           usedTexts.add(normalized)
@@ -1127,7 +1081,7 @@ export async function POST(request: NextRequest) {
           target.changed_since_last_run = 'edited manually before approval'
         } else {
           const founderVoiceProfile = await loadFounderVoiceProfile()
-          const nextText = rewriteDraftText(target, String(body.feedback || '').trim(), voiceDirection, founderVoiceProfile)
+          const nextText = await rewriteDraftText(target, String(body.feedback || '').trim(), voiceDirection, founderVoiceProfile)
           if (!nextText) {
             return NextResponse.json({ error: 'Could not rewrite draft.' }, { status: 400 })
           }
