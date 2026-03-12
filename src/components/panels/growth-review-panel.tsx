@@ -1909,55 +1909,59 @@ export function GrowthReviewPanel() {
                     </div>
                     <div className="rounded-full border border-emerald-400/20 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-medium text-emerald-100">{readyApprovedPosts.length}</div>
                   </div>
-                  {readyApprovedPosts.length ? readyApprovedPosts.map((post) => {
-                    const suggested = buildSuggestedSchedule(post)
-                    const scheduleState = scheduleDrafts[post.id] || { when: post.scheduledAt || suggested.when, note: post.scheduleNote || suggested.note }
-                    const publishState = publishDrafts[post.id] || { tweetUrl: post.tweetUrl || '', tweetId: post.tweetId || '' }
-                    return (
-                      <div key={post.id} className="rounded-[1.2rem] border border-emerald-500/15 bg-[#10161f] p-4 shadow-[0_12px_28px_rgba(0,0,0,0.18)]">
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <div className="text-sm font-semibold leading-5 text-foreground">{post.pillar || 'Approved post'}{post.angle ? `: ${post.angle}` : ''}</div>
-                            <div className="mt-2 flex flex-wrap gap-2">
-                              {post.distributionType ? <FieldChip>{post.distributionType}</FieldChip> : null}
-                              {post.sourceType ? <FieldChip>{post.sourceType}</FieldChip> : null}
-                              {post.approvedAtPt ? <FieldChip>{formatPacificTime(post.approvedAtPt)}</FieldChip> : null}
+                  {readyApprovedPosts.length ? (
+                    readyApprovedPosts.map((post) => {
+                      const suggested = buildSuggestedSchedule(post)
+                      const scheduleState = scheduleDrafts[post.id] || { when: post.scheduledAt || suggested.when, note: post.scheduleNote || suggested.note }
+                      const publishState = publishDrafts[post.id] || { tweetUrl: post.tweetUrl || '', tweetId: post.tweetId || '' }
+                      return (
+                        <div key={post.id} className="rounded-[1.2rem] border border-emerald-500/15 bg-[#10161f] p-4 shadow-[0_12px_28px_rgba(0,0,0,0.18)]">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <div className="text-sm font-semibold leading-5 text-foreground">{post.pillar || 'Approved post'}{post.angle ? `: ${post.angle}` : ''}</div>
+                              <div className="mt-2 flex flex-wrap gap-2">
+                                {post.distributionType ? <FieldChip>{post.distributionType}</FieldChip> : null}
+                                {post.sourceType ? <FieldChip>{post.sourceType}</FieldChip> : null}
+                                {post.approvedAtPt ? <FieldChip>{formatPacificTime(post.approvedAtPt)}</FieldChip> : null}
+                              </div>
                             </div>
                           </div>
-                        </div>
-                        <div className="mt-4 rounded-xl border border-emerald-500/15 bg-black/20 px-4 py-4 text-sm leading-6 text-foreground whitespace-pre-wrap">{post.text}</div>
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          <button onClick={() => void runGrowthAction('schedule_draft', post.id, { scheduledAt: scheduleState.when, scheduleNote: scheduleState.note, scheduleSource: scheduleState.when === suggested.when ? 'machine_suggested' : 'user_selected' })} disabled={actionState.status === 'saving' || !scheduleState.when} className="rounded-lg bg-emerald-500/15 px-3 py-2 text-xs font-medium text-emerald-200 transition-smooth hover:bg-emerald-500/20 disabled:opacity-60">Schedule</button>
-                          <button onClick={() => void runGrowthAction('post_now', post.id)} disabled={actionState.status === 'saving'} className="rounded-lg bg-cyan-500/15 px-3 py-2 text-xs font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/20 disabled:opacity-60">Post now</button>
-                        </div>
-                        <details className="mt-3 rounded-xl border border-white/8 bg-black/20 px-3 py-3">
-                          <summary className="cursor-pointer list-none text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Scheduling details</summary>
-                          <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_1fr]">
-                            <label className="text-xs text-muted-foreground">When
-                              <input type="datetime-local" value={scheduleState.when} onChange={(event) => setScheduleDrafts((current) => ({ ...current, [post.id]: { ...scheduleState, when: event.target.value } }))} className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground" />
-                            </label>
-                            <label className="text-xs text-muted-foreground">Note
-                              <input value={scheduleState.note} onChange={(event) => setScheduleDrafts((current) => ({ ...current, [post.id]: { ...scheduleState, note: event.target.value } }))} className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground" placeholder="optional schedule note" />
-                            </label>
+                          <div className="mt-4 rounded-xl border border-emerald-500/15 bg-black/20 px-4 py-4 text-sm leading-6 text-foreground whitespace-pre-wrap">{post.text}</div>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <button onClick={() => void runGrowthAction('schedule_draft', post.id, { scheduledAt: scheduleState.when, scheduleNote: scheduleState.note, scheduleSource: scheduleState.when === suggested.when ? 'machine_suggested' : 'user_selected' })} disabled={actionState.status === 'saving' || !scheduleState.when} className="rounded-lg bg-emerald-500/15 px-3 py-2 text-xs font-medium text-emerald-200 transition-smooth hover:bg-emerald-500/20 disabled:opacity-60">Schedule</button>
+                            <button onClick={() => void runGrowthAction('post_now', post.id)} disabled={actionState.status === 'saving'} className="rounded-lg bg-cyan-500/15 px-3 py-2 text-xs font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/20 disabled:opacity-60">Post now</button>
                           </div>
-                          <details className="mt-3 rounded-xl border border-white/8 bg-black/15 px-3 py-3">
-                            <summary className="cursor-pointer list-none text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Manual fallback</summary>
+                          <details className="mt-3 rounded-xl border border-white/8 bg-black/20 px-3 py-3">
+                            <summary className="cursor-pointer list-none text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Scheduling details</summary>
                             <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_1fr]">
-                              <label className="text-xs text-muted-foreground">Tweet URL
-                                <input value={publishState.tweetUrl} onChange={(event) => setPublishDrafts((current) => ({ ...current, [post.id]: { ...publishState, tweetUrl: event.target.value } }))} className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground" placeholder="https://x.com/.../status/..." />
+                              <label className="text-xs text-muted-foreground">When
+                                <input type="datetime-local" value={scheduleState.when} onChange={(event) => setScheduleDrafts((current) => ({ ...current, [post.id]: { ...scheduleState, when: event.target.value } }))} className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground" />
                               </label>
-                              <label className="text-xs text-muted-foreground">Tweet ID
-                                <input value={publishState.tweetId} onChange={(event) => setPublishDrafts((current) => ({ ...current, [post.id]: { ...publishState, tweetId: event.target.value } }))} className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground" placeholder="optional if URL is present" />
+                              <label className="text-xs text-muted-foreground">Note
+                                <input value={scheduleState.note} onChange={(event) => setScheduleDrafts((current) => ({ ...current, [post.id]: { ...scheduleState, note: event.target.value } }))} className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground" placeholder="optional schedule note" />
                               </label>
                             </div>
-                            <div className="mt-3 flex flex-wrap gap-2">
-                              <button onClick={() => void runGrowthAction('link_manual_publish', post.id, { tweetUrl: publishState.tweetUrl, tweetId: publishState.tweetId })} disabled={actionState.status === 'saving' || (!publishState.tweetUrl && !publishState.tweetId)} className="rounded-lg bg-cyan-500/15 px-3 py-2 text-xs font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/20 disabled:opacity-60">Link manual publish</button>
-                            </div>
+                            <details className="mt-3 rounded-xl border border-white/8 bg-black/15 px-3 py-3">
+                              <summary className="cursor-pointer list-none text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Manual fallback</summary>
+                              <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_1fr]">
+                                <label className="text-xs text-muted-foreground">Tweet URL
+                                  <input value={publishState.tweetUrl} onChange={(event) => setPublishDrafts((current) => ({ ...current, [post.id]: { ...publishState, tweetUrl: event.target.value } }))} className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground" placeholder="https://x.com/.../status/..." />
+                                </label>
+                                <label className="text-xs text-muted-foreground">Tweet ID
+                                  <input value={publishState.tweetId} onChange={(event) => setPublishDrafts((current) => ({ ...current, [post.id]: { ...publishState, tweetId: event.target.value } }))} className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground" placeholder="optional if URL is present" />
+                                </label>
+                              </div>
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                <button onClick={() => void runGrowthAction('link_manual_publish', post.id, { tweetUrl: publishState.tweetUrl, tweetId: publishState.tweetId })} disabled={actionState.status === 'saving' || (!publishState.tweetUrl && !publishState.tweetId)} className="rounded-lg bg-cyan-500/15 px-3 py-2 text-xs font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/20 disabled:opacity-60">Link manual publish</button>
+                              </div>
+                            </details>
                           </details>
-                        </details>
-                      </div>
-                    )
-                  }) : <div className="rounded-[1.1rem] border border-white/10 bg-[#10161f] px-4 py-4 text-sm text-muted-foreground">Nothing is ready to publish yet.</div>}
+                        </div>
+                      )
+                    })
+                  ) : (
+                    <div className="rounded-[1.1rem] border border-white/10 bg-[#10161f] px-4 py-4 text-sm text-muted-foreground">Nothing is ready to publish yet.</div>
+                  )}
                 </div>
 
               <div className="space-y-3 rounded-[1.4rem] border border-cyan-500/12 bg-[linear-gradient(180deg,rgba(12,24,30,0.96),rgba(9,15,18,0.98))] p-4 shadow-[0_16px_36px_rgba(0,0,0,0.22)]">
@@ -1968,20 +1972,24 @@ export function GrowthReviewPanel() {
                     </div>
                     <div className="rounded-full border border-cyan-400/20 bg-cyan-500/10 px-2.5 py-1 text-[11px] font-medium text-cyan-100">{scheduledPosts.length}</div>
                   </div>
-                  {scheduledPosts.length ? scheduledPosts.map((post) => (
-                    <div key={`scheduled-${post.id}`} className="rounded-[1.2rem] border border-cyan-500/15 bg-[#10161f] p-4 shadow-[0_12px_28px_rgba(0,0,0,0.18)]">
-                      <div className="text-sm font-semibold leading-5 text-foreground">{post.pillar || 'Scheduled post'}{post.angle ? `: ${post.angle}` : ''}</div>
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        <FieldChip>{post.distributionType || 'scheduled'}</FieldChip>
-                        <FieldChip>{formatPacificTime(post.scheduledAtPt || post.scheduledAt || null)}</FieldChip>
+                  {scheduledPosts.length ? (
+                    scheduledPosts.map((post) => (
+                      <div key={`scheduled-${post.id}`} className="rounded-[1.2rem] border border-cyan-500/15 bg-[#10161f] p-4 shadow-[0_12px_28px_rgba(0,0,0,0.18)]">
+                        <div className="text-sm font-semibold leading-5 text-foreground">{post.pillar || 'Scheduled post'}{post.angle ? `: ${post.angle}` : ''}</div>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          <FieldChip>{post.distributionType || 'scheduled'}</FieldChip>
+                          <FieldChip>{formatPacificTime(post.scheduledAtPt || post.scheduledAt || null)}</FieldChip>
+                        </div>
+                        <div className="mt-4 rounded-xl border border-cyan-500/15 bg-black/20 px-4 py-4 text-sm leading-6 text-foreground whitespace-pre-wrap">{post.text}</div>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <button onClick={() => void runGrowthAction('post_now', post.id)} disabled={actionState.status === 'saving'} className="rounded-lg bg-cyan-500/15 px-3 py-2 text-xs font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/20 disabled:opacity-60">Post now</button>
+                          <button onClick={() => void runGrowthAction('unschedule_draft', post.id)} disabled={actionState.status === 'saving'} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2 disabled:opacity-60">Unschedule</button>
+                        </div>
                       </div>
-                      <div className="mt-4 rounded-xl border border-cyan-500/15 bg-black/20 px-4 py-4 text-sm leading-6 text-foreground whitespace-pre-wrap">{post.text}</div>
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        <button onClick={() => void runGrowthAction('post_now', post.id)} disabled={actionState.status === 'saving'} className="rounded-lg bg-cyan-500/15 px-3 py-2 text-xs font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/20 disabled:opacity-60">Post now</button>
-                        <button onClick={() => void runGrowthAction('unschedule_draft', post.id)} disabled={actionState.status === 'saving'} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2 disabled:opacity-60">Unschedule</button>
-                      </div>
-                    </div>
-                  )) : <div className="rounded-[1.1rem] border border-white/10 bg-[#10161f] px-4 py-4 text-sm text-muted-foreground">Nothing is scheduled.</div>}
+                    ))
+                  ) : (
+                    <div className="rounded-[1.1rem] border border-white/10 bg-[#10161f] px-4 py-4 text-sm text-muted-foreground">Nothing is scheduled.</div>
+                  )}
                 </div>
 
               <div className="space-y-3 rounded-[1.4rem] border border-rose-500/12 bg-[linear-gradient(180deg,rgba(28,16,22,0.96),rgba(14,12,18,0.98))] p-4 shadow-[0_16px_36px_rgba(0,0,0,0.22)]">
@@ -1992,13 +2000,17 @@ export function GrowthReviewPanel() {
                     </div>
                     <div className="rounded-full border border-rose-400/20 bg-rose-500/10 px-2.5 py-1 text-[11px] font-medium text-rose-100">{failedPosts.length}</div>
                   </div>
-                  {failedPosts.length ? failedPosts.map((post) => (
-                    <div key={`failed-${post.id}`} className="rounded-[1.2rem] border border-rose-500/15 bg-[#161014] p-4 shadow-[0_12px_28px_rgba(0,0,0,0.18)]">
-                      <div className="text-sm font-semibold leading-5 text-foreground">{post.pillar || 'Failed post'}{post.angle ? `: ${post.angle}` : ''}</div>
-                      <div className="mt-3 rounded-lg border border-rose-500/15 bg-black/15 px-3 py-2 text-xs text-rose-100/90">{post.publishError || 'Publish failed.'}</div>
-                      <div className="mt-3 rounded-xl border border-rose-500/15 bg-black/20 px-4 py-4 text-sm leading-6 text-foreground whitespace-pre-wrap">{post.text}</div>
-                    </div>
-                  )) : <div className="rounded-[1.1rem] border border-white/10 bg-[#10161f] px-4 py-4 text-sm text-muted-foreground">No failed publishes.</div>}
+                  {failedPosts.length ? (
+                    failedPosts.map((post) => (
+                      <div key={`failed-${post.id}`} className="rounded-[1.2rem] border border-rose-500/15 bg-[#161014] p-4 shadow-[0_12px_28px_rgba(0,0,0,0.18)]">
+                        <div className="text-sm font-semibold leading-5 text-foreground">{post.pillar || 'Failed post'}{post.angle ? `: ${post.angle}` : ''}</div>
+                        <div className="mt-3 rounded-lg border border-rose-500/15 bg-black/15 px-3 py-2 text-xs text-rose-100/90">{post.publishError || 'Publish failed.'}</div>
+                        <div className="mt-3 rounded-xl border border-rose-500/15 bg-black/20 px-4 py-4 text-sm leading-6 text-foreground whitespace-pre-wrap">{post.text}</div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="rounded-[1.1rem] border border-white/10 bg-[#10161f] px-4 py-4 text-sm text-muted-foreground">No failed publishes.</div>
+                  )}
                 </div>
 
               <div className="space-y-3 rounded-[1.4rem] border border-white/8 bg-[linear-gradient(180deg,rgba(17,18,23,0.96),rgba(9,15,18,0.98))] p-4 shadow-[0_16px_36px_rgba(0,0,0,0.22)] xl:col-span-2">
