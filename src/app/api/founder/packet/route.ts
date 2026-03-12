@@ -113,6 +113,80 @@ async function resolveGrowthWeek(root: string): Promise<string | null> {
   return findLatestGrowthWeek(root)
 }
 
+async function listGrowthWeeks(root: string): Promise<string[]> {
+  let entries: Array<{ name: string; isDirectory(): boolean }> = []
+  try {
+    entries = await fs.readdir(root, { withFileTypes: true }) as Array<{ name: string; isDirectory(): boolean }>
+  } catch {
+    return []
+  }
+
+  return entries
+    .filter((entry) => entry.isDirectory() && /^week-\d+$/i.test(entry.name))
+    .map((entry) => entry.name)
+    .sort((left, right) => {
+      const leftNum = Number.parseInt(left.split('-')[1] || '0', 10)
+      const rightNum = Number.parseInt(right.split('-')[1] || '0', 10)
+      return leftNum - rightNum
+    })
+}
+
+function normalizeAccountGrowthSummary(input: any) {
+  if (!input || typeof input !== 'object') return null
+  const startingFollowerCount = Number.isFinite(Number(input.startingFollowerCount)) ? Number(input.startingFollowerCount) : null
+  const endingFollowerCount = Number.isFinite(Number(input.endingFollowerCount)) ? Number(input.endingFollowerCount) : null
+  const netFollowerGrowth = Number.isFinite(Number(input.netFollowerGrowth)) ? Number(input.netFollowerGrowth) : (startingFollowerCount != null && endingFollowerCount != null ? endingFollowerCount - startingFollowerCount : null)
+  return {
+    week: String(input.week || '').trim() || null,
+    generatedAt: input.generatedAt || null,
+    researchGeneratedAt: input.researchGeneratedAt || null,
+    snapshotStatus: String(input.snapshotStatus || 'partial').trim() || 'partial',
+    notes: Array.isArray(input.notes) ? input.notes.map((value: unknown) => String(value || '').trim()).filter(Boolean).slice(0, 4) : [],
+    usedCache: Boolean(input.usedCache),
+    cacheAgeMinutes: Number.isFinite(Number(input.cacheAgeMinutes)) ? Number(input.cacheAgeMinutes) : null,
+    discoveryTriggered: Boolean(input.discoveryTriggered),
+    followerSnapshot: input.followerSnapshot && typeof input.followerSnapshot === 'object'
+      ? {
+          fetchedAt: input.followerSnapshot.fetchedAt || null,
+          username: input.followerSnapshot.username || null,
+          accountId: input.followerSnapshot.accountId || null,
+          followersCount: Number.isFinite(Number(input.followerSnapshot.followersCount)) ? Number(input.followerSnapshot.followersCount) : null,
+        }
+      : null,
+    startingFollowerCount,
+    endingFollowerCount,
+    netFollowerGrowth,
+    accountsFollowed: Number.isFinite(Number(input.accountsFollowed)) ? Number(input.accountsFollowed) : 0,
+    followsFromEngagement: Number.isFinite(Number(input.followsFromEngagement)) ? Number(input.followsFromEngagement) : 0,
+    followsFromProactiveQueue: Number.isFinite(Number(input.followsFromProactiveQueue)) ? Number(input.followsFromProactiveQueue) : 0,
+    followBudget: input.followBudget && typeof input.followBudget === 'object'
+      ? {
+          proactiveDailyCap: Number.isFinite(Number(input.followBudget.proactiveDailyCap)) ? Number(input.followBudget.proactiveDailyCap) : null,
+          proactiveUsedThisWeek: Number.isFinite(Number(input.followBudget.proactiveUsedThisWeek)) ? Number(input.followBudget.proactiveUsedThisWeek) : 0,
+          engagementUsedThisWeek: Number.isFinite(Number(input.followBudget.engagementUsedThisWeek)) ? Number(input.followBudget.engagementUsedThisWeek) : 0,
+        }
+      : null,
+    postsPublished: Number.isFinite(Number(input.postsPublished)) ? Number(input.postsPublished) : 0,
+    repliesPublished: Number.isFinite(Number(input.repliesPublished)) ? Number(input.repliesPublished) : 0,
+    quotesPublished: Number.isFinite(Number(input.quotesPublished)) ? Number(input.quotesPublished) : 0,
+    originalsPublished: Number.isFinite(Number(input.originalsPublished)) ? Number(input.originalsPublished) : 0,
+    successfulPublishCount: Number.isFinite(Number(input.successfulPublishCount)) ? Number(input.successfulPublishCount) : 0,
+    failedPublishCount: Number.isFinite(Number(input.failedPublishCount)) ? Number(input.failedPublishCount) : 0,
+    selectedOpportunityCount: Number.isFinite(Number(input.selectedOpportunityCount)) ? Number(input.selectedOpportunityCount) : 0,
+    draftCount: Number.isFinite(Number(input.draftCount)) ? Number(input.draftCount) : 0,
+  }
+}
+
+async function loadGrowthAccountGrowthSummaries(root: string) {
+  const weeks = await listGrowthWeeks(root)
+  const summaries = await Promise.all(weeks.map(async (week) => {
+    const summaryPath = path.join(root, week, 'account-growth-summary.json')
+    const summary = normalizeAccountGrowthSummary(await readJsonOrNull<any>(summaryPath))
+    return summary ? { ...summary, week } : null
+  }))
+  return summaries.filter(Boolean)
+}
+
 function normalizeGrowthResearchSignals(input: unknown): string[] {
   if (!Array.isArray(input)) return []
 
@@ -1591,6 +1665,7 @@ export async function GET(request: NextRequest) {
     const growthPublishLog = growthPaths ? await readJsonOrNull<any>(growthPaths.publishLogPath) : null
     const growthFollowQueue = growthPaths ? await readJsonOrNull<any[]>(growthPaths.followQueuePath) : null
     const growthFollowLog = await readJsonOrNull<any[]>(GROWTH_FOLLOW_LOG_PATH)
+    const growthAccountGrowthSummaries = await loadGrowthAccountGrowthSummaries(GROWTH_WEEKS_ROOT)
     const repeatedPains = summarizeRepeatedPains(signalLedger)
     const workspaceId = auth.user.workspace_id ?? 1
 
@@ -1706,6 +1781,7 @@ export async function GET(request: NextRequest) {
         publishLog: Array.isArray(growthPublishLog) ? growthPublishLog.slice(-5).reverse() : [],
         followQueue: Array.isArray(growthFollowQueue) ? growthFollowQueue : [],
         followLog: Array.isArray(growthFollowLog) ? growthFollowLog.slice(-10).reverse() : [],
+        accountGrowthSummaries: growthAccountGrowthSummaries,
         scorecard: growthScorecard,
       },
       tasks: loadTaskSnapshot(workspaceId),

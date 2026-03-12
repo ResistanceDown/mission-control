@@ -324,6 +324,41 @@ interface GrowthApiResponse {
       followType?: 'proactive' | 'engagement' | string
       countsTowardDailyCap?: boolean
     }>
+    accountGrowthSummaries?: Array<{
+      week: string | null
+      generatedAt?: string | null
+      researchGeneratedAt?: string | null
+      snapshotStatus?: string
+      notes?: string[]
+      usedCache?: boolean
+      cacheAgeMinutes?: number | null
+      discoveryTriggered?: boolean
+      followerSnapshot?: {
+        fetchedAt?: string | null
+        username?: string | null
+        accountId?: string | null
+        followersCount?: number | null
+      } | null
+      startingFollowerCount?: number | null
+      endingFollowerCount?: number | null
+      netFollowerGrowth?: number | null
+      accountsFollowed?: number
+      followsFromEngagement?: number
+      followsFromProactiveQueue?: number
+      followBudget?: {
+        proactiveDailyCap?: number | null
+        proactiveUsedThisWeek?: number
+        engagementUsedThisWeek?: number
+      } | null
+      postsPublished?: number
+      repliesPublished?: number
+      quotesPublished?: number
+      originalsPublished?: number
+      successfulPublishCount?: number
+      failedPublishCount?: number
+      selectedOpportunityCount?: number
+      draftCount?: number
+    }>
     resultsSummary?: {
       postedCount: number
       syncedPostCount?: number
@@ -391,6 +426,12 @@ function formatPacificTime(value?: string | null) {
   const parsed = new Date(raw)
   if (Number.isNaN(parsed.getTime())) return raw
   return `${PT_DATE_TIME.format(parsed)} PT`
+}
+
+function formatSignedCount(value?: number | null) {
+  if (typeof value !== 'number' || Number.isNaN(value)) return 'n/a'
+  if (value > 0) return `+${value}`
+  return String(value)
 }
 
 function useGrowthData() {
@@ -1184,6 +1225,10 @@ export function GrowthReviewPanel() {
   const watchOnlyOpportunities = useMemo(() => growth?.watchOnlyOpportunities || [], [growth])
   const followQueue = useMemo(() => growth?.followQueue || [], [growth])
   const followLog = useMemo(() => growth?.followLog || [], [growth])
+  const accountGrowthSummaries = useMemo(
+    () => [...(growth?.accountGrowthSummaries || [])].filter((summary) => summary.week).sort((left, right) => String(left.week || '').localeCompare(String(right.week || ''), undefined, { numeric: true })),
+    [growth],
+  )
   const reactiveOpportunities = selectedOpportunities.filter((opportunity) => opportunity.distributionType === 'reply' || opportunity.distributionType === 'quote')
   const standaloneOpportunities = selectedOpportunities.filter((opportunity) => opportunity.distributionType === 'original')
   const reactiveOpportunityFamilies = useMemo(() => {
@@ -1246,6 +1291,11 @@ export function GrowthReviewPanel() {
   const syncedPublishedCount = Number(growth?.resultsSummary?.syncedPostCount || growth?.strategyMemory?.performance?.syncedPostCount || 0)
   const publishAttempts = Number(growth?.resultsSummary?.publishAttempts || growth?.strategyMemory?.performance?.publishAttempts || 0)
   const todayBestMove = growth?.strategy?.todayBestMove || null
+  const latestAccountGrowthSummary = accountGrowthSummaries[accountGrowthSummaries.length - 1] || null
+  const bestGrowthWeek = useMemo(() => {
+    const candidates = accountGrowthSummaries.filter((summary) => typeof summary.netFollowerGrowth === 'number')
+    return candidates.sort((left, right) => Number(right.netFollowerGrowth || 0) - Number(left.netFollowerGrowth || 0))[0] || null
+  }, [accountGrowthSummaries])
   const topOpportunity = useMemo(() => {
     const ranked = [...selectedOpportunities].sort((left, right) => {
       const leftReactiveBoost = left.distributionType === 'reply' ? 8 : left.distributionType === 'quote' ? 4 : 0
@@ -1705,6 +1755,141 @@ export function GrowthReviewPanel() {
 
           <CollapsibleSection title="Signals" subtitle="Source quality, account targets, and research residue that did not make the active review lane." defaultOpen={false}>
             <div className="space-y-3">
+              {accountGrowthSummaries.length ? (
+                <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Account growth</div>
+                      <div className="mt-1 text-sm font-medium text-foreground">
+                        {latestAccountGrowthSummary?.week || 'Current week'}
+                        {latestAccountGrowthSummary?.snapshotStatus === 'partial' ? ' • partial' : ''}
+                      </div>
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {latestAccountGrowthSummary?.generatedAt ? `Updated ${formatPacificTime(latestAccountGrowthSummary.generatedAt)}` : 'Waiting on weekly snapshot'}
+                    </div>
+                  </div>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                    <div className="rounded-lg border border-white/8 bg-black/15 px-3 py-3">
+                      <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Followers</div>
+                      <div className="mt-1 text-xl font-semibold text-foreground">
+                        {typeof latestAccountGrowthSummary?.endingFollowerCount === 'number' ? latestAccountGrowthSummary.endingFollowerCount.toLocaleString() : 'Unknown'}
+                      </div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        {typeof latestAccountGrowthSummary?.startingFollowerCount === 'number' && typeof latestAccountGrowthSummary?.endingFollowerCount === 'number'
+                          ? `${latestAccountGrowthSummary.startingFollowerCount.toLocaleString()} → ${latestAccountGrowthSummary.endingFollowerCount.toLocaleString()}`
+                          : latestAccountGrowthSummary?.snapshotStatus === 'partial'
+                            ? 'Partial follower snapshot'
+                            : 'No follower snapshot yet'}
+                      </div>
+                    </div>
+                    <div className="rounded-lg border border-white/8 bg-black/15 px-3 py-3">
+                      <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Net growth</div>
+                      <div className="mt-1 text-xl font-semibold text-foreground">
+                        {typeof latestAccountGrowthSummary?.netFollowerGrowth === 'number' ? formatSignedCount(latestAccountGrowthSummary.netFollowerGrowth) : '—'}
+                      </div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        {bestGrowthWeek ? `Best week so far: ${bestGrowthWeek.week} (${formatSignedCount(bestGrowthWeek.netFollowerGrowth)})` : 'Waiting for multiple weeks of follower data'}
+                      </div>
+                    </div>
+                    <div className="rounded-lg border border-white/8 bg-black/15 px-3 py-3">
+                      <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Posts published</div>
+                      <div className="mt-1 text-xl font-semibold text-foreground">{latestAccountGrowthSummary?.postsPublished ?? 0}</div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        {latestAccountGrowthSummary ? `${latestAccountGrowthSummary.repliesPublished ?? 0} replies • ${latestAccountGrowthSummary.quotesPublished ?? 0} quotes • ${latestAccountGrowthSummary.originalsPublished ?? 0} originals` : 'No weekly publish summary yet'}
+                      </div>
+                    </div>
+                    <div className="rounded-lg border border-white/8 bg-black/15 px-3 py-3">
+                      <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Follows</div>
+                      <div className="mt-1 text-xl font-semibold text-foreground">{latestAccountGrowthSummary?.accountsFollowed ?? 0}</div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        {latestAccountGrowthSummary ? `${latestAccountGrowthSummary.followsFromProactiveQueue ?? 0} proactive • ${latestAccountGrowthSummary.followsFromEngagement ?? 0} engagement` : 'No follow summary yet'}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="mt-3 grid gap-3 xl:grid-cols-[minmax(0,1.7fr)_minmax(280px,1fr)]">
+                    <div className="rounded-lg border border-white/8 bg-black/15 px-3 py-3">
+                      <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Weekly trend</div>
+                      <div className="mt-3 overflow-x-auto">
+                        <table className="min-w-full text-sm">
+                          <thead className="text-left text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
+                            <tr>
+                              <th className="pb-2 pr-4 font-medium">Week</th>
+                              <th className="pb-2 pr-4 font-medium">Followers</th>
+                              <th className="pb-2 pr-4 font-medium">Net</th>
+                              <th className="pb-2 pr-4 font-medium">Posts</th>
+                              <th className="pb-2 pr-4 font-medium">Follows</th>
+                              <th className="pb-2 font-medium">Status</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-white/6">
+                            {accountGrowthSummaries.map((summary) => (
+                              <tr key={`growth-summary-${summary.week}`} className="text-foreground/88">
+                                <td className="py-2 pr-4 font-medium text-foreground">{summary.week}</td>
+                                <td className="py-2 pr-4 text-xs text-foreground/82">
+                                  {typeof summary.startingFollowerCount === 'number' && typeof summary.endingFollowerCount === 'number'
+                                    ? `${summary.startingFollowerCount.toLocaleString()} → ${summary.endingFollowerCount.toLocaleString()}`
+                                    : typeof summary.endingFollowerCount === 'number'
+                                      ? summary.endingFollowerCount.toLocaleString()
+                                      : 'Partial'}
+                                </td>
+                                <td className="py-2 pr-4 font-medium">{typeof summary.netFollowerGrowth === 'number' ? formatSignedCount(summary.netFollowerGrowth) : '—'}</td>
+                                <td className="py-2 pr-4">{summary.postsPublished ?? 0}</td>
+                                <td className="py-2 pr-4">{summary.accountsFollowed ?? 0}</td>
+                                <td className="py-2 text-xs text-muted-foreground">{summary.snapshotStatus || 'ready'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                    <div className="space-y-3">
+                      <div className="rounded-lg border border-white/8 bg-black/15 px-3 py-3">
+                        <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Published mix</div>
+                        <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                          <div className="rounded-md border border-white/8 bg-black/10 px-3 py-2">
+                            <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Replies</div>
+                            <div className="mt-1 text-lg font-semibold text-foreground">{latestAccountGrowthSummary?.repliesPublished ?? 0}</div>
+                          </div>
+                          <div className="rounded-md border border-white/8 bg-black/10 px-3 py-2">
+                            <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Quotes</div>
+                            <div className="mt-1 text-lg font-semibold text-foreground">{latestAccountGrowthSummary?.quotesPublished ?? 0}</div>
+                          </div>
+                          <div className="rounded-md border border-white/8 bg-black/10 px-3 py-2">
+                            <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Originals</div>
+                            <div className="mt-1 text-lg font-semibold text-foreground">{latestAccountGrowthSummary?.originalsPublished ?? 0}</div>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="rounded-lg border border-white/8 bg-black/15 px-3 py-3">
+                        <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Follow split</div>
+                        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                          <div className="rounded-md border border-white/8 bg-black/10 px-3 py-2">
+                            <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Proactive</div>
+                            <div className="mt-1 text-lg font-semibold text-foreground">{latestAccountGrowthSummary?.followsFromProactiveQueue ?? 0}</div>
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              {latestAccountGrowthSummary?.followBudget?.proactiveDailyCap ? `Cap ${latestAccountGrowthSummary.followBudget.proactiveDailyCap}/day` : 'Budgeted discovery follows'}
+                            </div>
+                          </div>
+                          <div className="rounded-md border border-white/8 bg-black/10 px-3 py-2">
+                            <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Engagement</div>
+                            <div className="mt-1 text-lg font-semibold text-foreground">{latestAccountGrowthSummary?.followsFromEngagement ?? 0}</div>
+                            <div className="mt-1 text-xs text-muted-foreground">Does not reduce the proactive budget.</div>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="rounded-lg border border-white/8 bg-black/15 px-3 py-3">
+                        <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Weekly read</div>
+                        <div className="mt-2 space-y-1 text-xs text-foreground/82">
+                          {bestGrowthWeek ? <div>Best visible week: {bestGrowthWeek.week} ({formatSignedCount(bestGrowthWeek.netFollowerGrowth)})</div> : null}
+                          {latestAccountGrowthSummary?.postsPublished && !latestAccountGrowthSummary.netFollowerGrowth ? <div>Publishing is happening, but follower movement is still partial or flat this week.</div> : null}
+                          {latestAccountGrowthSummary?.notes?.length ? latestAccountGrowthSummary.notes.map((note, index) => <div key={`growth-note-${index}`}>{note}</div>) : <div>Weekly growth data is available here without cluttering the posting workflow.</div>}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
               {watchOnlyOpportunities.length ? (
                 <details className="rounded-xl border border-white/8 bg-black/20 p-4">
                   <summary className="cursor-pointer list-none text-sm font-medium text-foreground">
