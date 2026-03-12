@@ -841,6 +841,9 @@ function DraftCard({
     setRewritePrompt('')
   }, [draft.id, draft.text])
 
+  const visibleRationale = draft.selection_reason || draft.why_now || draft.rationale
+  const detailSignalCount = draft.supporting_signals?.length || 0
+
   return (
     <article className="rounded-2xl border border-white/10 bg-[#10161f] p-4 shadow-[0_20px_40px_rgba(0,0,0,0.28)]">
       <div className="flex items-start justify-between gap-3">
@@ -848,12 +851,8 @@ function DraftCard({
           <div className="text-sm font-semibold text-foreground">{draft.pillar}: {draft.angle}</div>
           <div className="mt-2 flex flex-wrap gap-2">
             {draft.distribution_type ? <FieldChip>{draft.distribution_type}</FieldChip> : null}
-            {draft.source_type ? <FieldChip>{draft.source_type}</FieldChip> : null}
-            {draft.cluster_id ? <FieldChip>{draft.cluster_id}</FieldChip> : null}
             {draft.confidence ? <FieldChip>confidence {draft.confidence}</FieldChip> : null}
-            {typeof draft.follower_growth_score === 'number' ? <FieldChip>growth {draft.follower_growth_score}</FieldChip> : null}
-            {typeof draft.brand_building_score === 'number' ? <FieldChip>brand {draft.brand_building_score}</FieldChip> : null}
-            {typeof draft.timeliness_score === 'number' ? <FieldChip>timeliness {draft.timeliness_score}</FieldChip> : null}
+            {draft.source_account ? <FieldChip>{draft.source_account}</FieldChip> : null}
           </div>
         </div>
         <span className={cx(
@@ -865,50 +864,69 @@ function DraftCard({
         )}>{draft.approval || 'candidate'}</span>
       </div>
 
-      <div className="mt-4 rounded-xl border border-cyan-500/15 bg-[#0c1219] px-4 py-4">
-        <div className="mb-2 flex items-center justify-between gap-3">
-          <div>
-            <div className="text-[11px] uppercase tracking-[0.12em] text-cyan-100/70">Exact post text</div>
-            <div className="mt-1 text-xs text-foreground/65">Edit the exact copy here, or rewrite it from your feedback before approval.</div>
+      <div className="mt-4 grid gap-4 xl:grid-cols-[1.25fr_0.75fr]">
+        <div className="rounded-xl border border-cyan-500/15 bg-[#0c1219] px-4 py-4">
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <div>
+              <div className="text-[11px] uppercase tracking-[0.12em] text-cyan-100/70">Exact post text</div>
+              <div className="mt-1 text-xs text-foreground/65">Edit the exact copy here, or rewrite it before approval.</div>
+            </div>
+            {dirty ? <FieldChip>Edited locally</FieldChip> : null}
           </div>
-          {dirty ? <FieldChip>Edited locally</FieldChip> : null}
+          <textarea
+            className="min-h-36 w-full resize-y rounded-xl border border-white/8 bg-black/15 px-4 py-4 text-[15px] leading-7 text-foreground outline-none transition-smooth focus:border-cyan-500/30"
+            value={draftText}
+            onChange={(event) => {
+              setDraftText(event.target.value)
+              setDirty(event.target.value !== draft.text)
+            }}
+          />
         </div>
-        <textarea
-          className="min-h-36 w-full resize-y rounded-xl border border-white/8 bg-black/15 px-4 py-4 text-[15px] leading-7 text-foreground outline-none transition-smooth focus:border-cyan-500/30"
-          value={draftText}
-          onChange={(event) => {
-            setDraftText(event.target.value)
-            setDirty(event.target.value !== draft.text)
-          }}
-        />
-        <div className="mt-3 flex flex-wrap gap-2">
-          <button
-            onClick={() => onAction('update_draft_text', draft.id, { draftText })}
-            disabled={saving || !dirty || !draftText.trim()}
-            className="rounded-lg border border-white/10 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2 disabled:opacity-60"
-          >
-            Save Edit
-          </button>
-          <button
-            onClick={() => onAction('rewrite_draft', draft.id, { feedback: rewritePrompt.trim() || feedbackValue })}
-            disabled={saving}
-            className="rounded-lg border border-cyan-500/20 px-3 py-2 text-xs font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/10 disabled:opacity-60"
-          >
-            {saving ? 'Rewriting…' : 'Rewrite With Direction'}
-          </button>
+        <div className="space-y-3">
+          <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
+            <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Why this draft</div>
+            <div className="mt-1 text-sm text-foreground/88">{visibleRationale}</div>
+          </div>
+          <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
+            <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Actions</div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                onClick={() => onAction('update_draft_text', draft.id, { draftText })}
+                disabled={saving || !dirty || !draftText.trim()}
+                className="rounded-lg border border-white/10 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2 disabled:opacity-60"
+              >
+                Save Edit
+              </button>
+              <button
+                onClick={() => onAction('rewrite_draft', draft.id, { feedback: rewritePrompt.trim() || feedbackValue })}
+                disabled={saving}
+                className="rounded-lg border border-cyan-500/20 px-3 py-2 text-xs font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/10 disabled:opacity-60"
+              >
+                {saving ? 'Rewriting…' : 'Rewrite With Direction'}
+              </button>
+              <button onClick={() => onAction('approve_draft', draft.id)} disabled={saving || dirty || draft.approval === 'approved'} className="rounded-lg bg-emerald-500/15 px-3 py-2 text-xs font-medium text-emerald-200 transition-smooth hover:bg-emerald-500/20 disabled:opacity-60">Approve</button>
+              <button onClick={() => onAction('reject_draft', draft.id)} disabled={saving || draft.approval === 'rejected'} className="rounded-lg border border-white/10 px-3 py-2 text-xs font-medium text-muted-foreground transition-smooth hover:bg-surface-2 disabled:opacity-60">Reject</button>
+              <button onClick={() => onAction('archive_draft', draft.id)} disabled={saving || draft.approval === 'archived'} className="rounded-lg border border-amber-500/20 px-3 py-2 text-xs font-medium text-amber-200 transition-smooth hover:bg-amber-500/10 disabled:opacity-60">Archive</button>
+            </div>
+            <textarea
+              className="mt-3 min-h-20 w-full rounded-xl border border-white/8 bg-black/15 px-3 py-2 text-sm text-foreground outline-none transition-smooth focus:border-cyan-500/30"
+              placeholder="Rewrite direction: sharpen the hook, lean more contrarian, or reference the source context more directly."
+              value={rewritePrompt}
+              onChange={(event) => setRewritePrompt(event.target.value)}
+            />
+          </div>
+          {(typeof draft.follower_growth_score === 'number' || typeof draft.brand_building_score === 'number' || typeof draft.timeliness_score === 'number') ? (
+            <div className="flex flex-wrap gap-2">
+              {typeof draft.follower_growth_score === 'number' ? <FieldChip>growth {draft.follower_growth_score}</FieldChip> : null}
+              {typeof draft.brand_building_score === 'number' ? <FieldChip>brand {draft.brand_building_score}</FieldChip> : null}
+              {typeof draft.timeliness_score === 'number' ? <FieldChip>timeliness {draft.timeliness_score}</FieldChip> : null}
+            </div>
+          ) : null}
         </div>
-        <textarea
-          className="mt-3 min-h-20 w-full rounded-xl border border-white/8 bg-black/15 px-3 py-2 text-sm text-foreground outline-none transition-smooth focus:border-cyan-500/30"
-          placeholder="Optional rewrite direction: sharpen the hook, lean more contrarian, reference the source context more directly."
-          value={rewritePrompt}
-          onChange={(event) => setRewritePrompt(event.target.value)}
-        />
       </div>
 
-      <div className="mt-4 text-sm text-foreground/80">{draft.selection_reason || draft.why_now || draft.rationale}</div>
-
       <details className="mt-4 rounded-xl border border-white/8 bg-black/20 px-3 py-3">
-        <summary className="cursor-pointer list-none text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Details</summary>
+        <summary className="cursor-pointer list-none text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Details {detailSignalCount ? `• ${detailSignalCount} signals` : ''}</summary>
         <div className="mt-3 grid gap-3 lg:grid-cols-[1.2fr_0.8fr]">
         <div className="space-y-3">
           {draft.selection_reason ? (
@@ -989,12 +1007,6 @@ function DraftCard({
           value={feedbackValue}
           onChange={(event) => onFeedbackChange(event.target.value)}
         />
-      </div>
-
-      <div className="mt-4 flex flex-wrap gap-2">
-        <button onClick={() => onAction('approve_draft', draft.id)} disabled={saving || dirty || draft.approval === 'approved'} className="rounded-lg bg-emerald-500/15 px-3 py-2 text-xs font-medium text-emerald-200 transition-smooth hover:bg-emerald-500/20 disabled:opacity-60">Approve This Post</button>
-        <button onClick={() => onAction('reject_draft', draft.id)} disabled={saving || draft.approval === 'rejected'} className="rounded-lg border border-white/10 px-3 py-2 text-xs font-medium text-muted-foreground transition-smooth hover:bg-surface-2 disabled:opacity-60">Reject</button>
-        <button onClick={() => onAction('archive_draft', draft.id)} disabled={saving || draft.approval === 'archived'} className="rounded-lg border border-amber-500/20 px-3 py-2 text-xs font-medium text-amber-200 transition-smooth hover:bg-amber-500/10 disabled:opacity-60">Archive Angle</button>
       </div>
     </article>
   )
@@ -1806,7 +1818,7 @@ export function GrowthReviewPanel() {
         <div className="space-y-4">
           <div id="growth-ready-to-schedule">
           <CollapsibleSection title="Publishing queue" subtitle="Ready, scheduled, failed, and published states live here." defaultOpen>
-            <div className="grid gap-4 xl:grid-cols-3">
+            <div className="grid gap-4 xl:grid-cols-4">
               <div className="space-y-3 rounded-2xl border border-white/8 bg-[#0f151d] p-4">
                   <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Ready</div>
                   {readyApprovedPosts.length ? readyApprovedPosts.map((post) => {
@@ -1821,11 +1833,11 @@ export function GrowthReviewPanel() {
                             <div className="mt-1 flex flex-wrap gap-2">
                               {post.distributionType ? <FieldChip>{post.distributionType}</FieldChip> : null}
                               {post.sourceType ? <FieldChip>{post.sourceType}</FieldChip> : null}
-                              {post.approvedAtPt ? <FieldChip>approved {formatPacificTime(post.approvedAtPt)}</FieldChip> : null}
+                              {post.approvedAtPt ? <FieldChip>{formatPacificTime(post.approvedAtPt)}</FieldChip> : null}
                             </div>
                           </div>
                         </div>
-                        <div className="mt-4 rounded-xl border border-emerald-500/15 bg-black/20 px-4 py-4 text-[15px] leading-7 text-foreground whitespace-pre-wrap">{post.text}</div>
+                        <div className="mt-4 rounded-xl border border-emerald-500/15 bg-black/20 px-4 py-4 text-sm leading-6 text-foreground whitespace-pre-wrap">{post.text}</div>
                         <div className="mt-3 flex flex-wrap gap-2">
                           <button onClick={() => void runGrowthAction('schedule_draft', post.id, { scheduledAt: scheduleState.when, scheduleNote: scheduleState.note, scheduleSource: scheduleState.when === suggested.when ? 'machine_suggested' : 'user_selected' })} disabled={actionState.status === 'saving' || !scheduleState.when} className="rounded-lg bg-emerald-500/15 px-3 py-2 text-xs font-medium text-emerald-200 transition-smooth hover:bg-emerald-500/20 disabled:opacity-60">Schedule</button>
                           <button onClick={() => void runGrowthAction('post_now', post.id)} disabled={actionState.status === 'saving'} className="rounded-lg bg-cyan-500/15 px-3 py-2 text-xs font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/20 disabled:opacity-60">Post now</button>
@@ -1869,7 +1881,7 @@ export function GrowthReviewPanel() {
                         <FieldChip>{post.distributionType || 'scheduled'}</FieldChip>
                         <FieldChip>{formatPacificTime(post.scheduledAtPt || post.scheduledAt || null)}</FieldChip>
                       </div>
-                      <div className="mt-4 rounded-xl border border-cyan-500/15 bg-black/20 px-4 py-4 text-[15px] leading-7 text-foreground whitespace-pre-wrap">{post.text}</div>
+                      <div className="mt-4 rounded-xl border border-cyan-500/15 bg-black/20 px-4 py-4 text-sm leading-6 text-foreground whitespace-pre-wrap">{post.text}</div>
                       <div className="mt-3 flex flex-wrap gap-2">
                         <button onClick={() => void runGrowthAction('post_now', post.id)} disabled={actionState.status === 'saving'} className="rounded-lg bg-cyan-500/15 px-3 py-2 text-xs font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/20 disabled:opacity-60">Post now</button>
                         <button onClick={() => void runGrowthAction('unschedule_draft', post.id)} disabled={actionState.status === 'saving'} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2 disabled:opacity-60">Unschedule</button>
@@ -1884,7 +1896,7 @@ export function GrowthReviewPanel() {
                     <div key={`failed-${post.id}`} className="rounded-2xl border border-rose-500/15 bg-[#161014] p-4">
                       <div className="text-sm font-semibold text-foreground">{post.pillar || 'Failed post'}{post.angle ? `: ${post.angle}` : ''}</div>
                       <div className="mt-3 text-xs text-rose-100/90">{post.publishError || 'Publish failed.'}</div>
-                      <div className="mt-3 rounded-xl border border-rose-500/15 bg-black/20 px-4 py-4 text-[15px] leading-7 text-foreground whitespace-pre-wrap">{post.text}</div>
+                      <div className="mt-3 rounded-xl border border-rose-500/15 bg-black/20 px-4 py-4 text-sm leading-6 text-foreground whitespace-pre-wrap">{post.text}</div>
                     </div>
                   )) : <div className="rounded-xl border border-white/10 bg-[#10161f] px-4 py-4 text-sm text-muted-foreground">No failed publishes.</div>}
                 </div>
