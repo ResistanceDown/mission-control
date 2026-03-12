@@ -1807,40 +1807,73 @@ export function GrowthReviewPanel() {
                       </div>
                     </div>
                   </div>
-                  <div className="mt-3 grid gap-3 xl:grid-cols-[minmax(0,1.7fr)_minmax(280px,1fr)]">
+                  <div className="mt-3 grid gap-3 xl:grid-cols-[minmax(0,1.8fr)_minmax(300px,1fr)]">
                     <div className="rounded-lg border border-white/8 bg-black/15 px-3 py-3">
-                      <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Weekly trend</div>
-                      <div className="mt-3 overflow-x-auto">
-                        <table className="min-w-full text-sm">
-                          <thead className="text-left text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
-                            <tr>
-                              <th className="pb-2 pr-4 font-medium">Week</th>
-                              <th className="pb-2 pr-4 font-medium">Followers</th>
-                              <th className="pb-2 pr-4 font-medium">Net</th>
-                              <th className="pb-2 pr-4 font-medium">Posts</th>
-                              <th className="pb-2 pr-4 font-medium">Follows</th>
-                              <th className="pb-2 font-medium">Status</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-white/6">
-                            {accountGrowthSummaries.map((summary) => (
-                              <tr key={`growth-summary-${summary.week}`} className="text-foreground/88">
-                                <td className="py-2 pr-4 font-medium text-foreground">{summary.week}</td>
-                                <td className="py-2 pr-4 text-xs text-foreground/82">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Weekly trend</div>
+                        <div className="text-xs text-muted-foreground">Newest week first.</div>
+                      </div>
+                      <div className="mt-3 space-y-2">
+                        {[...accountGrowthSummaries].reverse().map((summary) => (
+                          <div
+                            key={`growth-summary-${summary.week}`}
+                            className="rounded-lg border border-white/8 bg-black/10 px-3 py-3"
+                          >
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                              <div>
+                                <div className="text-sm font-medium text-foreground">{summary.week}</div>
+                                <div className="mt-1 text-xs text-muted-foreground">
                                   {typeof summary.startingFollowerCount === 'number' && typeof summary.endingFollowerCount === 'number'
-                                    ? `${summary.startingFollowerCount.toLocaleString()} → ${summary.endingFollowerCount.toLocaleString()}`
+                                    ? `${summary.startingFollowerCount.toLocaleString()} -> ${summary.endingFollowerCount.toLocaleString()} followers`
                                     : typeof summary.endingFollowerCount === 'number'
-                                      ? summary.endingFollowerCount.toLocaleString()
-                                      : 'Partial'}
-                                </td>
-                                <td className="py-2 pr-4 font-medium">{typeof summary.netFollowerGrowth === 'number' ? formatSignedCount(summary.netFollowerGrowth) : '—'}</td>
-                                <td className="py-2 pr-4">{summary.postsPublished ?? 0}</td>
-                                <td className="py-2 pr-4">{summary.accountsFollowed ?? 0}</td>
-                                <td className="py-2 text-xs text-muted-foreground">{summary.snapshotStatus || 'ready'}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
+                                      ? `${summary.endingFollowerCount.toLocaleString()} followers`
+                                      : 'Follower snapshot still partial'}
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="rounded-full border border-white/8 bg-black/15 px-2 py-1 text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+                                  {summary.snapshotStatus || 'ready'}
+                                </span>
+                                <div className="text-right">
+                                  <div className="text-lg font-semibold text-foreground">
+                                    {typeof summary.netFollowerGrowth === 'number' ? formatSignedCount(summary.netFollowerGrowth) : '—'}
+                                  </div>
+                                  <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">Net growth</div>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                              <div className="rounded-md border border-white/8 bg-black/10 px-3 py-2">
+                                <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">Posts</div>
+                                <div className="mt-1 text-sm font-medium text-foreground">{summary.postsPublished ?? 0}</div>
+                                <div className="mt-1 text-[11px] text-muted-foreground">
+                                  {summary.repliesPublished ?? 0} replies • {summary.quotesPublished ?? 0} quotes • {summary.originalsPublished ?? 0} originals
+                                </div>
+                              </div>
+                              <div className="rounded-md border border-white/8 bg-black/10 px-3 py-2">
+                                <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">Follows</div>
+                                <div className="mt-1 text-sm font-medium text-foreground">{summary.accountsFollowed ?? 0}</div>
+                                <div className="mt-1 text-[11px] text-muted-foreground">
+                                  {summary.followsFromProactiveQueue ?? 0} proactive • {summary.followsFromEngagement ?? 0} engagement
+                                </div>
+                              </div>
+                              <div className="rounded-md border border-white/8 bg-black/10 px-3 py-2">
+                                <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">Pipeline</div>
+                                <div className="mt-1 text-sm font-medium text-foreground">
+                                  {summary.selectedOpportunityCount ?? 0} selected • {summary.draftCount ?? 0} drafts
+                                </div>
+                                <div className="mt-1 text-[11px] text-muted-foreground">
+                                  {summary.successfulPublishCount ?? 0} successful • {summary.failedPublishCount ?? 0} failed
+                                </div>
+                              </div>
+                            </div>
+                            {summary.notes?.length ? (
+                              <div className="mt-3 rounded-md border border-white/8 bg-black/10 px-3 py-2 text-xs text-foreground/78">
+                                {summary.notes[0]}
+                              </div>
+                            ) : null}
+                          </div>
+                        ))}
                       </div>
                     </div>
                     <div className="space-y-3">
