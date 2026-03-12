@@ -537,11 +537,11 @@ function OpportunityCard({
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-sm font-semibold text-foreground">{opportunity.title || 'Opportunity'}</div>
-          <div className="mt-1 text-xs text-foreground/70">{summaryReason}</div>
+          <div className="mt-1 line-clamp-2 text-xs text-foreground/70">{summaryReason}</div>
           <div className="mt-2 flex flex-wrap gap-2">
             {opportunity.distributionType ? <FieldChip>{opportunity.distributionType}</FieldChip> : null}
-            {opportunity.sourceAccount ? <FieldChip>{opportunity.sourceAccount}</FieldChip> : null}
             {opportunity.confidence ? <FieldChip>{opportunity.confidence}</FieldChip> : null}
+            {opportunity.sourceAccount ? <FieldChip>{opportunity.sourceAccount}</FieldChip> : null}
           </div>
         </div>
         <span className={cx(
@@ -550,6 +550,36 @@ function OpportunityCard({
         )}>
           {blocked ? opportunity.sourceState.replace(/_/g, ' ') : 'selected'}
         </span>
+      </div>
+      <div className="mt-4 flex flex-wrap gap-2">
+        {!blocked && onAction ? (
+          <button
+            onClick={() => onAction('generate_drafts', opportunity.id, { opportunityId: opportunity.opportunityId })}
+            disabled={saving}
+            className="rounded-lg border border-cyan-500/20 px-3 py-2 text-xs font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/10 disabled:opacity-60"
+          >
+            Generate Drafts
+          </button>
+        ) : null}
+        {!blocked && onAction ? (
+          <button
+            onClick={() => onAction('reject_opportunity', opportunity.id, { feedback: feedbackValue })}
+            disabled={saving}
+            className="rounded-lg border border-white/10 px-3 py-2 text-xs font-medium text-muted-foreground transition-smooth hover:bg-surface-2 disabled:opacity-60"
+          >
+            Reject
+          </button>
+        ) : null}
+        {!blocked && onAction ? (
+          <button
+            onClick={() => onAction('archive_opportunity', opportunity.id, { feedback: feedbackValue })}
+            disabled={saving}
+            className="rounded-lg border border-amber-500/20 px-3 py-2 text-xs font-medium text-amber-200 transition-smooth hover:bg-amber-500/10 disabled:opacity-60"
+          >
+            Archive
+          </button>
+        ) : null}
+        {opportunity.sourceUrl ? <a href={opportunity.sourceUrl} target="_blank" rel="noreferrer" className="rounded-lg border border-white/10 px-3 py-2 text-xs font-medium text-foreground/80 transition-smooth hover:bg-surface-2">Open source</a> : null}
       </div>
       <details className="mt-4 rounded-xl border border-white/8 bg-black/20 px-3 py-3">
         <summary className="cursor-pointer list-none text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Details</summary>
@@ -582,7 +612,6 @@ function OpportunityCard({
                   {historyChips.map((chip, index) => <FieldChip key={`${opportunity.id}-history-${index}`}>{chip}</FieldChip>)}
                 </div>
               ) : null}
-              {opportunity.sourceUrl ? <a href={opportunity.sourceUrl} target="_blank" rel="noreferrer" className="mt-3 inline-block text-xs text-cyan-200 hover:text-cyan-100">Open source post</a> : null}
             </div>
             {opportunity.selectionFactors?.length ? (
               <div className="rounded-xl border border-white/8 bg-black/15 px-3 py-3">
@@ -604,9 +633,9 @@ function OpportunityCard({
         </div>
       </details>
       {!blocked && onAction && onFeedbackChange ? (
-        <div className="mt-4 rounded-xl border border-white/8 bg-black/20 px-3 py-3">
-          <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Opportunity feedback</div>
-          <div className="mt-2 flex flex-wrap gap-2">
+        <details className="mt-4 rounded-xl border border-white/8 bg-black/20 px-3 py-3">
+          <summary className="cursor-pointer list-none text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Notes and feedback</summary>
+          <div className="mt-3 flex flex-wrap gap-2">
             {feedbackPresets.map((preset) => (
               <button
                 key={`${opportunity.id}-${preset}`}
@@ -631,30 +660,7 @@ function OpportunityCard({
             value={feedbackValue}
             onChange={(event) => onFeedbackChange(event.target.value)}
           />
-          <div className="mt-3 flex flex-wrap gap-2">
-            <button
-              onClick={() => onAction('generate_drafts', opportunity.id, { opportunityId: opportunity.opportunityId })}
-              disabled={saving}
-              className="rounded-lg border border-cyan-500/20 px-3 py-2 text-xs font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/10 disabled:opacity-60"
-            >
-              Generate Drafts
-            </button>
-            <button
-              onClick={() => onAction('reject_opportunity', opportunity.id, { feedback: feedbackValue })}
-              disabled={saving}
-              className="rounded-lg border border-white/10 px-3 py-2 text-xs font-medium text-muted-foreground transition-smooth hover:bg-surface-2 disabled:opacity-60"
-            >
-              Reject Opportunity
-            </button>
-            <button
-              onClick={() => onAction('archive_opportunity', opportunity.id, { feedback: feedbackValue })}
-              disabled={saving}
-              className="rounded-lg border border-amber-500/20 px-3 py-2 text-xs font-medium text-amber-200 transition-smooth hover:bg-amber-500/10 disabled:opacity-60"
-            >
-              Archive Angle
-            </button>
-          </div>
-        </div>
+        </details>
       ) : null}
     </article>
   )
@@ -735,23 +741,16 @@ function OpportunityFamilyGroup({
     >
       <summary className="flex cursor-pointer list-none flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
-          <div className="text-[11px] uppercase tracking-[0.14em] text-cyan-100/70">{familyLabel}</div>
           <div className="mt-1 text-sm font-semibold text-foreground">{sourceLabel}</div>
-          <div className="mt-1 text-xs text-muted-foreground">
-            {opportunities.length} move{opportunities.length === 1 ? '' : 's'} from this source family.
-          </div>
+          <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">{leader.selectionReason || leader.whyNow || 'Review this source before drafting.'}</div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {leader.distributionType ? <FieldChip>{leader.distributionType}</FieldChip> : null}
-          {leader.sourceAccount ? <FieldChip>{leader.sourceAccount}</FieldChip> : null}
           {leader.confidence ? <FieldChip>{leader.confidence}</FieldChip> : null}
-          <FieldChip>{opportunities.length} options</FieldChip>
-          <span className="rounded-full border border-white/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.18em] text-muted-foreground">
-            Expand
-          </span>
+          {opportunities.length > 1 ? <FieldChip>{opportunities.length} moves</FieldChip> : null}
         </div>
       </summary>
-      <div className="mt-4 grid gap-3 xl:grid-cols-2">
+      <div className="mt-4 space-y-3">
         {opportunities.map((opportunity) => (
           <OpportunityCard
             key={opportunity.id}
@@ -788,17 +787,15 @@ function OpportunityFamilyLane({
 }) {
   if (!families.length) return null
   return (
-    <details open={defaultOpen} className="rounded-xl border border-white/10 bg-[#0f151d] p-4">
-      <summary className="cursor-pointer list-none">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <div className="text-sm font-semibold text-foreground">{title}</div>
-            <div className="mt-1 text-xs text-muted-foreground">{subtitle}</div>
-          </div>
-          <FieldChip>{families.length} families</FieldChip>
+    <section className="space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold text-foreground">{title}</div>
+          <div className="mt-1 text-xs text-muted-foreground">{subtitle}</div>
         </div>
-      </summary>
-      <div className="mt-4 grid gap-3 xl:grid-cols-2">
+        <FieldChip>{families.length} families</FieldChip>
+      </div>
+      <div className="grid gap-3 xl:grid-cols-2">
         {families.map((family, familyIndex) => (
           <OpportunityFamilyGroup
             key={family.key}
@@ -809,11 +806,11 @@ function OpportunityFamilyLane({
             onFeedbackChange={onFeedbackChange}
             onAction={onAction}
             saving={saving}
-            defaultOpen={familyIndex === 0}
+            defaultOpen={defaultOpen && familyIndex === 0 && families.length === 1}
           />
         ))}
       </div>
-    </details>
+    </section>
   )
 }
 
