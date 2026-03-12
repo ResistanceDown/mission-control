@@ -946,12 +946,24 @@ function normalizeApprovedPosts(input: unknown): Array<{
       const record = entry as Record<string, unknown>
       const text = String(record.text || '').trim()
       if (!text) return null
+      const rawStatus = String(record.status || 'approved').trim()
+      const publishStatus = String(record.publish_status || '').trim().toLowerCase()
+      const hasPublishedArtifact = Boolean(
+        String(record.tweet_url || '').trim() ||
+        String(record.tweet_id || '').trim(),
+      )
+      const status =
+        publishStatus === 'published' || (hasPublishedArtifact && String(record.posted_at || '').trim())
+          ? 'published'
+          : publishStatus === 'failed' && rawStatus !== 'published'
+            ? 'failed'
+            : rawStatus
       return {
         id: String(record.id || '').trim(),
         text,
         pillar: String(record.pillar || '').trim(),
         angle: String(record.angle || '').trim(),
-        status: String(record.status || 'approved').trim(),
+        status,
         approvedAtPt: String(record.approved_at_pt || '').trim(),
         scheduledAt: String(record.scheduled_at || '').trim() || null,
         scheduledAtPt: String(record.scheduled_at_pt || '').trim() || null,
