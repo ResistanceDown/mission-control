@@ -939,7 +939,7 @@ function DraftCard({
         )}>{draft.approval || 'candidate'}</span>
       </div>
 
-      <div className="mt-4 grid gap-4 xl:grid-cols-[1.25fr_0.75fr]">
+      <div className="mt-4 space-y-4">
         <div className="rounded-xl border border-cyan-500/15 bg-[#0c1219] px-4 py-4">
           {draft.source_tweet?.text ? (
             <div className="mb-3 rounded-xl border border-white/8 bg-black/20 px-3 py-3">
@@ -968,14 +968,11 @@ function DraftCard({
             }}
           />
         </div>
-        <div className="space-y-3">
-          <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
-            <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Why this draft</div>
-            <div className="mt-1 text-sm text-foreground/88">{visibleRationale}</div>
-          </div>
-          <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
-            <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Actions</div>
-            <div className="mt-3 flex flex-wrap gap-2">
+        <div className="rounded-xl border border-white/8 bg-black/20 px-4 py-4">
+          <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Why this draft</div>
+          <div className="mt-1 text-sm leading-6 text-foreground/88">{visibleRationale}</div>
+          <div className="mt-4 text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Actions</div>
+          <div className="mt-3 flex flex-wrap gap-2">
               <button
                 onClick={() => onAction('update_draft_text', draft.id, { draftText })}
                 disabled={saving || !dirty || !draftText.trim()}
@@ -993,22 +990,21 @@ function DraftCard({
               <button onClick={() => onAction('approve_draft', draft.id)} disabled={saving || dirty || draft.approval === 'approved'} className="rounded-lg bg-emerald-500/15 px-3 py-2 text-xs font-medium text-emerald-200 transition-smooth hover:bg-emerald-500/20 disabled:opacity-60">Approve</button>
               <button onClick={() => onAction('reject_draft', draft.id)} disabled={saving || draft.approval === 'rejected'} className="rounded-lg border border-white/10 px-3 py-2 text-xs font-medium text-muted-foreground transition-smooth hover:bg-surface-2 disabled:opacity-60">Reject</button>
               <button onClick={() => onAction('archive_draft', draft.id)} disabled={saving || draft.approval === 'archived'} className="rounded-lg border border-amber-500/20 px-3 py-2 text-xs font-medium text-amber-200 transition-smooth hover:bg-amber-500/10 disabled:opacity-60">Archive</button>
-            </div>
-            <textarea
-              className="mt-3 min-h-20 w-full rounded-xl border border-white/8 bg-black/15 px-3 py-2 text-sm text-foreground outline-none transition-smooth focus:border-cyan-500/30"
-              placeholder="Rewrite direction: sharpen the hook, lean more contrarian, or reference the source context more directly."
-              value={rewritePrompt}
-              onChange={(event) => setRewritePrompt(event.target.value)}
-            />
-            <input
-              className="mt-3 w-full rounded-xl border border-white/8 bg-black/15 px-3 py-2 text-sm text-foreground outline-none transition-smooth focus:border-cyan-500/30"
-              placeholder="Voice direction (optional): lean more quietly dangerous, less product-y, more humane."
-              value={voiceDirection}
-              onChange={(event) => onVoiceDirectionChange(event.target.value)}
-            />
           </div>
+          <textarea
+            className="mt-3 min-h-20 w-full rounded-xl border border-white/8 bg-black/15 px-3 py-2 text-sm text-foreground outline-none transition-smooth focus:border-cyan-500/30"
+            placeholder="Rewrite direction: sharpen the hook, lean more contrarian, or reference the source context more directly."
+            value={rewritePrompt}
+            onChange={(event) => setRewritePrompt(event.target.value)}
+          />
+          <input
+            className="mt-3 w-full rounded-xl border border-white/8 bg-black/15 px-3 py-2 text-sm text-foreground outline-none transition-smooth focus:border-cyan-500/30"
+            placeholder="Voice direction (optional): lean more quietly dangerous, less product-y, more humane."
+            value={voiceDirection}
+            onChange={(event) => onVoiceDirectionChange(event.target.value)}
+          />
           {(typeof draft.follower_growth_score === 'number' || typeof draft.brand_building_score === 'number' || typeof draft.timeliness_score === 'number') ? (
-            <div className="flex flex-wrap gap-2">
+            <div className="mt-3 flex flex-wrap gap-2">
               {typeof draft.follower_growth_score === 'number' ? <FieldChip>growth {draft.follower_growth_score}</FieldChip> : null}
               {typeof draft.brand_building_score === 'number' ? <FieldChip>brand {draft.brand_building_score}</FieldChip> : null}
               {typeof draft.timeliness_score === 'number' ? <FieldChip>timeliness {draft.timeliness_score}</FieldChip> : null}
@@ -1019,7 +1015,7 @@ function DraftCard({
 
       <details className="mt-4 rounded-xl border border-white/8 bg-black/20 px-3 py-3">
         <summary className="cursor-pointer list-none text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Details {detailSignalCount ? `• ${detailSignalCount} signals` : ''}</summary>
-        <div className="mt-3 grid gap-3 lg:grid-cols-[1.2fr_0.8fr]">
+        <div className="mt-3 space-y-3">
         <div className="space-y-3">
           {draft.selection_reason ? (
             <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
