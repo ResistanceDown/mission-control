@@ -233,6 +233,8 @@ interface GrowthApiResponse {
       feedback_applied?: string[]
       changed_since_last_run?: string
       confidence?: string
+      voice_profile?: string
+      voice_direction?: string
       source_metrics?: Record<string, unknown>
       source_quality_note?: string
       variant_family_id?: string
@@ -287,10 +289,13 @@ interface GrowthApiResponse {
       approvedAtPt: string
       scheduledAt?: string | null
       scheduledAtPt?: string | null
+      postedAt?: string | null
+      postedAtPt?: string | null
       scheduleSource?: string | null
       scheduleNote?: string | null
       distributionType?: string
       sourceType?: string
+      sourceAccount?: string | null
       selectionReason?: string
       tweetId?: string
       tweetUrl?: string | null
@@ -577,12 +582,6 @@ function isNonReplyablePublishError(message?: string | null) {
     text.includes('only people mentioned') ||
     text.includes('only users mentioned')
   )
-}
-
-function scrollToId(id: string) {
-  if (typeof document === 'undefined') return
-  const element = document.getElementById(id)
-  element?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
 function OpportunityCard({
@@ -1194,7 +1193,6 @@ export function GrowthReviewPanel() {
   const [voiceDirection, setVoiceDirection] = useState('')
   const [scheduleDrafts, setScheduleDrafts] = useState<Record<string, { when: string; note: string }>>({})
   const [publishDrafts, setPublishDrafts] = useState<Record<string, { tweetUrl: string; tweetId: string }>>({})
-  const [deskMode, setDeskMode] = useState<'act' | 'queue' | 'signals'>('act')
   const [activeDrawer, setActiveDrawer] = useState<'queue' | 'signals' | null>(null)
   const [selection, setSelection] = useState<
     | { kind: 'opportunity'; id: string }
@@ -1618,30 +1616,20 @@ export function GrowthReviewPanel() {
     return <div className="panel"><div className="panel-body text-sm text-muted-foreground">Growth data is not available yet.</div></div>
   }
 
+  const selectedOpportunitySourceFamilyKey = selectedOpportunity?.sourceFamilyKey || selectedOpportunity?.sourceUrl || selectedOpportunity?.id || null
+  const selectedDraftFamilyId = selectedDraftFamily?.familyId || null
+  const compactOpportunities = reactiveOpportunityFamilies.length ? reactiveOpportunityFamilies : fallbackOpportunityFamilies
+  const showFallbackStub = !reactiveOpportunityFamilies.length && fallbackOpportunityFamilies.length > 0
+
   return (
     <div className="space-y-5 p-5">
       <div className="rounded-2xl border border-white/10 bg-[linear-gradient(135deg,rgba(15,20,27,0.98),rgba(11,16,23,0.98))] p-5 shadow-[0_24px_60px_rgba(0,0,0,0.35)]">
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-          <div>
-            <div className="text-sm font-semibold text-foreground">Growth</div>
-            <div className="mt-1 max-w-3xl text-sm text-muted-foreground">Review the next move, decide on exact post text, then push it into the publishing queue.</div>
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+          <div className="min-w-0">
+            <div className="text-sm font-semibold text-foreground">Growth command desk</div>
+            <div className="mt-1 text-sm text-muted-foreground">{researchStatusLine} • {queueStatusLine}</div>
           </div>
-          <div className="flex flex-col items-stretch gap-3 xl:items-end">
-            <div className="flex flex-wrap gap-2">
-              {(['act', 'queue', 'signals'] as const).map((mode) => (
-                <button
-                  key={mode}
-                  type="button"
-                  onClick={() => setDeskMode(mode)}
-                  className={cx(
-                    'rounded-full border px-3 py-1.5 text-xs font-medium transition-smooth',
-                    deskMode === mode ? 'border-cyan-500/25 bg-cyan-500/12 text-cyan-100' : 'border-white/10 bg-black/20 text-muted-foreground hover:bg-surface-2',
-                  )}
-                >
-                  {mode === 'act' ? 'Act' : mode === 'queue' ? 'Queue' : 'Signals'}
-                </button>
-              ))}
-            </div>
+          <div className="flex flex-col gap-3 xl:items-end">
             <div className="flex flex-wrap gap-2 rounded-2xl border border-white/8 bg-black/20 p-2">
               {utilityActions.map((item) => (
                 <button
@@ -1649,814 +1637,502 @@ export function GrowthReviewPanel() {
                   type="button"
                   onClick={item.action}
                   disabled={actionState.status === 'saving'}
-                  className="rounded-lg border border-white/10 bg-[#121922] px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2 disabled:opacity-60"
+                  className={cx(
+                    'rounded-lg border px-3 py-2 text-xs font-medium transition-smooth disabled:opacity-60',
+                    (activeDrawer === 'queue' && item.key === 'queue') || (activeDrawer === 'signals' && item.key === 'signals')
+                      ? 'border-cyan-500/25 bg-cyan-500/12 text-cyan-100'
+                      : 'border-white/10 bg-[#121922] text-foreground hover:bg-surface-2',
+                  )}
                 >
                   {item.label}
                 </button>
               ))}
             </div>
-            <input
-              type="text"
-              value={voiceDirection}
-              onChange={(event) => setVoiceDirection(event.target.value)}
-              placeholder="Voice direction (optional)"
-              className="w-full rounded-xl border border-white/8 bg-black/20 px-3 py-2 text-sm text-foreground outline-none transition-smooth focus:border-cyan-500/30 xl:max-w-sm"
-            />
-          </div>
-        </div>
-
-        <div className="mt-4 rounded-xl border border-cyan-500/15 bg-gradient-to-br from-cyan-500/8 via-surface-2/80 to-surface-2/80 p-4">
-          <div className="grid gap-4 xl:grid-cols-[1.45fr_0.55fr]">
-            <div className="max-w-4xl">
-              <div className="text-[11px] uppercase tracking-[0.14em] text-cyan-100/70">Today’s best move</div>
-              <div className="mt-1 text-base font-semibold text-foreground">
-                {topMoveTitle}
-              </div>
-              <div className="mt-2 text-sm text-foreground/85">
-                {topMoveBody}
-              </div>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {topOpportunity?.distributionType ? <CommandChip label={topOpportunity.distributionType} tone="live" /> : todayBestMove?.distributionType ? <CommandChip label={todayBestMove.distributionType} tone="live" /> : null}
-                {growth.strategy?.accountStage ? <CommandChip label={growth.strategy.accountStage} /> : null}
-                {topOpportunity?.clusterLabel ? <CommandChip label={topOpportunity.clusterLabel} /> : todayBestMove?.clusterLabel ? <CommandChip label={todayBestMove.clusterLabel} /> : null}
-                {topOpportunity?.sourceAccount ? <CommandChip label={topOpportunity.sourceAccount} /> : todayBestMove?.sourceAccount ? <CommandChip label={todayBestMove.sourceAccount} /> : null}
-                {topOpportunity?.confidence ? <CommandChip label={topOpportunity.confidence} tone={topOpportunity.confidence === 'high' ? 'queue' : topOpportunity.confidence === 'low' ? 'warning' : 'neutral'} /> : todayBestMove?.confidence ? <CommandChip label={todayBestMove.confidence} tone={todayBestMove.confidence === 'high' ? 'queue' : todayBestMove.confidence === 'low' ? 'warning' : 'neutral'} /> : null}
-              </div>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {topOpportunity?.sourceUrl || todayBestMove?.sourceUrl ? (
-                  <a href={topOpportunity?.sourceUrl || todayBestMove?.sourceUrl || '#'} target="_blank" rel="noreferrer" className="inline-flex items-center rounded-lg border border-cyan-500/20 bg-cyan-500/10 px-3 py-2 text-xs font-medium text-cyan-100 hover:bg-cyan-500/20">
-                    Open source
-                  </a>
-                ) : null}
-                {topOpportunity ? (
-                  <button type="button" onClick={() => scrollToId('growth-opportunities')} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2">
-                    Jump to opportunity
-                  </button>
-                ) : null}
-                {candidateCount && topDraft ? (
-                  <button type="button" onClick={() => scrollToId('growth-drafts')} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2">
-                    Jump to drafts
-                  </button>
-                ) : null}
-                {!candidateCount && topOpportunity ? (
-                  <button type="button" onClick={() => void runGrowthAction('generate_drafts', undefined, { voiceDirection })} disabled={actionState.status === 'saving'} className="rounded-lg border border-amber-500/20 bg-black/20 px-3 py-2 text-xs font-medium text-amber-200 transition-smooth hover:bg-amber-500/10 disabled:opacity-60">
-                    Generate drafts
-                  </button>
-                ) : null}
-                {readyToSchedule ? (
-                  <button type="button" onClick={() => scrollToId('growth-ready-to-schedule')} className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs font-medium text-emerald-200 transition-smooth hover:bg-emerald-500/20">
-                    Go to scheduling
-                  </button>
-                ) : null}
-              </div>
-            </div>
-            <div className="grid gap-3">
-              <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
-                <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Research status</div>
-                <div className="mt-2 text-sm text-foreground/90">{researchStatusLine}</div>
-                <div className="mt-1 text-xs text-foreground/65">{queueStatusLine}</div>
-                <div className="mt-1 text-xs text-muted-foreground">{formatPacificTime(growth.freshness?.lastXPullAt || growth.researchGeneratedAt || null)}</div>
-              </div>
-              <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
-                <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Top draft</div>
-                <div className="mt-2 text-sm text-foreground/90">{topDraftSummary}</div>
-                <div className="mt-1 text-xs text-muted-foreground">{actionState.message || topMoveActionText}</div>
-              </div>
-              <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
-                <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Next scheduled</div>
-                <div className="mt-2 text-sm text-foreground/90">{nextScheduledSummary}</div>
-              </div>
+            <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+              <FieldChip>{researchStatusLine}</FieldChip>
+              <FieldChip>{queueStatusLine}</FieldChip>
+              {topDraft ? <FieldChip>{topDraftSummary}</FieldChip> : null}
             </div>
           </div>
         </div>
       </div>
 
-      {deskMode === 'act' ? (
-      <div className="space-y-4">
-        <div id="growth-opportunities">
-          <CollapsibleSection title="Opportunities" subtitle="Choose the move before you draft." defaultOpen>
-            <div className="space-y-4">
-              {selectedOpportunities.length ? (
-                <div className="space-y-3">
-                  <OpportunityFamilyLane
-                    title="Reactive moves"
-                    subtitle="Grouped by source family so you can scan live moves quickly."
-                    families={reactiveOpportunityFamilies}
-                    feedbackDrafts={opportunityFeedback}
-                    onFeedbackChange={(opportunityId, value) => setOpportunityFeedback((current) => ({ ...current, [opportunityId]: value }))}
-                    onAction={runGrowthAction}
-                    saving={actionState.status === 'saving'}
-                  />
-                  <OpportunityLane
-                    title="Fallback original posts"
-                    subtitle="These only appear when reply and quote opportunities do not clear the bar in the current research window."
-                    opportunities={standaloneOpportunities}
-                    feedbackDrafts={opportunityFeedback}
-                    onFeedbackChange={(opportunityId, value) => setOpportunityFeedback((current) => ({ ...current, [opportunityId]: value }))}
-                    onAction={runGrowthAction}
-                    saving={actionState.status === 'saving'}
-                    defaultOpen={!reactiveOpportunityFamilies.length}
-                  />
-                </div>
-              ) : (
-                <div className="rounded-xl border border-white/10 bg-[#10161f] px-4 py-4 text-sm text-muted-foreground">
-                  {growth.noOpportunityReason || 'No selected opportunities yet. Refresh research, then run Select Opportunities before drafting.'}
-                  {growth.externalStatus === 'live' ? (
-                    <div className="mt-2 text-xs text-foreground/60">
-                      Last live pull: {formatPacificTime(growth.freshness?.lastXPullAt || growth.researchGeneratedAt || null)}
-                      {typeof growth.sourceMemory?.blockedSourceCount === 'number' && growth.sourceMemory.blockedSourceCount > 0
-                        ? ` • ${growth.sourceMemory.blockedSourceCount} blocked source${growth.sourceMemory.blockedSourceCount === 1 ? '' : 's'} retained in source memory`
-                        : ''}
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
+        <div className="space-y-4">
+          <section className="rounded-2xl border border-cyan-500/15 bg-[#10161f] p-4 shadow-[0_18px_40px_rgba(0,0,0,0.26)]">
+            <div className="text-[11px] uppercase tracking-[0.14em] text-cyan-100/70">Top move</div>
+            <div className="mt-1 text-base font-semibold text-foreground">{topMoveTitle}</div>
+            <div className="mt-2 text-sm text-foreground/85">{topMoveBody}</div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {selectedDraft?.distribution_type ? <CommandChip label={selectedDraft.distribution_type} tone="live" /> : selectedOpportunity?.distributionType ? <CommandChip label={selectedOpportunity.distributionType} tone="live" /> : topOpportunity?.distributionType ? <CommandChip label={topOpportunity.distributionType} tone="live" /> : null}
+              {selectedDraft?.source_account ? <CommandChip label={selectedDraft.source_account} /> : selectedOpportunity?.sourceAccount ? <CommandChip label={selectedOpportunity.sourceAccount} /> : topOpportunity?.sourceAccount ? <CommandChip label={topOpportunity.sourceAccount} /> : null}
+              {selectedOpportunity?.confidence ? <CommandChip label={selectedOpportunity.confidence} tone={selectedOpportunity.confidence === 'high' ? 'queue' : selectedOpportunity.confidence === 'low' ? 'warning' : 'neutral'} /> : topOpportunity?.confidence ? <CommandChip label={topOpportunity.confidence} tone={topOpportunity.confidence === 'high' ? 'queue' : topOpportunity.confidence === 'low' ? 'warning' : 'neutral'} /> : null}
+              <CommandChip label={growth.freshness?.cacheUsed ? `Cached ${Number(growth.freshness?.cacheAgeMinutes || 0).toFixed(0)}m` : growth.externalStatus || 'fresh'} />
+            </div>
+          </section>
+
+          <section className="rounded-2xl border border-white/10 bg-[#10161f] p-4 shadow-[0_18px_40px_rgba(0,0,0,0.24)]">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold text-foreground">Opportunities</div>
+                <div className="mt-1 text-xs text-muted-foreground">Choose the source move first. The inspector handles the actions.</div>
+              </div>
+              <FieldChip>{selectedOpportunities.length}</FieldChip>
+            </div>
+            <div className="mt-4 space-y-3">
+              {compactOpportunities.length ? compactOpportunities.map((family) => {
+                const leader = family.opportunities[0]
+                const isSelected = selectedOpportunitySourceFamilyKey === (leader.sourceFamilyKey || leader.sourceUrl || leader.id)
+                return (
+                  <button
+                    key={family.key}
+                    type="button"
+                    onClick={() => setSelection({ kind: 'opportunity', id: leader.id })}
+                    className={cx(
+                      'w-full rounded-2xl border p-4 text-left shadow-[0_16px_32px_rgba(0,0,0,0.18)] transition-smooth',
+                      isSelected ? 'border-cyan-500/25 bg-cyan-500/8' : 'border-white/8 bg-black/20 hover:bg-surface-2/70',
+                    )}
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-[0.12em] text-muted-foreground">
+                          {leader.sourceAccount ? <span>{leader.sourceAccount}</span> : null}
+                          {leader.distributionType ? <span>{leader.distributionType}</span> : null}
+                          {leader.confidence ? <span>{leader.confidence}</span> : null}
+                        </div>
+                        <div className="mt-2 text-sm font-semibold text-foreground">{leader.title || family.sourceLabel}</div>
+                        <div className="mt-1 text-xs text-foreground/70">{leader.selectionReason || leader.whyNow || 'Review this move.'}</div>
+                      </div>
+                      {family.opportunities.length > 1 ? <FieldChip>{family.opportunities.length} moves</FieldChip> : null}
                     </div>
-                  ) : null}
+                    {leader.sourceText ? (
+                      <div className="mt-4 rounded-xl border border-white/8 bg-black/20 px-4 py-4">
+                        <div className="border-l-2 border-cyan-500/35 pl-3 text-sm leading-6 text-foreground/88 whitespace-pre-wrap">
+                          {leader.sourceText}
+                        </div>
+                      </div>
+                    ) : null}
+                  </button>
+                )
+              }) : (
+                <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-4 text-sm text-muted-foreground">
+                  {allQueueItems.length
+                    ? 'Nothing is in review right now. Open the publishing queue to keep moving.'
+                    : growth.noOpportunityReason || 'No live moves yet.'}
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button type="button" onClick={() => void runGrowthAction('refresh_research')} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2">Refresh research</button>
+                    <button type="button" onClick={() => void runGrowthAction('select_opportunities')} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2">Select opportunities</button>
+                    <button type="button" onClick={() => setActiveDrawer('signals')} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2">Open signals</button>
+                  </div>
                 </div>
               )}
-              {blockedOpportunities.length ? (
-                <details className="rounded-xl border border-rose-500/15 bg-[#130f14] p-4">
-                  <summary className="cursor-pointer list-none text-sm font-medium text-rose-100">
-                    Blocked by source truth ({blockedOpportunities.length})
-                  </summary>
-                  <div className="mt-3 space-y-3">
-                    {blockedOpportunities.map((opportunity) => (
-                      <OpportunityCard key={`blocked-${opportunity.id}`} opportunity={opportunity} blocked />
-                    ))}
-                  </div>
-                </details>
-              ) : null}
-            </div>
-          </CollapsibleSection>
-        </div>
-
-        <div id="growth-drafts">
-          <CollapsibleSection title="Drafts" subtitle="Review exact post text first. Open details only when you need more context." defaultOpen>
-            <div className="space-y-4">
-              {groupedDraftCandidates.length ? groupedDraftCandidates.map((group, groupIndex) => {
-                const leader = group[0]
-                const familyLabel = leader.variant_group_label || 'Candidate set'
-                const sourceLabel =
-                  leader.source_account && leader.source_tweet?.url
-                    ? `${leader.source_account} • ${leader.angle}`
-                    : leader.angle || leader.pillar
-                if (group.length > 1 && leader.source_tweet?.url) {
-                  return (
-                    <SourceVariantGroup
-                      key={leader.variant_family_id || leader.id}
-                      familyLabel={familyLabel}
-                      sourceLabel={sourceLabel}
-                      drafts={group}
-                      defaultOpen={groupIndex === 0}
-                      feedbackDrafts={feedbackDrafts}
-                      voiceDirection={voiceDirection}
-                      onVoiceDirectionChange={setVoiceDirection}
-                      onFeedbackChange={(draftId, value) => setFeedbackDrafts((current) => ({ ...current, [draftId]: value }))}
-                      onAction={(action, draftId, extra) => void runGrowthAction(action, draftId, extra || {})}
-                      onExpandFamily={(draftId) => void runGrowthAction('expand_family_variants', draftId, { feedback: feedbackDrafts[draftId] || '' })}
-                      saving={actionState.status === 'saving'}
-                    />
-                  )
-                }
-                const draft = leader
-                return (
-                  <DraftCard
-                    key={draft.id}
-                    draft={draft}
-                    feedbackValue={feedbackDrafts[draft.id] || ''}
-                    voiceDirection={voiceDirection}
-                    onVoiceDirectionChange={setVoiceDirection}
-                    onFeedbackChange={(value) => setFeedbackDrafts((current) => ({ ...current, [draft.id]: value }))}
-                    onAction={(action, draftId, extra) => void runGrowthAction(action, draftId, extra || {})}
-                    saving={actionState.status === 'saving'}
-                  />
-                )
-              }) : <div className="rounded-xl border border-white/10 bg-[#10161f] px-4 py-4 text-sm text-muted-foreground">Research is ready. Generate a fresh candidate pack when you want posts to review.</div>}
-            </div>
-          </CollapsibleSection>
-        </div>
-
-      </div>
-      ) : null}
-
-      {deskMode === 'signals' ? (
-        <div className="space-y-4">
-          {growth.changesSummary || growth.stateIntegrity ? (
-            <CollapsibleSection title="What changed" subtitle="Recent movement, pruning, and learning effects from the last cycle." defaultOpen={false}>
-              <div className="space-y-3 rounded-xl border border-white/8 bg-black/20 px-3 py-3">
-                <div className="flex flex-wrap gap-3 text-xs text-foreground/85">
-                  {growth.changesSummary ? <span>{growth.changesSummary.newCount} new</span> : null}
-                  {growth.changesSummary ? <span>{growth.changesSummary.retainedCount} retained</span> : null}
-                  {growth.changesSummary ? <span>{growth.changesSummary.changedDraftIds.length} changed</span> : null}
-                  {growth.stateIntegrity?.orphanDraftCount ? <span>{growth.stateIntegrity.orphanDraftCount} orphan retired</span> : null}
-                  {growth.stateIntegrity?.prunedVariantCount ? <span>{growth.stateIntegrity.prunedVariantCount} variants pruned</span> : null}
-                </div>
-                {growth.changesSummary?.whatChangedSinceLastRun?.length ? (
-                  <div className="space-y-1 text-xs text-foreground/85">
-                    {growth.changesSummary.whatChangedSinceLastRun.map((effect, index) => <div key={`change-${index}`} className="flex gap-2"><span>•</span><span>{effect}</span></div>)}
-                  </div>
-                ) : growth.changesSummary?.feedbackEffects?.length ? (
-                  <div className="space-y-1 text-xs text-amber-100/85">
-                    {growth.changesSummary.feedbackEffects.map((effect, index) => <div key={`effect-${index}`} className="flex gap-2"><span>•</span><span>{effect}</span></div>)}
-                  </div>
-                ) : null}
-              </div>
-            </CollapsibleSection>
-          ) : null}
-          <CollapsibleSection title="Listening" subtitle="Market signal, research diagnostics, and live conversation quality." defaultOpen={false}>
-            <div className="space-y-3">
-              <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3 text-sm text-foreground/85">
-                <div><strong className="text-foreground">Primary goal:</strong> {growth.strategy?.primaryGoal || 'No strategy generated yet.'}</div>
-                <div className="mt-2 text-xs text-muted-foreground">Last pull {formatPacificTime(growth.freshness?.lastXPullAt || growth.researchGeneratedAt || null)} • {growth.freshness?.queryCount ?? 0} queries • {growth.freshness?.sampleSize ?? 0} samples</div>
-                <div className="mt-1 text-xs text-foreground/60">
-                  {growth.freshness?.cacheUsed
-                    ? `Using cached snapshot (${Number(growth.freshness?.cacheAgeMinutes || 0).toFixed(0)} min old) until research is refreshed.`
-                    : 'Using a fresh current-week snapshot.'}
-                  {growth.freshness?.discoveryTriggered ? ' Fallback discovery was used because the live lane was thin.' : ' Neighborhood-first research stayed within the current target lane.'}
-                </div>
-              </div>
-              {growth.trendClusters.length ? growth.trendClusters.map((cluster) => (
-                <div key={cluster.id} className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="font-medium text-foreground">{cluster.label}</div>
-                    <FieldChip>{cluster.confidence}</FieldChip>
-                  </div>
-                  <div className="mt-2 text-sm text-foreground/85">{cluster.whyItMatters}</div>
-                  {cluster.conversationThemes.length ? <div className="mt-2 text-xs text-cyan-100/80">{cluster.conversationThemes.join(' • ')}</div> : null}
-                  {cluster.representativeExample ? <div className="mt-2 text-xs text-foreground/70">{cluster.representativeExample}</div> : null}
-                </div>
-              )) : <div className="text-sm text-muted-foreground">No high-confidence clusters yet.</div>}
-              {growth.listeningDiagnostics?.coverageByZone?.length ? (
-                <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
-                  <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Diagnostics</div>
-                  <div className="mt-2 space-y-1 text-xs text-foreground/80">
-                    {growth.listeningDiagnostics.coverageByZone.map((zone) => (
-                      <div key={zone.zoneId} className="flex items-center justify-between gap-2"><span>{zone.label}</span><span className="text-muted-foreground">{zone.queryCount} queries • {zone.keptTweets} kept</span></div>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-            </div>
-          </CollapsibleSection>
-
-          <CollapsibleSection title="Signals" subtitle="Source quality, account targets, and research residue that did not make the active review lane." defaultOpen={false}>
-            <div className="space-y-3">
-              {accountGrowthSummaries.length ? (
-                <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Account growth</div>
-                      <div className="mt-1 text-sm font-medium text-foreground">
-                        {latestAccountGrowthSummary?.week || 'Current week'}
-                        {latestAccountGrowthSummary?.snapshotStatus === 'partial' ? ' • partial' : ''}
-                      </div>
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      {latestAccountGrowthSummary?.generatedAt ? `Updated ${formatPacificTime(latestAccountGrowthSummary.generatedAt)}` : 'Waiting on weekly snapshot'}
-                    </div>
-                  </div>
-                  <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-                    <div className="rounded-lg border border-white/8 bg-black/15 px-3 py-3">
-                      <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Followers</div>
-                      <div className="mt-1 text-xl font-semibold text-foreground">
-                        {typeof latestAccountGrowthSummary?.endingFollowerCount === 'number' ? latestAccountGrowthSummary.endingFollowerCount.toLocaleString() : 'Unknown'}
-                      </div>
-                      <div className="mt-1 text-xs text-muted-foreground">
-                        {typeof latestAccountGrowthSummary?.startingFollowerCount === 'number' && typeof latestAccountGrowthSummary?.endingFollowerCount === 'number'
-                          ? `${latestAccountGrowthSummary.startingFollowerCount.toLocaleString()} → ${latestAccountGrowthSummary.endingFollowerCount.toLocaleString()}`
-                          : latestAccountGrowthSummary?.snapshotStatus === 'partial'
-                            ? 'Partial follower snapshot'
-                            : 'No follower snapshot yet'}
-                      </div>
-                    </div>
-                    <div className="rounded-lg border border-white/8 bg-black/15 px-3 py-3">
-                      <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Net growth</div>
-                      <div className="mt-1 text-xl font-semibold text-foreground">
-                        {typeof latestAccountGrowthSummary?.netFollowerGrowth === 'number' ? formatSignedCount(latestAccountGrowthSummary.netFollowerGrowth) : '—'}
-                      </div>
-                      <div className="mt-1 text-xs text-muted-foreground">
-                        {bestGrowthWeek ? `Best week so far: ${bestGrowthWeek.week} (${formatSignedCount(bestGrowthWeek.netFollowerGrowth)})` : 'Waiting for multiple weeks of follower data'}
-                      </div>
-                    </div>
-                    <div className="rounded-lg border border-white/8 bg-black/15 px-3 py-3">
-                      <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Posts published</div>
-                      <div className="mt-1 text-xl font-semibold text-foreground">{latestAccountGrowthSummary?.postsPublished ?? 0}</div>
-                      <div className="mt-1 text-xs text-muted-foreground">
-                        {latestAccountGrowthSummary ? `${latestAccountGrowthSummary.repliesPublished ?? 0} replies • ${latestAccountGrowthSummary.quotesPublished ?? 0} quotes • ${latestAccountGrowthSummary.originalsPublished ?? 0} originals` : 'No weekly publish summary yet'}
-                      </div>
-                    </div>
-                    <div className="rounded-lg border border-white/8 bg-black/15 px-3 py-3">
-                      <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Follows</div>
-                      <div className="mt-1 text-xl font-semibold text-foreground">{latestAccountGrowthSummary?.accountsFollowed ?? 0}</div>
-                      <div className="mt-1 text-xs text-muted-foreground">
-                        {latestAccountGrowthSummary ? `${latestAccountGrowthSummary.followsFromProactiveQueue ?? 0} proactive • ${latestAccountGrowthSummary.followsFromEngagement ?? 0} engagement` : 'No follow summary yet'}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="mt-3 grid gap-3 xl:grid-cols-[minmax(0,1.8fr)_minmax(300px,1fr)]">
-                    <div className="rounded-lg border border-white/8 bg-black/15 px-3 py-3">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Weekly trend</div>
-                        <div className="text-xs text-muted-foreground">Newest week first.</div>
-                      </div>
-                      <div className="mt-3 space-y-2">
-                        {[...accountGrowthSummaries].reverse().map((summary) => (
-                          <div
-                            key={`growth-summary-${summary.week}`}
-                            className="rounded-lg border border-white/8 bg-black/10 px-3 py-3"
-                          >
-                            <div className="flex flex-wrap items-start justify-between gap-3">
-                              <div>
-                                <div className="text-sm font-medium text-foreground">{summary.week}</div>
-                                <div className="mt-1 text-xs text-muted-foreground">
-                                  {typeof summary.startingFollowerCount === 'number' && typeof summary.endingFollowerCount === 'number'
-                                    ? `${summary.startingFollowerCount.toLocaleString()} -> ${summary.endingFollowerCount.toLocaleString()} followers`
-                                    : typeof summary.endingFollowerCount === 'number'
-                                      ? `${summary.endingFollowerCount.toLocaleString()} followers`
-                                      : 'Follower snapshot still partial'}
-                                </div>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <span className="rounded-full border border-white/8 bg-black/15 px-2 py-1 text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-                                  {summary.snapshotStatus || 'ready'}
-                                </span>
-                                <div className="text-right">
-                                  <div className="text-lg font-semibold text-foreground">
-                                    {typeof summary.netFollowerGrowth === 'number' ? formatSignedCount(summary.netFollowerGrowth) : '—'}
-                                  </div>
-                                  <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">Net growth</div>
-                                </div>
-                              </div>
-                            </div>
-                            <div className="mt-3 grid gap-2 sm:grid-cols-3">
-                              <div className="rounded-md border border-white/8 bg-black/10 px-3 py-2">
-                                <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">Posts</div>
-                                <div className="mt-1 text-sm font-medium text-foreground">{summary.postsPublished ?? 0}</div>
-                                <div className="mt-1 text-[11px] text-muted-foreground">
-                                  {summary.repliesPublished ?? 0} replies • {summary.quotesPublished ?? 0} quotes • {summary.originalsPublished ?? 0} originals
-                                </div>
-                              </div>
-                              <div className="rounded-md border border-white/8 bg-black/10 px-3 py-2">
-                                <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">Follows</div>
-                                <div className="mt-1 text-sm font-medium text-foreground">{summary.accountsFollowed ?? 0}</div>
-                                <div className="mt-1 text-[11px] text-muted-foreground">
-                                  {summary.followsFromProactiveQueue ?? 0} proactive • {summary.followsFromEngagement ?? 0} engagement
-                                </div>
-                              </div>
-                              <div className="rounded-md border border-white/8 bg-black/10 px-3 py-2">
-                                <div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">Pipeline</div>
-                                <div className="mt-1 text-sm font-medium text-foreground">
-                                  {summary.selectedOpportunityCount ?? 0} selected • {summary.draftCount ?? 0} drafts
-                                </div>
-                                <div className="mt-1 text-[11px] text-muted-foreground">
-                                  {summary.successfulPublishCount ?? 0} successful • {summary.failedPublishCount ?? 0} failed
-                                </div>
-                              </div>
-                            </div>
-                            {summary.notes?.length ? (
-                              <div className="mt-3 rounded-md border border-white/8 bg-black/10 px-3 py-2 text-xs text-foreground/78">
-                                {summary.notes[0]}
-                              </div>
-                            ) : null}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                    <div className="space-y-3">
-                      <div className="rounded-lg border border-white/8 bg-black/15 px-3 py-3">
-                        <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Published mix</div>
-                        <div className="mt-3 grid gap-2 sm:grid-cols-3">
-                          <div className="rounded-md border border-white/8 bg-black/10 px-3 py-2">
-                            <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Replies</div>
-                            <div className="mt-1 text-lg font-semibold text-foreground">{latestAccountGrowthSummary?.repliesPublished ?? 0}</div>
-                          </div>
-                          <div className="rounded-md border border-white/8 bg-black/10 px-3 py-2">
-                            <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Quotes</div>
-                            <div className="mt-1 text-lg font-semibold text-foreground">{latestAccountGrowthSummary?.quotesPublished ?? 0}</div>
-                          </div>
-                          <div className="rounded-md border border-white/8 bg-black/10 px-3 py-2">
-                            <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Originals</div>
-                            <div className="mt-1 text-lg font-semibold text-foreground">{latestAccountGrowthSummary?.originalsPublished ?? 0}</div>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="rounded-lg border border-white/8 bg-black/15 px-3 py-3">
-                        <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Follow split</div>
-                        <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                          <div className="rounded-md border border-white/8 bg-black/10 px-3 py-2">
-                            <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Proactive</div>
-                            <div className="mt-1 text-lg font-semibold text-foreground">{latestAccountGrowthSummary?.followsFromProactiveQueue ?? 0}</div>
-                            <div className="mt-1 text-xs text-muted-foreground">
-                              {latestAccountGrowthSummary?.followBudget?.proactiveDailyCap ? `Cap ${latestAccountGrowthSummary.followBudget.proactiveDailyCap}/day` : 'Budgeted discovery follows'}
-                            </div>
-                          </div>
-                          <div className="rounded-md border border-white/8 bg-black/10 px-3 py-2">
-                            <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Engagement</div>
-                            <div className="mt-1 text-lg font-semibold text-foreground">{latestAccountGrowthSummary?.followsFromEngagement ?? 0}</div>
-                            <div className="mt-1 text-xs text-muted-foreground">Does not reduce the proactive budget.</div>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="rounded-lg border border-white/8 bg-black/15 px-3 py-3">
-                        <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Weekly read</div>
-                        <div className="mt-2 space-y-1 text-xs text-foreground/82">
-                          {bestGrowthWeek ? <div>Best visible week: {bestGrowthWeek.week} ({formatSignedCount(bestGrowthWeek.netFollowerGrowth)})</div> : null}
-                          {latestAccountGrowthSummary?.postsPublished && !latestAccountGrowthSummary.netFollowerGrowth ? <div>Publishing is happening, but follower movement is still partial or flat this week.</div> : null}
-                          {latestAccountGrowthSummary?.notes?.length ? latestAccountGrowthSummary.notes.map((note, index) => <div key={`growth-note-${index}`}>{note}</div>) : <div>Weekly growth data is available here without cluttering the posting workflow.</div>}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ) : null}
-              {watchOnlyOpportunities.length ? (
-                <details className="rounded-xl border border-white/8 bg-black/20 p-4">
-                  <summary className="cursor-pointer list-none text-sm font-medium text-foreground">
-                    Accounts to watch ({watchOnlyOpportunities.length})
-                  </summary>
-                  <div className="mt-2 text-xs text-foreground/70">
-                    These are low-confidence watch items and account targets, not live posting opportunities.
-                  </div>
-                  <div className="mt-3 space-y-3">
-                    {watchOnlyOpportunities.map((opportunity) => {
-                      const username = extractOpportunityUsername(opportunity)
+              {showFallbackStub ? (
+                <details className="rounded-xl border border-white/8 bg-black/15 p-3">
+                  <summary className="cursor-pointer list-none text-sm font-medium text-foreground">Fallback original posts</summary>
+                  <div className="mt-2 space-y-2">
+                    {fallbackOpportunityFamilies.map((family) => {
+                      const leader = family.opportunities[0]
                       return (
-                        <div key={`watch-${opportunity.id}`} className="space-y-3">
-                          <OpportunityCard opportunity={opportunity} blocked />
-                          {username ? (
-                            <div className="mt-2 flex flex-wrap gap-1">
-                              {(['watch', 'prioritize', 'mute', 'engage_this_week'] as const).map((state) => (
-                                <button
-                                  key={`${opportunity.id}-${state}`}
-                                  onClick={() => void runGrowthAction('set_account_target_state', undefined, { accountUsername: username, accountState: state, feedback: opportunity.selectionReason || opportunity.whyNow || opportunity.title || '' })}
-                                  disabled={actionState.status === 'saving'}
-                                  className={cx(
-                                    'rounded-full border px-2 py-1 text-[10px] uppercase tracking-[0.12em] transition-smooth',
-                                    opportunity.accountState === state
-                                      ? 'border-cyan-500/25 bg-cyan-500/10 text-cyan-200'
-                                      : 'border-white/10 text-muted-foreground hover:bg-surface-2',
-                                  )}
-                                >
-                                  {state.replaceAll('_', ' ')}
-                                </button>
-                              ))}
-                            </div>
-                          ) : null}
-                        </div>
+                        <button
+                          key={`fallback-${family.key}`}
+                          type="button"
+                          onClick={() => setSelection({ kind: 'opportunity', id: leader.id })}
+                          className="w-full rounded-xl border border-white/8 bg-black/15 px-3 py-3 text-left hover:bg-surface-2/70"
+                        >
+                          <div className="text-sm font-medium text-foreground">{leader.title || family.sourceLabel}</div>
+                          <div className="mt-1 text-xs text-muted-foreground">{leader.selectionReason || leader.whyNow || 'Fallback original'}</div>
+                        </button>
                       )
                     })}
                   </div>
                 </details>
               ) : null}
-              {growth.watchlistRecommendations?.length ? (
-                <div className="space-y-2">
-                  {growth.watchlistRecommendations.map((account) => (
-                    <div key={account.username} className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
+            </div>
+          </section>
+
+          <section className="rounded-2xl border border-white/10 bg-[#10161f] p-4 shadow-[0_18px_40px_rgba(0,0,0,0.24)]">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold text-foreground">Draft studio</div>
+                <div className="mt-1 text-xs text-muted-foreground">Compare variants here. The inspector is where you rewrite, approve, and publish.</div>
+              </div>
+              <FieldChip>{groupedDraftCandidates.length}</FieldChip>
+            </div>
+            <div className="mt-4 space-y-3">
+              {draftFamilyModels.length ? draftFamilyModels.map((family) => {
+                const familyOpen = selectedDraftFamilyId === family.familyId || draftFamilyModels.length === 1
+                return (
+                  <details key={family.familyId} open={familyOpen} className="rounded-2xl border border-white/8 bg-black/20 p-4">
+                    <summary className="cursor-pointer list-none">
                       <div className="flex items-start justify-between gap-3">
                         <div>
-                          <div className="font-medium text-foreground">{displayUsername(account.username)}</div>
-                          <div className="mt-1 text-xs text-muted-foreground">{account.clusterLabel} • {account.state}</div>
+                          <div className="text-sm font-semibold text-foreground">{family.sourceLabel}</div>
+                          <div className="mt-1 text-xs text-muted-foreground">{family.familyLabel} • {family.drafts.length} variants</div>
                         </div>
-                        <div className="flex flex-wrap gap-1">
-                          {(['watch', 'prioritize', 'mute', 'engage_this_week'] as const).map((state) => (
-                            <button key={`${account.username}-${state}`} onClick={() => void runGrowthAction('set_account_target_state', undefined, { accountUsername: account.username, accountState: state, feedback: account.reason })} disabled={actionState.status === 'saving'} className={cx('rounded-full border px-2 py-1 text-[10px] uppercase tracking-[0.12em] transition-smooth', account.state === state ? 'border-cyan-500/25 bg-cyan-500/10 text-cyan-200' : 'border-white/10 text-muted-foreground hover:bg-surface-2')}>{state.replaceAll('_', ' ')}</button>
-                          ))}
-                        </div>
+                        {family.leader.distribution_type ? <FieldChip>{family.leader.distribution_type}</FieldChip> : null}
                       </div>
-                      <div className="mt-2 text-xs text-foreground/80">{account.reason}</div>
-                      {account.sourceUrl ? <a href={account.sourceUrl} target="_blank" rel="noreferrer" className="mt-2 inline-block text-xs text-cyan-200 hover:text-cyan-100">Open source</a> : null}
-                    </div>
-                  ))}
-                </div>
-              ) : <div className="text-sm text-muted-foreground">No watchlist recommendations yet.</div>}
-
-              {(followQueue.length || followLog.length) ? (
-                <details className="rounded-xl border border-white/8 bg-black/20 p-4">
-                  <summary className="cursor-pointer list-none text-sm font-medium text-foreground">
-                    Follow queue {pendingFollows.length ? `(${pendingFollows.length} pending)` : ''}
-                  </summary>
-                  <div className="mt-2 text-xs text-foreground/70">
-                    Proactive follows are budgeted separately from engagement-triggered follows, so posting activity does not consume neighborhood-growth capacity.
-                  </div>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <FieldChip>{pendingProactiveFollows.length} proactive pending</FieldChip>
-                    <FieldChip>{pendingEngagementFollows.length} engagement pending</FieldChip>
-                    <FieldChip>{completedProactiveFollowsToday} proactive followed today</FieldChip>
-                    <FieldChip>{completedEngagementFollowsToday} engagement followed today</FieldChip>
-                    <FieldChip>cap 15/day proactive</FieldChip>
-                  </div>
-                  {pendingFollows.length ? (
+                    </summary>
                     <div className="mt-3 space-y-2">
-                      {pendingFollows.slice(0, 6).map((entry) => (
-                        <div key={entry.id} className="rounded-xl border border-white/8 bg-black/15 px-3 py-3">
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <div className="font-medium text-foreground">{displayUsername(entry.username)}</div>
-                              <div className="mt-1 text-xs text-muted-foreground">
-                                {entry.clusterLabel || 'Watchlist follow candidate'}{entry.role ? ` • ${entry.role}` : ''}{entry.followType ? ` • ${entry.followType}` : ''}
+                      {family.drafts.map((draft) => {
+                        const isSelected = selectedDraft?.id === draft.id
+                        return (
+                          <button
+                            key={draft.id}
+                            type="button"
+                            onClick={() => setSelection({ kind: 'draft', familyId: family.familyId, draftId: draft.id })}
+                            className={cx(
+                              'w-full rounded-xl border p-4 text-left transition-smooth',
+                              isSelected ? 'border-cyan-500/25 bg-cyan-500/8' : 'border-white/8 bg-black/15 hover:bg-surface-2/70',
+                            )}
+                          >
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">{draft.variant_label || 'Draft'}</div>
+                              <div className="flex flex-wrap gap-2">
+                                {draft.approval ? <FieldChip>{draft.approval}</FieldChip> : null}
+                                {draft.voice_profile ? <FieldChip>{draft.voice_profile}</FieldChip> : null}
                               </div>
                             </div>
-                            {typeof entry.score === 'number' ? <FieldChip>score {entry.score}</FieldChip> : null}
-                          </div>
-                          {entry.reason ? <div className="mt-2 text-sm text-foreground/82">{entry.reason}</div> : null}
-                          {entry.sourceUrl ? <a href={entry.sourceUrl} target="_blank" rel="noreferrer" className="mt-3 inline-block text-xs text-cyan-200 hover:text-cyan-100">Open source</a> : null}
-                        </div>
-                      ))}
+                            <div className="mt-3 text-sm leading-6 text-foreground whitespace-pre-wrap">{draft.text}</div>
+                            {draft.selection_reason || draft.why_now || draft.rationale ? (
+                              <div className="mt-3 text-xs text-muted-foreground">{draft.selection_reason || draft.why_now || draft.rationale}</div>
+                            ) : null}
+                          </button>
+                        )
+                      })}
                     </div>
-                  ) : <div className="mt-3 text-sm text-muted-foreground">No pending follows right now.</div>}
-                  {followLog.length ? (
-                    <div className="mt-4 rounded-xl border border-white/8 bg-black/15 px-3 py-3">
-                      <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Recent follow activity</div>
-                      <div className="mt-2 space-y-2">
-                        {followLog.slice(0, 5).map((entry, index) => (
-                          <div key={`${entry.username}-${entry.createdAt || index}`} className="flex items-center justify-between gap-3 text-sm">
-                            <div className="text-foreground/88">{displayUsername(entry.username)}</div>
-                            <div className="text-xs text-muted-foreground">
-                              {entry.status || 'followed'}{entry.datePt ? ` • ${entry.datePt}` : ''}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ) : null}
-                </details>
-              ) : null}
-
-              {growth.sourceCandidates.length ? (
-                <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
-                  <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Top source candidates</div>
-                  <div className="mt-2 space-y-2">
-                    {growth.sourceCandidates.slice(0, 4).map((candidate, index) => (
-                      <div key={`candidate-${index}`} className="rounded-lg border border-white/8 bg-black/15 px-3 py-2">
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="text-sm font-medium text-foreground">{candidate.clusterLabel}</div>
-                          <FieldChip>score {candidate.score}</FieldChip>
-                        </div>
-                        <div className="mt-1 text-xs text-muted-foreground">{candidate.author} • {candidate.followers.toLocaleString()} followers • {candidate.likes} likes • {candidate.replies} replies</div>
-                        <div className="mt-2 text-xs text-foreground/80">{candidate.text}</div>
-                      </div>
-                    ))}
-                  </div>
+                  </details>
+                )
+              }) : (
+                <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-4 text-sm text-muted-foreground">
+                  {selectedOpportunities.length
+                    ? 'Opportunities are ready. Generate drafts from the selected move.'
+                    : 'No drafts yet. Refresh research or select opportunities first.'}
                 </div>
-              ) : null}
-              {growth.accountTargets.length ? (
-                <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
-                  <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Account targets</div>
-                  <div className="mt-2 space-y-2">
-                    {growth.accountTargets.slice(0, 5).map((account) => (
-                      <div key={`account-target-${account.username}`} className="rounded-lg border border-white/8 bg-black/15 px-3 py-2">
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="text-sm font-medium text-foreground">{displayUsername(account.username)}</div>
-                          <div className="flex flex-wrap gap-2">
-                            {account.clusterLabel ? <FieldChip>{account.clusterLabel}</FieldChip> : null}
-                            <FieldChip>{account.followers.toLocaleString()} followers</FieldChip>
-                            {account.verified ? <FieldChip>verified</FieldChip> : null}
-                            {account.state ? <FieldChip>{account.state}</FieldChip> : null}
-                          </div>
-                        </div>
-                        <div className="mt-2 text-xs text-foreground/80">{account.why}</div>
-                        <div className="mt-3 flex flex-wrap gap-1">
-                          {(['watch', 'prioritize', 'mute', 'engage_this_week'] as const).map((state) => (
-                            <button
-                              key={`${account.username}-target-${state}`}
-                              onClick={() => void runGrowthAction('set_account_target_state', undefined, { accountUsername: account.username, accountState: state, feedback: account.why })}
-                              disabled={actionState.status === 'saving'}
-                              className={cx(
-                                'rounded-full border px-2 py-1 text-[10px] uppercase tracking-[0.12em] transition-smooth',
-                                account.state === state
-                                  ? 'border-cyan-500/25 bg-cyan-500/10 text-cyan-200'
-                                  : 'border-white/10 text-muted-foreground hover:bg-surface-2',
-                              )}
-                            >
-                              {state.replaceAll('_', ' ')}
-                            </button>
-                          ))}
-                        </div>
-                        {account.stateNote ? <div className="mt-2 text-[11px] text-muted-foreground">{account.stateNote}</div> : null}
-                        {account.sourceUrl ? <a href={account.sourceUrl} target="_blank" rel="noreferrer" className="mt-2 inline-block text-xs text-cyan-200 hover:text-cyan-100">Open source context</a> : null}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
+              )}
             </div>
-          </CollapsibleSection>
-
-          <CollapsibleSection title="Strategy memory" subtitle="What the system has learned from your feedback and live results." defaultOpen={false}>
-            <div className="space-y-3">
-              <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
-                <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Editorial memory</div>
-                {growth.editorialMemory?.recentFeedback?.length ? (
-                  <div className="mt-2 space-y-2">
-                    {growth.editorialMemory.recentFeedback.map((entry, index) => (
-                      <div key={`feedback-${index}`} className="rounded-lg border border-white/8 bg-black/15 px-3 py-2">
-                        <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">{entry.decision} • {entry.archetype || 'unknown'} • {formatPacificTime(entry.reviewedAtPt)}</div>
-                        <div className="mt-1 text-sm text-foreground/85">{entry.feedback}</div>
-                      </div>
-                    ))}
-                  </div>
-                ) : <div className="mt-2 text-sm text-muted-foreground">No editorial memory yet.</div>}
-              </div>
-              <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
-                <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Source memory</div>
-                {growth.sourceMemory ? (
-                  <div className="mt-2 space-y-2 text-xs text-foreground/85">
-                    {growth.sourceMemory.negativeStyleMarkers.length ? <div>Negative style markers: {growth.sourceMemory.negativeStyleMarkers.join(' • ')}</div> : null}
-                    {growth.sourceMemory.rejectedPhrases.length ? <div>Rejected phrase patterns: {growth.sourceMemory.rejectedPhrases.join(' • ')}</div> : null}
-                    {growth.sourceMemory.accounts.length ? <div>Tracked accounts: {growth.sourceMemory.accounts.slice(0, 5).map((account) => `${displayUsername(account.username)} (${account.state})`).join(' • ')}</div> : null}
-                    {!growth.sourceMemory.negativeStyleMarkers.length && !growth.sourceMemory.rejectedPhrases.length && !growth.sourceMemory.accounts.length ? <div className="text-muted-foreground">No source memory stored yet.</div> : null}
-                  </div>
-                ) : <div className="mt-2 text-sm text-muted-foreground">No source memory stored yet.</div>}
-              </div>
-              <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
-                <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Strategy memory</div>
-                {growth.strategyMemory ? (
-                  <div className="mt-2 space-y-2 text-xs text-foreground/85">
-                    {growth.strategyMemory.accountStage ? <div>Account stage: {growth.strategyMemory.accountStage}</div> : null}
-                    {growth.strategyMemory.performance?.postedCount && !growth.strategyMemory.performance?.syncedPostCount ? (
-                      <div className="space-y-1">
-                        <div>Published posts exist, but live metrics have not synced yet.</div>
-                        {growth.strategyMemory.performance?.publishAttempts ? <div className="text-muted-foreground">{growth.strategyMemory.performance.publishAttempts} publish update{growth.strategyMemory.performance.publishAttempts === 1 ? '' : 's'} recorded.</div> : null}
-                      </div>
-                    ) : (
-                      <>
-                        {growth.strategyMemory.winningDistributionTypes?.length ? <div>Winning distribution types: {growth.strategyMemory.winningDistributionTypes.join(' • ')}</div> : null}
-                        {growth.strategyMemory.winningSourceTypes?.length ? <div>Winning source types: {growth.strategyMemory.winningSourceTypes.join(' • ')}</div> : null}
-                        {growth.strategyMemory.winningSourceAccounts?.length ? <div>Winning source accounts: {growth.strategyMemory.winningSourceAccounts.map((account) => displayUsername(account)).join(' • ')}</div> : null}
-                        {growth.strategyMemory.winningArchetypes?.length ? <div>Winning archetypes: {growth.strategyMemory.winningArchetypes.join(' • ')}</div> : null}
-                        {growth.strategyMemory.timingBias?.length ? <div>Timing bias: {growth.strategyMemory.timingBias.join(' • ')}</div> : null}
-                      </>
-                    )}
-                    {growth.strategyMemory.strategyNotes?.length ? <div className="space-y-1">{growth.strategyMemory.strategyNotes.map((note, index) => <div key={`strategy-note-${index}`} className="flex gap-2"><span>•</span><span>{note}</span></div>)}</div> : null}
-                  </div>
-                ) : <div className="mt-2 text-sm text-muted-foreground">No strategy memory yet.</div>}
-              </div>
-              {growth.resultsSummary?.topPosts?.length ? (
-                <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
-                  <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Top published signals</div>
-                  <div className="mt-2 space-y-2">
-                    {growth.resultsSummary.topPosts.map((post) => (
-                      <div key={`top-post-${post.id}`} className="rounded-lg border border-white/8 bg-black/15 px-3 py-2">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="text-sm font-medium text-foreground">{post.pillar}</span>
-                          <FieldChip>score {post.engagementScore}</FieldChip>
-                          {post.distributionType ? <FieldChip>{post.distributionType}</FieldChip> : null}
-                          {post.sourceType ? <FieldChip>{post.sourceType}</FieldChip> : null}
-                          {post.sourceAccount ? <FieldChip>{displayUsername(post.sourceAccount)}</FieldChip> : null}
-                        </div>
-                        {post.tweetUrl ? <a href={post.tweetUrl} target="_blank" rel="noreferrer" className="mt-2 inline-block text-xs text-cyan-200 hover:text-cyan-100">Open published post</a> : null}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-            </div>
-          </CollapsibleSection>
+          </section>
         </div>
-      ) : null}
 
-      {deskMode === 'queue' ? (
-        <div className="space-y-4">
-          <div id="growth-ready-to-schedule">
-          <CollapsibleSection title="Publishing queue" subtitle="Move approved posts into the live queue, then monitor scheduled, failed, and published state here." defaultOpen>
-            <div className="grid gap-4 xl:grid-cols-2">
-              <div className="space-y-3 rounded-[1.4rem] border border-emerald-500/12 bg-[linear-gradient(180deg,rgba(16,28,24,0.96),rgba(9,15,18,0.98))] p-4 shadow-[0_16px_36px_rgba(0,0,0,0.22)]">
-                  <div className="flex items-start justify-between gap-3 border-b border-white/8 pb-3">
-                    <div>
-                      <div className="text-[11px] uppercase tracking-[0.14em] text-emerald-200/85">Ready</div>
-                      <div className="mt-1 text-xs text-muted-foreground">Approved posts waiting on a publish time or immediate send.</div>
-                    </div>
-                    <div className="rounded-full border border-emerald-400/20 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-medium text-emerald-100">{readyApprovedPosts.length}</div>
-                  </div>
-                  {readyApprovedPosts.length ? (
-                    readyApprovedPosts.map((post) => {
-                      const suggested = buildSuggestedSchedule(post)
-                      const scheduleState = scheduleDrafts[post.id] || { when: post.scheduledAt || suggested.when, note: post.scheduleNote || suggested.note }
-                      const publishState = publishDrafts[post.id] || { tweetUrl: post.tweetUrl || '', tweetId: post.tweetId || '' }
-                      return (
-                        <div key={post.id} className="rounded-[1.2rem] border border-emerald-500/15 bg-[#10161f] p-4 shadow-[0_12px_28px_rgba(0,0,0,0.18)]">
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <div className="text-sm font-semibold leading-5 text-foreground">{post.pillar || 'Approved post'}{post.angle ? `: ${post.angle}` : ''}</div>
-                              <div className="mt-2 flex flex-wrap gap-2">
-                                {post.distributionType ? <FieldChip>{post.distributionType}</FieldChip> : null}
-                                {post.sourceType ? <FieldChip>{post.sourceType}</FieldChip> : null}
-                                {post.approvedAtPt ? <FieldChip>{formatPacificTime(post.approvedAtPt)}</FieldChip> : null}
-                              </div>
-                            </div>
+        <aside className="xl:sticky xl:top-4 xl:self-start">
+          <div className="rounded-2xl border border-white/10 bg-[linear-gradient(180deg,rgba(15,20,27,0.98),rgba(11,16,23,0.98))] p-4 shadow-[0_24px_48px_rgba(0,0,0,0.3)]">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-[11px] uppercase tracking-[0.14em] text-cyan-100/70">Inspector</div>
+                <div className="mt-1 text-sm font-semibold text-foreground">
+                  {inspectorMode === 'draft' ? 'Selected draft' : inspectorMode === 'opportunity' ? 'Selected opportunity' : inspectorMode === 'queue' ? 'Queue item' : 'Nothing selected'}
+                </div>
+              </div>
+              {activeDrawer ? (
+                <button type="button" onClick={() => setActiveDrawer(null)} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2">
+                  Close drawer
+                </button>
+              ) : null}
+            </div>
+
+            <div className="mt-4">
+              {inspectorMode === 'draft' && selectedDraft ? (
+                <DraftCard
+                  draft={selectedDraft}
+                  feedbackValue={feedbackDrafts[selectedDraft.id] || ''}
+                  voiceDirection={voiceDirection}
+                  onVoiceDirectionChange={setVoiceDirection}
+                  onFeedbackChange={(value) => setFeedbackDrafts((current) => ({ ...current, [selectedDraft.id]: value }))}
+                  onAction={(action, draftId, extra) => void runGrowthAction(action, draftId, extra || {})}
+                  saving={actionState.status === 'saving'}
+                />
+              ) : inspectorMode === 'opportunity' && selectedOpportunity ? (
+                <OpportunityCard
+                  opportunity={selectedOpportunity}
+                  feedbackValue={opportunityFeedback[selectedOpportunity.id] || ''}
+                  onFeedbackChange={(value) => setOpportunityFeedback((current) => ({ ...current, [selectedOpportunity.id]: value }))}
+                  onAction={runGrowthAction}
+                  saving={actionState.status === 'saving'}
+                />
+              ) : inspectorMode === 'queue' && selectedQueueEntry ? (
+                (() => {
+                  const post = selectedQueueEntry.item
+                  const status = selectedQueueEntry.status
+                  const suggested = buildSuggestedSchedule(post)
+                  const scheduleState = scheduleDrafts[post.id] || { when: post.scheduledAt || suggested.when, note: post.scheduleNote || suggested.note }
+                  const publishState = publishDrafts[post.id] || { tweetUrl: post.tweetUrl || '', tweetId: post.tweetId || '' }
+                  return (
+                    <div className="space-y-3 rounded-2xl border border-white/8 bg-black/15 p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="text-sm font-semibold text-foreground">{post.pillar || 'Queue item'}{post.angle ? `: ${post.angle}` : ''}</div>
+                          <div className="mt-1 text-xs text-muted-foreground">{post.sourceAccount || post.sourceType || post.distributionType || status}</div>
+                        </div>
+                        <FieldChip>{status}</FieldChip>
+                      </div>
+                      <div className="rounded-xl border border-white/8 bg-black/20 px-4 py-4 text-sm leading-6 text-foreground whitespace-pre-wrap">{post.text}</div>
+                      {status === 'failed' && post.publishError ? (
+                        <div className="rounded-lg border border-rose-500/15 bg-rose-500/10 px-3 py-2 text-xs text-rose-100/90">{post.publishError}</div>
+                      ) : null}
+                      {status === 'published' && post.tweetUrl ? (
+                        <div className="rounded-lg border border-white/8 bg-black/20 px-3 py-2 text-xs text-foreground/80">
+                          Published {formatPacificTime(post.postedAtPt || post.postedAt || null)}
+                          <div className="mt-2">
+                            <a href={post.tweetUrl} target="_blank" rel="noreferrer" className="text-cyan-200 hover:text-cyan-100">Open published post</a>
                           </div>
-                          <div className="mt-4 rounded-xl border border-emerald-500/15 bg-black/20 px-4 py-4 text-sm leading-6 text-foreground whitespace-pre-wrap">{post.text}</div>
-                          <div className="mt-3 flex flex-wrap gap-2">
+                        </div>
+                      ) : null}
+                      {status === 'ready' ? (
+                        <>
+                          <div className="grid gap-3 sm:grid-cols-[1fr_1fr]">
+                            <label className="text-xs text-muted-foreground">When
+                              <input type="datetime-local" value={scheduleState.when} onChange={(event) => setScheduleDrafts((current) => ({ ...current, [post.id]: { ...scheduleState, when: event.target.value } }))} className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground" />
+                            </label>
+                            <label className="text-xs text-muted-foreground">Note
+                              <input value={scheduleState.note} onChange={(event) => setScheduleDrafts((current) => ({ ...current, [post.id]: { ...scheduleState, note: event.target.value } }))} className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground" />
+                            </label>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
                             <button onClick={() => void runGrowthAction('schedule_draft', post.id, { scheduledAt: scheduleState.when, scheduleNote: scheduleState.note, scheduleSource: scheduleState.when === suggested.when ? 'machine_suggested' : 'user_selected' })} disabled={actionState.status === 'saving' || !scheduleState.when} className="rounded-lg bg-emerald-500/15 px-3 py-2 text-xs font-medium text-emerald-200 transition-smooth hover:bg-emerald-500/20 disabled:opacity-60">Schedule</button>
                             <button onClick={() => void runGrowthAction('post_now', post.id)} disabled={actionState.status === 'saving'} className="rounded-lg bg-cyan-500/15 px-3 py-2 text-xs font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/20 disabled:opacity-60">Post now</button>
                           </div>
-                          <details className="mt-3 rounded-xl border border-white/8 bg-black/20 px-3 py-3">
-                            <summary className="cursor-pointer list-none text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Scheduling details</summary>
+                          <details className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
+                            <summary className="cursor-pointer list-none text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Manual fallback</summary>
                             <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_1fr]">
-                              <label className="text-xs text-muted-foreground">When
-                                <input type="datetime-local" value={scheduleState.when} onChange={(event) => setScheduleDrafts((current) => ({ ...current, [post.id]: { ...scheduleState, when: event.target.value } }))} className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground" />
+                              <label className="text-xs text-muted-foreground">Tweet URL
+                                <input value={publishState.tweetUrl} onChange={(event) => setPublishDrafts((current) => ({ ...current, [post.id]: { ...publishState, tweetUrl: event.target.value } }))} className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground" placeholder="https://x.com/.../status/..." />
                               </label>
-                              <label className="text-xs text-muted-foreground">Note
-                                <input value={scheduleState.note} onChange={(event) => setScheduleDrafts((current) => ({ ...current, [post.id]: { ...scheduleState, note: event.target.value } }))} className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground" placeholder="optional schedule note" />
+                              <label className="text-xs text-muted-foreground">Tweet ID
+                                <input value={publishState.tweetId} onChange={(event) => setPublishDrafts((current) => ({ ...current, [post.id]: { ...publishState, tweetId: event.target.value } }))} className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground" placeholder="optional if URL is present" />
                               </label>
                             </div>
-                            <details className="mt-3 rounded-xl border border-white/8 bg-black/15 px-3 py-3">
-                              <summary className="cursor-pointer list-none text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Manual fallback</summary>
-                              <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_1fr]">
-                                <label className="text-xs text-muted-foreground">Tweet URL
-                                  <input value={publishState.tweetUrl} onChange={(event) => setPublishDrafts((current) => ({ ...current, [post.id]: { ...publishState, tweetUrl: event.target.value } }))} className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground" placeholder="https://x.com/.../status/..." />
-                                </label>
-                                <label className="text-xs text-muted-foreground">Tweet ID
-                                  <input value={publishState.tweetId} onChange={(event) => setPublishDrafts((current) => ({ ...current, [post.id]: { ...publishState, tweetId: event.target.value } }))} className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground" placeholder="optional if URL is present" />
-                                </label>
-                              </div>
-                              <div className="mt-3 flex flex-wrap gap-2">
-                                <button onClick={() => void runGrowthAction('link_manual_publish', post.id, { tweetUrl: publishState.tweetUrl, tweetId: publishState.tweetId })} disabled={actionState.status === 'saving' || (!publishState.tweetUrl && !publishState.tweetId)} className="rounded-lg bg-cyan-500/15 px-3 py-2 text-xs font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/20 disabled:opacity-60">Link manual publish</button>
-                              </div>
-                            </details>
+                            <div className="mt-3">
+                              <button onClick={() => void runGrowthAction('link_manual_publish', post.id, { tweetUrl: publishState.tweetUrl, tweetId: publishState.tweetId })} disabled={actionState.status === 'saving' || (!publishState.tweetUrl && !publishState.tweetId)} className="rounded-lg bg-cyan-500/15 px-3 py-2 text-xs font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/20 disabled:opacity-60">Link manual publish</button>
+                            </div>
                           </details>
-                        </div>
-                      )
-                    })
-                  ) : (
-                    <div className="rounded-[1.1rem] border border-white/10 bg-[#10161f] px-4 py-4 text-sm text-muted-foreground">Nothing is ready to publish yet.</div>
-                  )}
-                </div>
-
-              <div className="space-y-3 rounded-[1.4rem] border border-cyan-500/12 bg-[linear-gradient(180deg,rgba(12,24,30,0.96),rgba(9,15,18,0.98))] p-4 shadow-[0_16px_36px_rgba(0,0,0,0.22)]">
-                  <div className="flex items-start justify-between gap-3 border-b border-white/8 pb-3">
-                    <div>
-                      <div className="text-[11px] uppercase tracking-[0.14em] text-cyan-200/85">Scheduled</div>
-                      <div className="mt-1 text-xs text-muted-foreground">Posts that already have a publish time and are waiting on the worker.</div>
-                    </div>
-                    <div className="rounded-full border border-cyan-400/20 bg-cyan-500/10 px-2.5 py-1 text-[11px] font-medium text-cyan-100">{scheduledPosts.length}</div>
-                  </div>
-                  {scheduledPosts.length ? (
-                    scheduledPosts.map((post) => (
-                      <div key={`scheduled-${post.id}`} className="rounded-[1.2rem] border border-cyan-500/15 bg-[#10161f] p-4 shadow-[0_12px_28px_rgba(0,0,0,0.18)]">
-                        <div className="text-sm font-semibold leading-5 text-foreground">{post.pillar || 'Scheduled post'}{post.angle ? `: ${post.angle}` : ''}</div>
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          <FieldChip>{post.distributionType || 'scheduled'}</FieldChip>
-                          <FieldChip>{formatPacificTime(post.scheduledAtPt || post.scheduledAt || null)}</FieldChip>
-                        </div>
-                        <div className="mt-4 rounded-xl border border-cyan-500/15 bg-black/20 px-4 py-4 text-sm leading-6 text-foreground whitespace-pre-wrap">{post.text}</div>
-                        <div className="mt-3 flex flex-wrap gap-2">
+                        </>
+                      ) : null}
+                      {status === 'scheduled' ? (
+                        <div className="flex flex-wrap gap-2">
                           <button onClick={() => void runGrowthAction('post_now', post.id)} disabled={actionState.status === 'saving'} className="rounded-lg bg-cyan-500/15 px-3 py-2 text-xs font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/20 disabled:opacity-60">Post now</button>
                           <button onClick={() => void runGrowthAction('unschedule_draft', post.id)} disabled={actionState.status === 'saving'} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2 disabled:opacity-60">Unschedule</button>
                         </div>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="rounded-[1.1rem] border border-white/10 bg-[#10161f] px-4 py-4 text-sm text-muted-foreground">Nothing is scheduled.</div>
-                  )}
+                      ) : null}
+                      {status === 'failed' ? (
+                        <div className="flex flex-wrap gap-2">
+                          <button onClick={() => setActiveDrawer('queue')} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2">Review in queue</button>
+                        </div>
+                      ) : null}
+                    </div>
+                  )
+                })()
+              ) : (
+                <div className="rounded-2xl border border-white/8 bg-black/15 p-4 text-sm text-muted-foreground">
+                  Select an opportunity, draft, or queue item to inspect it here. The main lane is for scanning; this panel is for acting.
                 </div>
+              )}
+            </div>
+          </div>
+        </aside>
+      </div>
 
-              <div className="space-y-3 rounded-[1.4rem] border border-rose-500/12 bg-[linear-gradient(180deg,rgba(28,16,22,0.96),rgba(14,12,18,0.98))] p-4 shadow-[0_16px_36px_rgba(0,0,0,0.22)]">
-                  <div className="flex items-start justify-between gap-3 border-b border-white/8 pb-3">
-                    <div>
-                      <div className="text-[11px] uppercase tracking-[0.14em] text-rose-200/85">Failed</div>
-                      <div className="mt-1 text-xs text-muted-foreground">Items that need a retry, a rewrite, or a different source/account path.</div>
-                    </div>
-                    <div className="rounded-full border border-rose-400/20 bg-rose-500/10 px-2.5 py-1 text-[11px] font-medium text-rose-100">{failedPosts.length}</div>
-                  </div>
-                  {failedPosts.length ? (
-                    failedPosts.map((post) => (
-                      <div key={`failed-${post.id}`} className="rounded-[1.2rem] border border-rose-500/15 bg-[#161014] p-4 shadow-[0_12px_28px_rgba(0,0,0,0.18)]">
-                        <div className="text-sm font-semibold leading-5 text-foreground">{post.pillar || 'Failed post'}{post.angle ? `: ${post.angle}` : ''}</div>
-                        <div className="mt-3 rounded-lg border border-rose-500/15 bg-black/15 px-3 py-2 text-xs text-rose-100/90">{post.publishError || 'Publish failed.'}</div>
-                        <div className="mt-3 rounded-xl border border-rose-500/15 bg-black/20 px-4 py-4 text-sm leading-6 text-foreground whitespace-pre-wrap">{post.text}</div>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="rounded-[1.1rem] border border-white/10 bg-[#10161f] px-4 py-4 text-sm text-muted-foreground">No failed publishes.</div>
-                  )}
-                </div>
-
-              <div className="space-y-3 rounded-[1.4rem] border border-white/8 bg-[linear-gradient(180deg,rgba(17,18,23,0.96),rgba(9,15,18,0.98))] p-4 shadow-[0_16px_36px_rgba(0,0,0,0.22)] xl:col-span-2">
-                  <div className="flex items-start justify-between gap-3 border-b border-white/8 pb-3">
-                    <div>
-                      <div className="text-[11px] uppercase tracking-[0.14em] text-white/80">Published</div>
-                      <div className="mt-1 text-xs text-muted-foreground">Latest shipped posts and the most recent learning signal.</div>
-                    </div>
-                    <div className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] font-medium text-foreground">{publishedCount}</div>
-                  </div>
-                  {publishedCount ? (
-                    <div className="space-y-3">
-                      <div className="rounded-[1.2rem] border border-white/10 bg-[#10161f] p-4 shadow-[0_12px_28px_rgba(0,0,0,0.18)]">
-                        <div className="text-sm font-semibold leading-5 text-foreground">{(approvedPosts.find((post) => post.status === 'published' || post.status === 'linked')?.pillar) || 'Latest published post'}</div>
-                        <div className="mt-2 text-xs text-muted-foreground">{publishedCount} published or linked • {publishAttempts} publish update{publishAttempts === 1 ? '' : 's'}</div>
-                        {growth.resultsSummary?.winningDistributionTypes?.length || growth.resultsSummary?.winningSourceTypes?.length || (growth.resultsSummary?.strategyNotes || []).length ? (
-                          <div className="mt-3 space-y-2 rounded-xl border border-white/8 bg-black/20 px-3 py-3 text-xs text-foreground/85">
-                            {growth.resultsSummary?.winningDistributionTypes?.length ? <div>Winning distribution: {growth.resultsSummary.winningDistributionTypes.join(' • ')}</div> : null}
-                            {growth.resultsSummary?.winningSourceTypes?.length ? <div>Winning sources: {growth.resultsSummary.winningSourceTypes.join(' • ')}</div> : null}
-                            {(growth.resultsSummary?.strategyNotes || []).slice(0, 1).map((note, index) => <div key={`published-note-${index}`}>{note}</div>)}
-                          </div>
-                        ) : <div className="mt-3 rounded-xl border border-white/8 bg-black/20 px-3 py-3 text-xs text-muted-foreground">Learning will tighten once more published posts accumulate.</div>}
-                      </div>
-                    </div>
-                  ) : <div className="rounded-[1.1rem] border border-white/10 bg-[#10161f] px-4 py-4 text-sm text-muted-foreground">No published post results yet.</div>}
+      {activeDrawer ? (
+        <div className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm">
+          <div className="absolute inset-y-0 right-0 w-full max-w-[460px] overflow-y-auto border-l border-white/10 bg-[#0d131b] p-5 shadow-[-20px_0_40px_rgba(0,0,0,0.32)]">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-[11px] uppercase tracking-[0.14em] text-cyan-100/70">{activeDrawer === 'queue' ? 'Publishing queue' : 'Signals'}</div>
+                <div className="mt-1 text-sm font-semibold text-foreground">
+                  {activeDrawer === 'queue' ? 'Operational publishing state' : 'Research, follows, and account intelligence'}
                 </div>
               </div>
-            </CollapsibleSection>
-          </div>
+              <button type="button" onClick={() => setActiveDrawer(null)} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2">
+                Close
+              </button>
+            </div>
 
+            <div className="mt-4 space-y-4">
+              {activeDrawer === 'queue' ? (
+                queueSections.map((section) => (
+                  <section key={section.key} className="rounded-2xl border border-white/8 bg-black/20 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-semibold text-foreground">{section.title}</div>
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          {section.key === 'ready' ? 'Approved posts waiting to publish.' : section.key === 'scheduled' ? 'Waiting on the publish worker.' : section.key === 'failed' ? 'Needs review or retry.' : 'Published history.'}
+                        </div>
+                      </div>
+                      <FieldChip>{section.items.length}</FieldChip>
+                    </div>
+                    <div className="mt-3 space-y-2">
+                      {section.items.length ? section.items.map((post) => (
+                        <button
+                          key={`${section.key}-${post.id}`}
+                          type="button"
+                          onClick={() => setSelection({ kind: 'queue', status: section.key, id: post.id })}
+                          className={cx(
+                            'w-full rounded-xl border p-3 text-left transition-smooth',
+                            selection?.kind === 'queue' && selection.id === post.id && selection.status === section.key
+                              ? 'border-cyan-500/25 bg-cyan-500/8'
+                              : 'border-white/8 bg-black/15 hover:bg-surface-2/70',
+                          )}
+                        >
+                          <div className="text-sm font-medium text-foreground line-clamp-2">{post.text}</div>
+                          <div className="mt-2 text-xs text-muted-foreground">
+                            {post.sourceAccount || post.sourceType || post.distributionType || section.key}
+                            {section.key === 'scheduled' && (post.scheduledAtPt || post.scheduledAt) ? ` • ${formatPacificTime(post.scheduledAtPt || post.scheduledAt || null)}` : ''}
+                            {section.key === 'published' && (post.postedAtPt || post.postedAt) ? ` • ${formatPacificTime(post.postedAtPt || post.postedAt || null)}` : ''}
+                          </div>
+                          {section.key === 'failed' && post.publishError ? <div className="mt-2 text-xs text-rose-100/80 line-clamp-2">{post.publishError}</div> : null}
+                        </button>
+                      )) : <div className="text-sm text-muted-foreground">Nothing here right now.</div>}
+                    </div>
+                  </section>
+                ))
+              ) : (
+                <>
+                  <CollapsibleSection title="Listening" subtitle="Current-week research status and diagnostics." defaultOpen>
+                    <div className="space-y-3">
+                      <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3 text-sm text-foreground/85">
+                        <div><strong className="text-foreground">Primary goal:</strong> {growth.strategy?.primaryGoal || 'No strategy generated yet.'}</div>
+                        <div className="mt-2 text-xs text-muted-foreground">Last pull {formatPacificTime(growth.freshness?.lastXPullAt || growth.researchGeneratedAt || null)} • {growth.freshness?.queryCount ?? 0} queries • {growth.freshness?.sampleSize ?? 0} samples</div>
+                        <div className="mt-1 text-xs text-foreground/60">
+                          {growth.freshness?.cacheUsed
+                            ? `Using cached snapshot (${Number(growth.freshness?.cacheAgeMinutes || 0).toFixed(0)} min old) until research is refreshed.`
+                            : 'Using a fresh current-week snapshot.'}
+                          {growth.freshness?.discoveryTriggered ? ' Fallback discovery was used because the live lane was thin.' : ' Neighborhood-first research stayed within the current target lane.'}
+                        </div>
+                      </div>
+                      {growth.trendClusters.length ? growth.trendClusters.map((cluster) => (
+                        <div key={cluster.id} className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="font-medium text-foreground">{cluster.label}</div>
+                            <FieldChip>{cluster.confidence}</FieldChip>
+                          </div>
+                          <div className="mt-2 text-sm text-foreground/85">{cluster.whyItMatters}</div>
+                        </div>
+                      )) : <div className="text-sm text-muted-foreground">No high-confidence clusters yet.</div>}
+                    </div>
+                  </CollapsibleSection>
+
+                  <CollapsibleSection title="Blocked by source truth" subtitle="Suppressed sources and opportunities." defaultOpen={false}>
+                    <div className="space-y-3">
+                      {blockedOpportunities.length ? blockedOpportunities.map((opportunity) => (
+                        <OpportunityCard key={`blocked-${opportunity.id}`} opportunity={opportunity} blocked />
+                      )) : <div className="text-sm text-muted-foreground">Nothing is blocked right now.</div>}
+                    </div>
+                  </CollapsibleSection>
+
+                  <CollapsibleSection title="Accounts to watch" subtitle="Secondary account targets and low-confidence watch items." defaultOpen={false}>
+                    <div className="space-y-3">
+                      {watchOnlyOpportunities.length ? watchOnlyOpportunities.map((opportunity) => {
+                        const username = extractOpportunityUsername(opportunity)
+                        return (
+                          <div key={`watch-${opportunity.id}`} className="rounded-xl border border-white/8 bg-black/20 p-4">
+                            <OpportunityCard opportunity={opportunity} blocked />
+                            {username ? (
+                              <div className="mt-2 flex flex-wrap gap-1">
+                                {(['watch', 'prioritize', 'mute', 'engage_this_week'] as const).map((state) => (
+                                  <button
+                                    key={`${opportunity.id}-${state}`}
+                                    onClick={() => void runGrowthAction('set_account_target_state', undefined, { accountUsername: username, accountState: state, feedback: opportunity.selectionReason || opportunity.whyNow || opportunity.title || '' })}
+                                    disabled={actionState.status === 'saving'}
+                                    className={cx(
+                                      'rounded-full border px-2 py-1 text-[10px] uppercase tracking-[0.12em] transition-smooth',
+                                      opportunity.accountState === state
+                                        ? 'border-cyan-500/25 bg-cyan-500/10 text-cyan-200'
+                                        : 'border-white/10 text-muted-foreground hover:bg-surface-2',
+                                    )}
+                                  >
+                                    {state.replaceAll('_', ' ')}
+                                  </button>
+                                ))}
+                              </div>
+                            ) : null}
+                          </div>
+                        )
+                      }) : <div className="text-sm text-muted-foreground">No watch items right now.</div>}
+                    </div>
+                  </CollapsibleSection>
+
+                  <CollapsibleSection title="Follow queue" subtitle="Proactive and engagement-driven follows." defaultOpen={false}>
+                    <div className="space-y-3">
+                      <div className="flex flex-wrap gap-2">
+                        <FieldChip>{pendingProactiveFollows.length} proactive pending</FieldChip>
+                        <FieldChip>{pendingEngagementFollows.length} engagement pending</FieldChip>
+                        <FieldChip>{completedProactiveFollowsToday} proactive followed today</FieldChip>
+                        <FieldChip>{completedEngagementFollowsToday} engagement followed today</FieldChip>
+                        <FieldChip>cap 15/day proactive</FieldChip>
+                      </div>
+                      {pendingFollows.length ? pendingFollows.slice(0, 6).map((entry) => (
+                        <div key={entry.id} className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
+                          <div className="font-medium text-foreground">{displayUsername(entry.username)}</div>
+                          <div className="mt-1 text-xs text-muted-foreground">{entry.followType || 'proactive'} • {entry.clusterLabel || 'follow candidate'}</div>
+                          {entry.reason ? <div className="mt-2 text-sm text-foreground/82">{entry.reason}</div> : null}
+                        </div>
+                      )) : <div className="text-sm text-muted-foreground">No pending follows right now.</div>}
+                    </div>
+                  </CollapsibleSection>
+
+                  <CollapsibleSection title="Account growth" subtitle="Weekly account momentum." defaultOpen={false}>
+                    <div className="space-y-3">
+                      {accountGrowthSummaries.length ? (
+                        <>
+                          <div className="grid gap-2 sm:grid-cols-3">
+                            <div className="rounded-lg border border-white/8 bg-black/20 px-3 py-3">
+                              <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Active week</div>
+                              <div className="mt-1 text-sm font-medium text-foreground">{latestAccountGrowthSummary?.week || 'Current week'}</div>
+                            </div>
+                            <div className="rounded-lg border border-white/8 bg-black/20 px-3 py-3">
+                              <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Current best streak</div>
+                              <div className="mt-1 text-sm font-medium text-foreground">{bestGrowthWeek ? `${bestGrowthWeek.week} (${formatSignedCount(bestGrowthWeek.netFollowerGrowth)})` : 'Waiting on more weeks'}</div>
+                            </div>
+                            <div className="rounded-lg border border-white/8 bg-black/20 px-3 py-3">
+                              <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Total completions</div>
+                              <div className="mt-1 text-sm font-medium text-foreground">{latestAccountGrowthSummary?.postsPublished ?? 0} posts • {latestAccountGrowthSummary?.accountsFollowed ?? 0} follows</div>
+                            </div>
+                          </div>
+                          {[...accountGrowthSummaries].reverse().map((summary) => (
+                            <div key={`growth-summary-${summary.week}`} className="rounded-lg border border-white/8 bg-black/20 px-3 py-3">
+                              <div className="flex items-center justify-between gap-3">
+                                <div className="font-medium text-foreground">{summary.week}</div>
+                                <FieldChip>{summary.snapshotStatus || 'ready'}</FieldChip>
+                              </div>
+                              <div className="mt-2 text-xs text-muted-foreground">
+                                {typeof summary.startingFollowerCount === 'number' && typeof summary.endingFollowerCount === 'number'
+                                  ? `${summary.startingFollowerCount.toLocaleString()} → ${summary.endingFollowerCount.toLocaleString()} followers`
+                                  : 'Follower snapshot partial'}
+                              </div>
+                              <div className="mt-2 text-sm text-foreground/82">
+                                {formatSignedCount(summary.netFollowerGrowth || 0)} • {summary.postsPublished ?? 0} posts • {summary.accountsFollowed ?? 0} follows
+                              </div>
+                            </div>
+                          ))}
+                        </>
+                      ) : <div className="text-sm text-muted-foreground">No account growth summary yet.</div>}
+                    </div>
+                  </CollapsibleSection>
+
+                  <CollapsibleSection title="Strategy memory" subtitle="Feedback, source memory, and learned signals." defaultOpen={false}>
+                    <div className="space-y-3">
+                      {growth.editorialMemory?.recentFeedback?.length ? (
+                        <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
+                          <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Editorial memory</div>
+                          <div className="mt-2 space-y-2">
+                            {growth.editorialMemory.recentFeedback.map((entry, index) => (
+                              <div key={`feedback-${index}`} className="rounded-lg border border-white/8 bg-black/15 px-3 py-2">
+                                <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">{entry.decision} • {entry.archetype || 'unknown'} • {formatPacificTime(entry.reviewedAtPt)}</div>
+                                <div className="mt-1 text-sm text-foreground/85">{entry.feedback}</div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+                      <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3 text-xs text-foreground/85">
+                        {growth.strategyMemory?.strategyNotes?.length ? growth.strategyMemory.strategyNotes.map((note, index) => (
+                          <div key={`strategy-note-${index}`} className="flex gap-2"><span>•</span><span>{note}</span></div>
+                        )) : <div className="text-muted-foreground">No strategy memory yet.</div>}
+                      </div>
+                    </div>
+                  </CollapsibleSection>
+                </>
+              )}
+            </div>
+          </div>
         </div>
       ) : null}
     </div>

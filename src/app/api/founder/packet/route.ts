@@ -1042,11 +1042,14 @@ function normalizeApprovedPosts(input: unknown): Array<{
         approvedAtPt: String(record.approved_at_pt || '').trim(),
         scheduledAt: String(record.scheduled_at || '').trim() || null,
         scheduledAtPt: String(record.scheduled_at_pt || '').trim() || null,
+        postedAt: String(record.posted_at || '').trim() || null,
+        postedAtPt: String(record.posted_at_pt || '').trim() || null,
         scheduleSource: String(record.schedule_source || '').trim() || null,
         scheduleNote: String(record.schedule_note || '').trim() || null,
         variantFamilyId: String(record.variant_family_id || '').trim() || null,
         distributionType: String(record.distribution_type || '').trim() || undefined,
         sourceType: String(record.source_type || '').trim() || undefined,
+        sourceAccount: String(record.source_account || '').trim() || null,
         selectionReason: String(record.selection_reason || '').trim() || undefined,
         tweetId: String(record.tweet_id || '').trim(),
         tweetUrl: String(record.tweet_url || '').trim() || (record.tweet_id ? `https://x.com/i/web/status/${record.tweet_id}` : null),
@@ -1063,11 +1066,14 @@ function normalizeApprovedPosts(input: unknown): Array<{
       approvedAtPt: string
       scheduledAt?: string | null
       scheduledAtPt?: string | null
+      postedAt?: string | null
+      postedAtPt?: string | null
       scheduleSource?: string | null
       scheduleNote?: string | null
       variantFamilyId?: string | null
       distributionType?: string
       sourceType?: string
+      sourceAccount?: string | null
       selectionReason?: string
       tweetId?: string
       tweetUrl?: string | null
