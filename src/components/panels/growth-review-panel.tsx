@@ -293,6 +293,29 @@ interface GrowthApiResponse {
       publishError?: string | null
     }>
     publishLog?: Array<{ id?: string; tweet_url?: string | null; posted_at_pt?: string; distribution_type?: string; source_type?: string; pillar?: string; angle?: string }>
+    followQueue?: Array<{
+      id: string
+      username: string
+      accountId?: string | null
+      state?: string
+      role?: string
+      reason?: string
+      sourceUrl?: string | null
+      clusterLabel?: string
+      score?: number
+      status?: string
+      createdAt?: string | null
+      updatedAt?: string | null
+      followedAt?: string | null
+      followError?: string | null
+    }>
+    followLog?: Array<{
+      username: string
+      accountId?: string | null
+      status?: string
+      datePt?: string | null
+      createdAt?: string | null
+    }>
     resultsSummary?: {
       postedCount: number
       syncedPostCount?: number
@@ -1134,6 +1157,8 @@ export function GrowthReviewPanel() {
   const selectedOpportunities = useMemo(() => growth?.selectedOpportunities || [], [growth])
   const blockedOpportunities = useMemo(() => growth?.blockedOpportunities || [], [growth])
   const watchOnlyOpportunities = useMemo(() => growth?.watchOnlyOpportunities || [], [growth])
+  const followQueue = useMemo(() => growth?.followQueue || [], [growth])
+  const followLog = useMemo(() => growth?.followLog || [], [growth])
   const reactiveOpportunities = selectedOpportunities.filter((opportunity) => opportunity.distributionType === 'reply' || opportunity.distributionType === 'quote')
   const standaloneOpportunities = selectedOpportunities.filter((opportunity) => opportunity.distributionType === 'original')
   const reactiveOpportunityFamilies = useMemo(() => {
@@ -1171,6 +1196,15 @@ export function GrowthReviewPanel() {
   const readyToSchedule = readyPosts.length
   const scheduledCount = scheduledPosts.length
   const lowConfidenceCount = growth?.freshness?.lowConfidenceClusters?.length ?? 0
+  const todayPt = useMemo(() => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles' }).format(new Date()), [])
+  const pendingFollows = useMemo(
+    () => followQueue.filter((entry) => String(entry.status || 'pending').trim().toLowerCase() === 'pending'),
+    [followQueue],
+  )
+  const completedFollowsToday = useMemo(
+    () => followLog.filter((entry) => String(entry.datePt || '').trim() === todayPt).length,
+    [followLog, todayPt],
+  )
   const publishedCount = publishedPosts.length || growth?.resultsSummary?.postedCount || 0
   const syncedPublishedCount = Number(growth?.resultsSummary?.syncedPostCount || growth?.strategyMemory?.performance?.syncedPostCount || 0)
   const publishAttempts = Number(growth?.resultsSummary?.publishAttempts || growth?.strategyMemory?.performance?.publishAttempts || 0)
@@ -1678,6 +1712,56 @@ export function GrowthReviewPanel() {
                   ))}
                 </div>
               ) : <div className="text-sm text-muted-foreground">No watchlist recommendations yet.</div>}
+
+              {(followQueue.length || followLog.length) ? (
+                <details className="rounded-xl border border-white/8 bg-black/20 p-4">
+                  <summary className="cursor-pointer list-none text-sm font-medium text-foreground">
+                    Follow queue {pendingFollows.length ? `(${pendingFollows.length} pending)` : ''}
+                  </summary>
+                  <div className="mt-2 text-xs text-foreground/70">
+                    Auto-follow runs conservatively from the current week snapshot so the account can grow without spiking activity.
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <FieldChip>{pendingFollows.length} pending</FieldChip>
+                    <FieldChip>{completedFollowsToday} followed today</FieldChip>
+                    <FieldChip>cap 8/day</FieldChip>
+                  </div>
+                  {pendingFollows.length ? (
+                    <div className="mt-3 space-y-2">
+                      {pendingFollows.slice(0, 6).map((entry) => (
+                        <div key={entry.id} className="rounded-xl border border-white/8 bg-black/15 px-3 py-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div>
+                              <div className="font-medium text-foreground">{displayUsername(entry.username)}</div>
+                              <div className="mt-1 text-xs text-muted-foreground">
+                                {entry.clusterLabel || 'Watchlist follow candidate'}{entry.role ? ` • ${entry.role}` : ''}
+                              </div>
+                            </div>
+                            {typeof entry.score === 'number' ? <FieldChip>score {entry.score}</FieldChip> : null}
+                          </div>
+                          {entry.reason ? <div className="mt-2 text-sm text-foreground/82">{entry.reason}</div> : null}
+                          {entry.sourceUrl ? <a href={entry.sourceUrl} target="_blank" rel="noreferrer" className="mt-3 inline-block text-xs text-cyan-200 hover:text-cyan-100">Open source</a> : null}
+                        </div>
+                      ))}
+                    </div>
+                  ) : <div className="mt-3 text-sm text-muted-foreground">No pending follows right now.</div>}
+                  {followLog.length ? (
+                    <div className="mt-4 rounded-xl border border-white/8 bg-black/15 px-3 py-3">
+                      <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Recent follow activity</div>
+                      <div className="mt-2 space-y-2">
+                        {followLog.slice(0, 5).map((entry, index) => (
+                          <div key={`${entry.username}-${entry.createdAt || index}`} className="flex items-center justify-between gap-3 text-sm">
+                            <div className="text-foreground/88">{displayUsername(entry.username)}</div>
+                            <div className="text-xs text-muted-foreground">
+                              {entry.status || 'followed'}{entry.datePt ? ` • ${entry.datePt}` : ''}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                </details>
+              ) : null}
 
               {growth.sourceCandidates.length ? (
                 <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">

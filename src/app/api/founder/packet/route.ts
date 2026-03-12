@@ -14,6 +14,7 @@ const SIGNAL_LEDGER_PATH = path.join(HABI_ROOT, 'output', 'founder', 'customer-s
 const PRODUCT_PROOF_PATH = path.join(HABI_ROOT, 'output', 'founder', 'product-proof-ledger.json')
 const ADOPTION_SCORECARD_PATH = path.join(HABI_ROOT, 'output', 'revenue', 'revenue-escape-scorecard.json')
 const GROWTH_WEEKS_ROOT = path.join(HABI_ROOT, 'output', 'growth', 'weeks')
+const GROWTH_FOLLOW_LOG_PATH = path.join(HABI_ROOT, 'output', 'growth', 'follow-log.json')
 
 async function readJsonOrNull<T>(filePath: string): Promise<T | null> {
   try {
@@ -1574,6 +1575,7 @@ export async function GET(request: NextRequest) {
           editorialMemoryPath: path.join(GROWTH_WEEKS_ROOT, latestGrowthWeek, 'editorial-memory.json'),
           sourceMemoryPath: path.join(GROWTH_WEEKS_ROOT, latestGrowthWeek, 'source-memory.json'),
           publishLogPath: path.join(GROWTH_WEEKS_ROOT, latestGrowthWeek, 'publish-log.json'),
+          followQueuePath: path.join(GROWTH_WEEKS_ROOT, latestGrowthWeek, 'follow-queue.json'),
         }
       : null
     const growthResearch = growthPaths ? await readJsonOrNull<any>(growthPaths.researchBriefPath) : null
@@ -1587,6 +1589,8 @@ export async function GET(request: NextRequest) {
     const growthEditorialMemory = growthPaths ? await readJsonOrNull<any>(growthPaths.editorialMemoryPath) : null
     const growthSourceMemory = growthPaths ? await readJsonOrNull<any>(growthPaths.sourceMemoryPath) : null
     const growthPublishLog = growthPaths ? await readJsonOrNull<any>(growthPaths.publishLogPath) : null
+    const growthFollowQueue = growthPaths ? await readJsonOrNull<any[]>(growthPaths.followQueuePath) : null
+    const growthFollowLog = await readJsonOrNull<any[]>(GROWTH_FOLLOW_LOG_PATH)
     const repeatedPains = summarizeRepeatedPains(signalLedger)
     const workspaceId = auth.user.workspace_id ?? 1
 
@@ -1700,6 +1704,8 @@ export async function GET(request: NextRequest) {
         approvedPosts: normalizedApprovedPosts,
         resultsSummary: normalizeResultsSummary(growthResultsSummary),
         publishLog: Array.isArray(growthPublishLog) ? growthPublishLog.slice(-5).reverse() : [],
+        followQueue: Array.isArray(growthFollowQueue) ? growthFollowQueue : [],
+        followLog: Array.isArray(growthFollowLog) ? growthFollowLog.slice(-10).reverse() : [],
         scorecard: growthScorecard,
       },
       tasks: loadTaskSnapshot(workspaceId),
