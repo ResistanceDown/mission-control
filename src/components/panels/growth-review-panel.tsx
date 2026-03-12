@@ -537,7 +537,7 @@ function OpportunityCard({
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-sm font-semibold text-foreground">{opportunity.title || 'Opportunity'}</div>
-          <div className="mt-1 line-clamp-2 text-xs text-foreground/70">{summaryReason}</div>
+          <div className="mt-1 text-xs text-foreground/70">{summaryReason}</div>
           <div className="mt-2 flex flex-wrap gap-2">
             {opportunity.distributionType ? <FieldChip>{opportunity.distributionType}</FieldChip> : null}
             {opportunity.confidence ? <FieldChip>{opportunity.confidence}</FieldChip> : null}
@@ -551,6 +551,11 @@ function OpportunityCard({
           {blocked ? opportunity.sourceState.replace(/_/g, ' ') : 'selected'}
         </span>
       </div>
+      {opportunity.sourceText ? (
+        <div className="mt-4 rounded-xl border border-white/8 bg-black/15 px-3 py-3 text-sm leading-6 text-foreground/88 whitespace-pre-wrap">
+          {opportunity.sourceText}
+        </div>
+      ) : null}
       <div className="mt-4 flex flex-wrap gap-2">
         {!blocked && onAction ? (
           <button
@@ -583,21 +588,14 @@ function OpportunityCard({
       </div>
       <details className="mt-4 rounded-xl border border-white/8 bg-black/20 px-3 py-3">
         <summary className="cursor-pointer list-none text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Details</summary>
-        <div className="mt-3 grid gap-3 lg:grid-cols-[1.15fr_0.85fr]">
+        <div className="mt-3 grid gap-3 lg:grid-cols-[1.05fr_0.95fr]">
           <div className="space-y-3">
-            {opportunity.sourceText ? (
-              <div className="rounded-xl border border-white/8 bg-black/15 px-3 py-3 text-sm leading-6 text-foreground/88">
-                {opportunity.sourceText}
-              </div>
-            ) : null}
-            {opportunity.whyNow && opportunity.whyNow !== opportunity.selectionReason ? (
+            {opportunity.whyNow ? (
               <div className="rounded-xl border border-white/8 bg-black/15 px-3 py-3">
                 <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Why now</div>
                 <div className="mt-1 text-sm text-foreground/90">{opportunity.whyNow}</div>
               </div>
             ) : null}
-          </div>
-          <div className="space-y-3">
             <div className="rounded-xl border border-white/8 bg-black/15 px-3 py-3">
               <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Source truth</div>
               <div className="mt-1 text-sm text-foreground/90">
@@ -613,6 +611,8 @@ function OpportunityCard({
                 </div>
               ) : null}
             </div>
+          </div>
+          <div className="space-y-3">
             {opportunity.selectionFactors?.length ? (
               <div className="rounded-xl border border-white/8 bg-black/15 px-3 py-3">
                 <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Why it ranked</div>
@@ -714,42 +714,35 @@ function OpportunityLane({
 }
 
 function OpportunityFamilyGroup({
-  familyLabel,
   sourceLabel,
   opportunities,
   feedbackDrafts,
   onFeedbackChange,
   onAction,
   saving,
-  defaultOpen,
 }: {
-  familyLabel: string
   sourceLabel: string
   opportunities: GrowthApiResponse['growth']['selectedOpportunities']
   feedbackDrafts: Record<string, string>
   onFeedbackChange: (opportunityId: string, value: string) => void
   onAction: (action: GrowthAction, draftId?: string, extra?: Record<string, unknown>) => void
   saving: boolean
-  defaultOpen?: boolean
 }) {
   if (!opportunities.length) return null
   const leader = opportunities[0]
   return (
-    <details
-      open={defaultOpen}
-      className="rounded-2xl border border-cyan-500/15 bg-[#0f151d] p-4 shadow-[0_18px_40px_rgba(0,0,0,0.26)] group"
-    >
-      <summary className="flex cursor-pointer list-none flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+    <article className="rounded-2xl border border-cyan-500/15 bg-[#0f151d] p-4 shadow-[0_18px_40px_rgba(0,0,0,0.26)]">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <div className="mt-1 text-sm font-semibold text-foreground">{sourceLabel}</div>
-          <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">{leader.selectionReason || leader.whyNow || 'Review this source before drafting.'}</div>
+          <div className="mt-1 line-clamp-1 text-xs text-muted-foreground">{leader.selectionReason || leader.whyNow || 'Review this source before drafting.'}</div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {leader.distributionType ? <FieldChip>{leader.distributionType}</FieldChip> : null}
           {leader.confidence ? <FieldChip>{leader.confidence}</FieldChip> : null}
           {opportunities.length > 1 ? <FieldChip>{opportunities.length} moves</FieldChip> : null}
         </div>
-      </summary>
+      </div>
       <div className="mt-4 space-y-3">
         {opportunities.map((opportunity) => (
           <OpportunityCard
@@ -762,7 +755,7 @@ function OpportunityFamilyGroup({
           />
         ))}
       </div>
-    </details>
+    </article>
   )
 }
 
@@ -774,7 +767,6 @@ function OpportunityFamilyLane({
   onFeedbackChange,
   onAction,
   saving,
-  defaultOpen = true,
 }: {
   title: string
   subtitle: string
@@ -783,7 +775,6 @@ function OpportunityFamilyLane({
   onFeedbackChange: (opportunityId: string, value: string) => void
   onAction: (action: GrowthAction, draftId?: string, extra?: Record<string, unknown>) => void
   saving: boolean
-  defaultOpen?: boolean
 }) {
   if (!families.length) return null
   return (
@@ -796,17 +787,15 @@ function OpportunityFamilyLane({
         <FieldChip>{families.length} families</FieldChip>
       </div>
       <div className="grid gap-3 xl:grid-cols-2">
-        {families.map((family, familyIndex) => (
+        {families.map((family) => (
           <OpportunityFamilyGroup
             key={family.key}
-            familyLabel={family.familyLabel}
             sourceLabel={family.sourceLabel}
             opportunities={family.opportunities}
             feedbackDrafts={feedbackDrafts}
             onFeedbackChange={onFeedbackChange}
             onAction={onAction}
             saving={saving}
-            defaultOpen={defaultOpen && familyIndex === 0 && families.length === 1}
           />
         ))}
       </div>
@@ -1485,6 +1474,7 @@ export function GrowthReviewPanel() {
                     onFeedbackChange={(opportunityId, value) => setOpportunityFeedback((current) => ({ ...current, [opportunityId]: value }))}
                     onAction={runGrowthAction}
                     saving={actionState.status === 'saving'}
+                    defaultOpen={!reactiveOpportunityFamilies.length}
                   />
                 </div>
               ) : (
@@ -1590,6 +1580,7 @@ export function GrowthReviewPanel() {
               <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3 text-sm text-foreground/85">
                 <div><strong className="text-foreground">Primary goal:</strong> {growth.strategy?.primaryGoal || 'No strategy generated yet.'}</div>
                 <div className="mt-2 text-xs text-muted-foreground">Last pull {formatPacificTime(growth.freshness?.lastXPullAt || growth.researchGeneratedAt || null)} • {growth.freshness?.queryCount ?? 0} queries • {growth.freshness?.sampleSize ?? 0} samples</div>
+                <div className="mt-1 text-xs text-foreground/60">Using the current week snapshot as the working cache until research is refreshed.</div>
               </div>
               {growth.trendClusters.length ? growth.trendClusters.map((cluster) => (
                 <div key={cluster.id} className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
