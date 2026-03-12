@@ -1194,8 +1194,14 @@ export function GrowthReviewPanel() {
   const [voiceDirection, setVoiceDirection] = useState('')
   const [scheduleDrafts, setScheduleDrafts] = useState<Record<string, { when: string; note: string }>>({})
   const [publishDrafts, setPublishDrafts] = useState<Record<string, { tweetUrl: string; tweetId: string }>>({})
-  const [topDraftRewritePrompt, setTopDraftRewritePrompt] = useState('')
   const [deskMode, setDeskMode] = useState<'act' | 'queue' | 'signals'>('act')
+  const [activeDrawer, setActiveDrawer] = useState<'queue' | 'signals' | null>(null)
+  const [selection, setSelection] = useState<
+    | { kind: 'opportunity'; id: string }
+    | { kind: 'draft'; familyId: string; draftId: string }
+    | { kind: 'queue'; status: 'ready' | 'scheduled' | 'failed' | 'published'; id: string }
+    | null
+  >(null)
 
   const growth = data?.growth ?? null
   const byId = useMemo(() => new Map((growth?.draftCandidates || []).map((draft) => [draft.id, draft])), [growth?.draftCandidates])
@@ -1322,9 +1328,6 @@ export function GrowthReviewPanel() {
     }
     return sortedForGrowth[0] || growth.draftCandidates[0] || null
   }, [growth, sortedForGrowth, topOpportunity])
-  useEffect(() => {
-    setTopDraftRewritePrompt('')
-  }, [topDraft?.id])
   const nextScheduledPost = useMemo(() => {
     if (!scheduledPosts.length) return null
     return [...scheduledPosts].sort((left, right) => {
@@ -1360,9 +1363,118 @@ export function GrowthReviewPanel() {
     { key: 'refresh', label: 'Refresh', action: () => void runGrowthAction('refresh_research') },
     { key: 'select', label: 'Select', action: () => void runGrowthAction('select_opportunities') },
     { key: 'drafts', label: candidateCount ? 'Clear drafts' : 'Generate drafts', action: () => void runGrowthAction(candidateCount ? 'clear_current_drafts' : 'generate_drafts', undefined, candidateCount ? {} : { voiceDirection }) },
-    { key: 'queue', label: 'Open queue', action: () => setDeskMode('queue') },
-    { key: 'signals', label: 'Open signals', action: () => setDeskMode('signals') },
+    { key: 'queue', label: 'Open queue', action: () => setActiveDrawer((current) => current === 'queue' ? null : 'queue') },
+    { key: 'signals', label: 'Open signals', action: () => setActiveDrawer((current) => current === 'signals' ? null : 'signals') },
   ]
+
+  const fallbackOpportunityFamilies = useMemo(() => {
+    const grouped = new Map<string, GrowthApiResponse['growth']['selectedOpportunities']>()
+    for (const opportunity of standaloneOpportunities) {
+      const key = String(opportunity.sourceFamilyKey || opportunity.sourceUrl || opportunity.id).trim()
+      if (!grouped.has(key)) grouped.set(key, [])
+      grouped.get(key)!.push(opportunity)
+    }
+    return Array.from(grouped.entries()).map(([key, family]) => {
+      const leader = family[0]
+      return {
+        key,
+        sourceLabel: leader.sourceAccount || leader.title || 'Fallback original',
+        opportunities: family,
+      }
+    })
+  }, [standaloneOpportunities])
+
+  const draftFamilyModels = useMemo(
+    () =>
+      groupedDraftCandidates.map((drafts) => {
+        const leader = drafts[0]
+        const familyId = String(leader.variant_family_id || leader.id)
+        return {
+          familyId,
+          leader,
+          drafts,
+          sourceLabel: leader.source_account || leader.source_tweet?.author?.username || leader.pillar || 'Draft family',
+          familyLabel: leader.variant_group_label || `${drafts.length} variants`,
+        }
+      }),
+    [groupedDraftCandidates],
+  )
+
+  const queueSections = useMemo(
+    () => [
+      { key: 'ready' as const, title: 'Ready', items: readyPosts },
+      { key: 'scheduled' as const, title: 'Scheduled', items: scheduledPosts },
+      { key: 'failed' as const, title: 'Failed', items: failedPosts },
+      { key: 'published' as const, title: 'Published', items: publishedPosts },
+    ],
+    [readyPosts, scheduledPosts, failedPosts, publishedPosts],
+  )
+
+  const allQueueItems = useMemo(
+    () => queueSections.flatMap((section) => section.items.map((item) => ({ status: section.key, item }))),
+    [queueSections],
+  )
+
+  useEffect(() => {
+    const nextSelection = (() => {
+      if (draftFamilyModels.length) {
+        const firstFamily = draftFamilyModels[0]
+        return { kind: 'draft' as const, familyId: firstFamily.familyId, draftId: firstFamily.drafts[0].id }
+      }
+      if (reactiveOpportunityFamilies.length) {
+        return { kind: 'opportunity' as const, id: reactiveOpportunityFamilies[0].opportunities[0].id }
+      }
+      if (fallbackOpportunityFamilies.length) {
+        return { kind: 'opportunity' as const, id: fallbackOpportunityFamilies[0].opportunities[0].id }
+      }
+      if (allQueueItems.length) {
+        return { kind: 'queue' as const, status: allQueueItems[0].status, id: allQueueItems[0].item.id }
+      }
+      return null
+    })()
+
+    const selectionStillValid =
+      selection?.kind === 'draft'
+        ? draftFamilyModels.some((family) => family.familyId === selection.familyId && family.drafts.some((draft) => draft.id === selection.draftId))
+        : selection?.kind === 'opportunity'
+          ? selectedOpportunities.some((opportunity) => opportunity.id === selection.id)
+          : selection?.kind === 'queue'
+            ? allQueueItems.some((entry) => entry.status === selection.status && entry.item.id === selection.id)
+            : false
+
+    if (!selectionStillValid) {
+      setSelection(nextSelection)
+    }
+  }, [allQueueItems, draftFamilyModels, fallbackOpportunityFamilies, reactiveOpportunityFamilies, selectedOpportunities, selection])
+
+  const selectedOpportunity = useMemo(() => {
+    if (selection?.kind !== 'opportunity') return null
+    return selectedOpportunities.find((opportunity) => opportunity.id === selection.id) || null
+  }, [selectedOpportunities, selection])
+
+  const selectedDraftFamily = useMemo(() => {
+    if (selection?.kind !== 'draft') return draftFamilyModels[0] || null
+    return draftFamilyModels.find((family) => family.familyId === selection.familyId) || draftFamilyModels[0] || null
+  }, [draftFamilyModels, selection])
+
+  const selectedDraft = useMemo(() => {
+    if (!selectedDraftFamily) return null
+    if (selection?.kind !== 'draft') return selectedDraftFamily.drafts[0] || null
+    return selectedDraftFamily.drafts.find((draft) => draft.id === selection.draftId) || selectedDraftFamily.drafts[0] || null
+  }, [selectedDraftFamily, selection])
+
+  const selectedQueueEntry = useMemo(() => {
+    if (selection?.kind !== 'queue') return null
+    return allQueueItems.find((entry) => entry.status === selection.status && entry.item.id === selection.id) || null
+  }, [allQueueItems, selection])
+
+  const inspectorMode: 'opportunity' | 'draft' | 'queue' | 'empty' = selectedDraft
+    ? 'draft'
+    : selectedOpportunity
+      ? 'opportunity'
+      : selectedQueueEntry
+        ? 'queue'
+        : 'empty'
 
   const patchAccountTargetState = useCallback((usernameInput: string, nextState: 'watch' | 'prioritize' | 'mute' | 'engage_this_week', note: string) => {
     const normalized = displayUsername(usernameInput).replace(/^@/, '').trim().toLowerCase()
