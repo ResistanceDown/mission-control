@@ -42,6 +42,10 @@ interface GrowthApiResponse {
       lastXPullAt?: string | null
       sampleSize?: number
       queryCount?: number
+      cacheUsed?: boolean
+      cacheAgeMinutes?: number
+      forcedRefresh?: boolean
+      discoveryTriggered?: boolean
       lowConfidenceClusters?: Array<{ id: string; label: string; tweetCount: number; reason: string }>
     } | null
     strategy: {
@@ -303,6 +307,8 @@ interface GrowthApiResponse {
       sourceUrl?: string | null
       clusterLabel?: string
       score?: number
+      followType?: 'proactive' | 'engagement' | string
+      countsTowardDailyCap?: boolean
       status?: string
       createdAt?: string | null
       updatedAt?: string | null
@@ -315,6 +321,8 @@ interface GrowthApiResponse {
       status?: string
       datePt?: string | null
       createdAt?: string | null
+      followType?: 'proactive' | 'engagement' | string
+      countsTowardDailyCap?: boolean
     }>
     resultsSummary?: {
       postedCount: number
@@ -1201,8 +1209,20 @@ export function GrowthReviewPanel() {
     () => followQueue.filter((entry) => String(entry.status || 'pending').trim().toLowerCase() === 'pending'),
     [followQueue],
   )
-  const completedFollowsToday = useMemo(
-    () => followLog.filter((entry) => String(entry.datePt || '').trim() === todayPt).length,
+  const pendingProactiveFollows = useMemo(
+    () => pendingFollows.filter((entry) => entry.countsTowardDailyCap !== false),
+    [pendingFollows],
+  )
+  const pendingEngagementFollows = useMemo(
+    () => pendingFollows.filter((entry) => entry.countsTowardDailyCap === false),
+    [pendingFollows],
+  )
+  const completedProactiveFollowsToday = useMemo(
+    () => followLog.filter((entry) => String(entry.datePt || '').trim() === todayPt && entry.countsTowardDailyCap !== false).length,
+    [followLog, todayPt],
+  )
+  const completedEngagementFollowsToday = useMemo(
+    () => followLog.filter((entry) => String(entry.datePt || '').trim() === todayPt && entry.countsTowardDailyCap === false).length,
     [followLog, todayPt],
   )
   const publishedCount = publishedPosts.length || growth?.resultsSummary?.postedCount || 0
@@ -1624,7 +1644,12 @@ export function GrowthReviewPanel() {
               <div className="rounded-xl border border-white/8 bg-black/20 px-3 py-3 text-sm text-foreground/85">
                 <div><strong className="text-foreground">Primary goal:</strong> {growth.strategy?.primaryGoal || 'No strategy generated yet.'}</div>
                 <div className="mt-2 text-xs text-muted-foreground">Last pull {formatPacificTime(growth.freshness?.lastXPullAt || growth.researchGeneratedAt || null)} • {growth.freshness?.queryCount ?? 0} queries • {growth.freshness?.sampleSize ?? 0} samples</div>
-                <div className="mt-1 text-xs text-foreground/60">Using the current week snapshot as the working cache until research is refreshed.</div>
+                <div className="mt-1 text-xs text-foreground/60">
+                  {growth.freshness?.cacheUsed
+                    ? `Using cached snapshot (${Number(growth.freshness?.cacheAgeMinutes || 0).toFixed(0)} min old) until research is refreshed.`
+                    : 'Using a fresh current-week snapshot.'}
+                  {growth.freshness?.discoveryTriggered ? ' Fallback discovery was used because the live lane was thin.' : ' Neighborhood-first research stayed within the current target lane.'}
+                </div>
               </div>
               {growth.trendClusters.length ? growth.trendClusters.map((cluster) => (
                 <div key={cluster.id} className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
@@ -1719,12 +1744,14 @@ export function GrowthReviewPanel() {
                     Follow queue {pendingFollows.length ? `(${pendingFollows.length} pending)` : ''}
                   </summary>
                   <div className="mt-2 text-xs text-foreground/70">
-                    Auto-follow runs conservatively from the current week snapshot so the account can grow without spiking activity.
+                    Proactive follows are budgeted separately from engagement-triggered follows, so posting activity does not consume neighborhood-growth capacity.
                   </div>
                   <div className="mt-3 flex flex-wrap gap-2">
-                    <FieldChip>{pendingFollows.length} pending</FieldChip>
-                    <FieldChip>{completedFollowsToday} followed today</FieldChip>
-                    <FieldChip>cap 8/day</FieldChip>
+                    <FieldChip>{pendingProactiveFollows.length} proactive pending</FieldChip>
+                    <FieldChip>{pendingEngagementFollows.length} engagement pending</FieldChip>
+                    <FieldChip>{completedProactiveFollowsToday} proactive followed today</FieldChip>
+                    <FieldChip>{completedEngagementFollowsToday} engagement followed today</FieldChip>
+                    <FieldChip>cap 15/day proactive</FieldChip>
                   </div>
                   {pendingFollows.length ? (
                     <div className="mt-3 space-y-2">
@@ -1734,7 +1761,7 @@ export function GrowthReviewPanel() {
                             <div>
                               <div className="font-medium text-foreground">{displayUsername(entry.username)}</div>
                               <div className="mt-1 text-xs text-muted-foreground">
-                                {entry.clusterLabel || 'Watchlist follow candidate'}{entry.role ? ` • ${entry.role}` : ''}
+                                {entry.clusterLabel || 'Watchlist follow candidate'}{entry.role ? ` • ${entry.role}` : ''}{entry.followType ? ` • ${entry.followType}` : ''}
                               </div>
                             </div>
                             {typeof entry.score === 'number' ? <FieldChip>score {entry.score}</FieldChip> : null}

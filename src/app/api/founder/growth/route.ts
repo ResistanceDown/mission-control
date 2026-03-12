@@ -195,8 +195,8 @@ function buildDraftQueueMarkdown(weekId: string, researchPath: string, drafts: A
   return `${lines.join('\n')}\n`
 }
 
-async function runGrowthCommand(script: string, week: string) {
-  const { stdout, stderr } = await execFileAsync('pnpm', [script, '--', '--week', week], {
+async function runGrowthCommand(script: string, week: string, extraArgs: string[] = []) {
+  const { stdout, stderr } = await execFileAsync('pnpm', [script, '--', '--week', week, ...extraArgs], {
     cwd: HABI_ROOT,
     env: process.env,
   })
@@ -764,7 +764,7 @@ export async function POST(request: NextRequest) {
         await sanitizeDraftPack(draftPackJsonPath)
         await runGrowthCommand('growth:m92:week-open', week)
         await runGrowthCommand('growth:m92:results-sync', week)
-        await runGrowthCommand('growth:m92:research-brief', week)
+        await runGrowthCommand('growth:m92:research-brief', week, ['--force-refresh', 'true'])
         return NextResponse.json({ status: 'ok', action: 'refresh_research', week })
       }
       case 'select_opportunities': {
@@ -878,7 +878,7 @@ export async function POST(request: NextRequest) {
         await sanitizeDraftPack(draftPackJsonPath)
         await runGrowthCommand('growth:m92:week-open', week)
         await runGrowthCommand('growth:m92:results-sync', week)
-        await runGrowthCommand('growth:m92:research-brief', week)
+        await runGrowthCommand('growth:m92:research-brief', week, ['--force-refresh', 'true'])
         await runGrowthCommand('growth:m92:select-opportunities', week)
         return NextResponse.json({ status: 'ok', action: 'refresh_research_and_select', week })
       }
@@ -886,7 +886,7 @@ export async function POST(request: NextRequest) {
         await sanitizeDraftPack(draftPackJsonPath)
         await runGrowthCommand('growth:m92:week-open', week)
         await runGrowthCommand('growth:m92:results-sync', week)
-        await runGrowthCommand('growth:m92:research-brief', week)
+        await runGrowthCommand('growth:m92:research-brief', week, ['--force-refresh', 'true'])
         await runGrowthCommand('growth:m92:select-opportunities', week)
         await runGrowthCommand('growth:m92:draft-pack', week)
         return NextResponse.json({ status: 'ok', action: 'refresh_research_and_generate', week })
