@@ -1750,7 +1750,7 @@ export function GrowthReviewPanel() {
               </div>
               <FieldChip>{selectedOpportunities.length}</FieldChip>
             </div>
-            <div className="mt-4 grid gap-3 xl:grid-cols-2">
+            <div className="mt-4 space-y-3">
               {compactOpportunities.length ? compactOpportunities.map((family) => {
                 const leader = family.opportunities[0]
                 const isSelected = selectedOpportunitySourceFamilyKey === (leader.sourceFamilyKey || leader.sourceUrl || leader.id)
@@ -1807,35 +1807,60 @@ export function GrowthReviewPanel() {
               <FieldChip>{groupedDraftCandidates.length}</FieldChip>
             </div>
             <div className="mt-4 space-y-3">
-              {draftFamilyModels.length ? draftFamilyModels.map((family) => {
-                const familyOpen = selectedDraftFamilyId === family.familyId || draftFamilyModels.length === 1
-                return (
-                  <details key={family.familyId} open={familyOpen} className="rounded-2xl border border-white/8 bg-black/20 p-4">
-                    <summary className="cursor-pointer list-none">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <div className="text-sm font-semibold text-foreground">{family.sourceLabel}</div>
-                          <div className="mt-1 text-xs text-muted-foreground">{family.familyLabel} • {family.drafts.length} variants</div>
-                        </div>
-                        {family.leader.distribution_type ? <FieldChip>{family.leader.distribution_type}</FieldChip> : null}
-                      </div>
-                    </summary>
-                    <div className="mt-3 space-y-2">
-                      {family.drafts.map((draft) => {
-                        const isSelected = selectedDraft?.id === draft.id
+              {draftFamilyModels.length ? (
+                <>
+                  {draftFamilyModels.length > 1 ? (
+                    <div className="flex flex-wrap gap-2">
+                      {draftFamilyModels.map((family) => {
+                        const isSelectedFamily = selectedDraftFamilyId === family.familyId
                         return (
-                          <DraftSelectorCard
-                            key={draft.id}
-                            draft={draft}
-                            selected={isSelected}
-                            onSelect={() => setSelection({ kind: 'draft', familyId: family.familyId, draftId: draft.id })}
-                          />
+                          <button
+                            key={`family-switch-${family.familyId}`}
+                            type="button"
+                            onClick={() => setSelection({ kind: 'draft', familyId: family.familyId, draftId: family.drafts[0].id })}
+                            className={cx(
+                              'rounded-full border px-3 py-2 text-left text-xs font-medium transition-smooth',
+                              isSelectedFamily
+                                ? 'border-cyan-500/30 bg-cyan-500/12 text-cyan-100'
+                                : 'border-white/10 bg-black/20 text-foreground hover:bg-surface-2',
+                            )}
+                          >
+                            {family.sourceLabel} • {family.drafts.length} variants
+                          </button>
                         )
                       })}
                     </div>
-                  </details>
-                )
-              }) : (
+                  ) : null}
+
+                  {selectedDraftFamily ? (
+                    <div className="rounded-2xl border border-white/8 bg-black/20 p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="text-sm font-semibold text-foreground">{selectedDraftFamily.sourceLabel}</div>
+                          <div className="mt-1 text-xs text-muted-foreground">{selectedDraftFamily.familyLabel}</div>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <FieldChip>{selectedDraftFamily.drafts.length} variants</FieldChip>
+                          {selectedDraftFamily.leader.distribution_type ? <FieldChip>{selectedDraftFamily.leader.distribution_type}</FieldChip> : null}
+                        </div>
+                      </div>
+                      <div className="mt-3 space-y-2">
+                        {selectedDraftFamily.drafts.map((draft) => {
+                          const isSelected = selectedDraft?.id === draft.id
+                          return (
+                            <DraftSelectorCard
+                              key={draft.id}
+                              draft={draft}
+                              selected={isSelected}
+                              onSelect={() => setSelection({ kind: 'draft', familyId: selectedDraftFamily.familyId, draftId: draft.id })}
+                            />
+                          )
+                        })}
+                      </div>
+                    </div>
+                  ) : null}
+                </>
+              ) : (
                 <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-4 text-sm text-muted-foreground">
                   {selectedOpportunities.length
                     ? 'Opportunities are ready. Generate drafts from the selected move.'
