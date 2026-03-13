@@ -37,6 +37,20 @@ const INFER_FROM_ACTIVE_ASSIGNMENT_AGENTS = new Set([
   'habi-control',
 ])
 
+function loadCurrentQcAssignment(workspaceId: number): number | null {
+  const db = getDatabase()
+  const rows = db.prepare(`
+    SELECT id, updated_at, created_at
+    FROM tasks
+    WHERE workspace_id = ?
+      AND status IN ('review', 'quality_review')
+    ORDER BY updated_at DESC, created_at DESC, id DESC
+  `).all(workspaceId) as Array<{ id: number; updated_at: number; created_at: number }>
+
+  if (rows.length !== 1) return null
+  return Number(rows[0].id)
+}
+
 function parseGrowthWeek(title: string): number | null {
   const match = String(title).match(/\(week-(\d+)\)/i)
   if (!match) return null
@@ -107,6 +121,7 @@ export function classifyTokenAttribution<T extends { taskId?: number | null; age
 ): Array<TokenAttributionRecord<T>> {
   const activeAssignments = loadActiveAssignments(workspaceId)
   const currentGrowthAssignment = loadCurrentGrowthAssignment(workspaceId)
+  const currentQcAssignment = loadCurrentQcAssignment(workspaceId)
 
   return records.map((record) => {
     const explicitTaskId = normalizeTaskId(record.taskId ?? null)
@@ -116,6 +131,15 @@ export function classifyTokenAttribution<T extends { taskId?: number | null; age
         taskId: explicitTaskId,
         attributionKind: 'task' as const,
         attributionReason: 'explicit_task_id',
+      }
+    }
+
+    if (record.agentName === 'habi-qc' && currentQcAssignment) {
+      return {
+        ...record,
+        taskId: currentQcAssignment,
+        attributionKind: 'task' as const,
+        attributionReason: 'current_qc_assignment',
       }
     }
 
