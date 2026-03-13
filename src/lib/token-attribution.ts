@@ -37,6 +37,13 @@ const INFER_FROM_ACTIVE_ASSIGNMENT_AGENTS = new Set([
   'habi-control',
 ])
 
+function parseGrowthWeek(title: string): number | null {
+  const match = String(title).match(/\(week-(\d+)\)/i)
+  if (!match) return null
+  const week = Number(match[1])
+  return Number.isFinite(week) ? week : null
+}
+
 function normalizeTaskId(value: number | null | undefined): number | null {
   return Number.isFinite(value) && Number(value) > 0 ? Number(value) : null
 }
@@ -62,11 +69,44 @@ function loadActiveAssignments(workspaceId: number): Map<string, number[]> {
   return out
 }
 
+function loadCurrentGrowthAssignment(workspaceId: number): number | null {
+  const db = getDatabase()
+  const rows = db.prepare(`
+    SELECT id, title, created_at, updated_at
+    FROM tasks
+    WHERE workspace_id = ?
+      AND assigned_to = 'habi-growth'
+      AND status IN ('assigned', 'in_progress')
+    ORDER BY updated_at DESC, created_at DESC, id DESC
+  `).all(workspaceId) as Array<{ id: number; title: string; created_at: number; updated_at: number }>
+
+  if (rows.length === 0) return null
+
+  const ranked = rows
+    .map((row) => ({
+      id: Number(row.id),
+      week: parseGrowthWeek(row.title),
+      updatedAt: Number(row.updated_at),
+      createdAt: Number(row.created_at),
+    }))
+    .sort((a, b) => {
+      const weekA = a.week ?? -1
+      const weekB = b.week ?? -1
+      if (weekA !== weekB) return weekB - weekA
+      if (a.updatedAt !== b.updatedAt) return b.updatedAt - a.updatedAt
+      if (a.createdAt !== b.createdAt) return b.createdAt - a.createdAt
+      return b.id - a.id
+    })
+
+  return ranked[0]?.id ?? null
+}
+
 export function classifyTokenAttribution<T extends { taskId?: number | null; agentName: string; sessionId: string; operation?: string; label?: string }>(
   records: T[],
   workspaceId: number,
 ): Array<TokenAttributionRecord<T>> {
   const activeAssignments = loadActiveAssignments(workspaceId)
+  const currentGrowthAssignment = loadCurrentGrowthAssignment(workspaceId)
 
   return records.map((record) => {
     const explicitTaskId = normalizeTaskId(record.taskId ?? null)
@@ -134,6 +174,15 @@ export function classifyTokenAttribution<T extends { taskId?: number | null; age
           attributionKind: 'unattributed' as const,
           attributionReason: 'multiple_active_assignments',
         }
+      }
+    }
+
+    if (record.agentName === 'habi-growth' && currentGrowthAssignment) {
+      return {
+        ...record,
+        taskId: currentGrowthAssignment,
+        attributionKind: 'task' as const,
+        attributionReason: 'current_growth_assignment',
       }
     }
 
