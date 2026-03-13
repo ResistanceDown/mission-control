@@ -3,7 +3,6 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { pathToFileURL } from 'node:url'
 import { requireRole } from '@/lib/auth'
 import { logger } from '@/lib/logger'
 
@@ -243,25 +242,225 @@ type FounderVoiceProfile = {
   bannedPatterns?: string[]
 }
 
-let founderVoiceImportPromise: Promise<{
-  enforceFounderVoice: (text: string, options?: Record<string, unknown>) => string
-  loadFounderVoiceProfile: (cwd?: string) => Promise<FounderVoiceProfile>
-}> | null = null
-
-async function loadFounderVoiceProfile(): Promise<FounderVoiceProfile> {
-  const founderVoiceModule = await loadFounderVoiceModule()
-  const profile = await founderVoiceModule.loadFounderVoiceProfile(HABI_ROOT)
-  return profile || { id: 'habi_founder_v1', bannedPatterns: [] }
+const DEFAULT_FOUNDER_VOICE_PROFILE: FounderVoiceProfile = {
+  id: 'habi_founder_v1',
+  bannedPatterns: [],
 }
 
-async function loadFounderVoiceModule() {
-  if (!founderVoiceImportPromise) {
-    founderVoiceImportPromise = import(pathToFileURL(FOUNDER_VOICE_MODULE_PATH).href) as Promise<{
-      enforceFounderVoice: (text: string, options?: Record<string, unknown>) => string
-      loadFounderVoiceProfile: (cwd?: string) => Promise<FounderVoiceProfile>
-    }>
+async function loadFounderVoiceProfile(): Promise<FounderVoiceProfile> {
+  try {
+    const raw = await fs.readFile(FOUNDER_VOICE_MODULE_PATH.replace(/founder-voice\.mjs$/, '../../config/growth/founder-voice.json'), 'utf8')
+    const parsed = JSON.parse(raw) as FounderVoiceProfile
+    return parsed || DEFAULT_FOUNDER_VOICE_PROFILE
+  } catch {
+    try {
+      const raw = await fs.readFile(path.join(HABI_ROOT, 'config', 'growth', 'founder-voice.json'), 'utf8')
+      const parsed = JSON.parse(raw) as FounderVoiceProfile
+      return parsed || DEFAULT_FOUNDER_VOICE_PROFILE
+    } catch {
+      return DEFAULT_FOUNDER_VOICE_PROFILE
+    }
   }
-  return founderVoiceImportPromise
+}
+
+function normalizeWhitespace(value: unknown) {
+  return String(value || '').replace(/\s+/g, ' ').trim()
+}
+
+function sentenceCase(value: unknown) {
+  const text = normalizeWhitespace(value)
+  if (!text) return ''
+  return text.charAt(0).toUpperCase() + text.slice(1)
+}
+
+function trimVoiceSentence(value: unknown) {
+  return sentenceCase(value).replace(/[.?!]+$/, '')
+}
+
+function ensureVoicePeriod(value: unknown) {
+  const text = trimVoiceSentence(value)
+  return text ? `${text}.` : ''
+}
+
+function lowerFirst(value: unknown) {
+  const text = normalizeWhitespace(value)
+  if (!text) return ''
+  return text.charAt(0).toLowerCase() + text.slice(1)
+}
+
+function splitVoiceSentences(value: unknown) {
+  return normalizeWhitespace(value)
+    .split(/(?<=[.!?])\s+/)
+    .map((part) => normalizeWhitespace(part))
+    .filter(Boolean)
+}
+
+function firstVoiceClause(value: unknown) {
+  return trimVoiceSentence(String(value || '').split(/[.?!]/)[0] || '')
+}
+
+function removeBannedVoicePatterns(text: string, bannedPatterns: string[] = []) {
+  let next = String(text || '')
+  for (const pattern of bannedPatterns) {
+    if (!pattern) continue
+    const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    next = next.replace(new RegExp(`\\b${escaped}\\b`, 'gi'), '')
+  }
+  return normalizeWhitespace(next)
+}
+
+function addSharperVoiceEdge(text: string, sourceText = '') {
+  const trimmed = trimVoiceSentence(text)
+  if (!trimmed) return ''
+  const normalized = trimmed.toLowerCase()
+  if (/^(most|people|that|the problem|the real line|capability|bad systems)/.test(normalized)) {
+    return ensureVoicePeriod(trimmed)
+  }
+  if (/(trust|control|schedule|plan|workflow|friction)/.test(String(sourceText || '').toLowerCase())) {
+    return `The problem usually starts before the failure is obvious: ${lowerFirst(trimmed)}.`
+  }
+  return `Most teams talk around this. ${trimmed}.`
+}
+
+function addQuietlyDangerousVoice(text: string, sourceText = '') {
+  const trimmed = trimVoiceSentence(text)
+  if (!trimmed) return ''
+  const source = String(sourceText || '').toLowerCase()
+  if (/people have normalized|should bother us more/i.test(trimmed)) {
+    return ensureVoicePeriod(trimmed)
+  }
+  if (/(trust|confidence|control|reversible|legible)/i.test(trimmed)) {
+    return `${trimmed}. That should bother us more than it does.`
+  }
+  if (/(schedule|calendar|plan|workflow)/.test(source)) {
+    return 'The quiet failure is not complexity itself. It is the point where the plan stops feeling legible once the week shifts.'
+  }
+  return `${trimmed}. People have gotten used to carrying drag that should have been designed out.`
+}
+
+function makeVoiceMoreGrounded(text: string) {
+  const sentences = splitVoiceSentences(text)
+  if (!sentences.length) return ''
+  const first = trimVoiceSentence(sentences[0])
+  const second = sentences[1] ? trimVoiceSentence(sentences[1]) : ''
+  const simplified = first
+    .replace(/^The problem usually starts before the failure is obvious:\s*/i, '')
+    .replace(/^Most teams talk around this\.\s*/i, '')
+  return ensureVoicePeriod(second ? `${simplified}. ${second}` : simplified)
+}
+
+function makeVoiceLessProducty(text: string) {
+  return ensureVoicePeriod(
+    normalizeWhitespace(
+      String(text || '')
+        .replace(/\bproduct(s)?\b/gi, 'tool$1')
+        .replace(/\bdesign\b/gi, 'approach')
+        .replace(/\bsystem(s)?\b/gi, 'setup$1')
+        .replace(/\bHabi\b/gi, '')
+        .replace(/\s{2,}/g, ' '),
+    ),
+  )
+}
+
+function makeVoiceMoreHumane(text: string) {
+  const trimmed = trimVoiceSentence(text)
+  if (!trimmed) return ''
+  if (/(people|momentum|confidence|dignity|lost|behind|stupid|worn down)/i.test(trimmed)) {
+    return ensureVoicePeriod(trimmed)
+  }
+  return `${trimmed}. Bad systems cost people more than time.`
+}
+
+function makeVoiceLessBiting(text: string) {
+  return ensureVoicePeriod(
+    normalizeWhitespace(
+      String(text || '')
+        .replace(/^Most teams talk around this\.\s*/i, '')
+        .replace(/^The problem usually starts before the failure is obvious:\s*/i, 'The drift usually starts earlier than people expect: ')
+        .replace(/^The quiet failure is not complexity itself\.\s*/i, 'The hard part is not complexity itself. '),
+    ),
+  )
+}
+
+function makeVoiceMoreSpecific(text: string, sourceText = '') {
+  const trimmed = trimVoiceSentence(text)
+  const sourceLead = firstVoiceClause(sourceText)
+  if (!trimmed) return ''
+  if (!sourceLead) return ensureVoicePeriod(trimmed)
+  if (normalizeWhitespace(trimmed).toLowerCase().includes(sourceLead.toLowerCase().slice(0, 12))) {
+    return ensureVoicePeriod(trimmed)
+  }
+  return `${sourceLead} — and that is usually where the friction becomes impossible to ignore.`
+}
+
+function makeVoiceShorter(text: string) {
+  const sentences = splitVoiceSentences(text)
+  return ensureVoicePeriod(sentences[0] || text)
+}
+
+function applyVoiceDirection(text: string, voiceDirection = '', sourceText = '') {
+  const direction = normalizeWhitespace(voiceDirection).toLowerCase()
+  if (!direction) return ensureVoicePeriod(text)
+  let next = String(text || '')
+  if (direction.includes('sharper hook') || direction.includes('more cutting') || direction.includes('quote with more bite')) {
+    next = addSharperVoiceEdge(next, sourceText)
+  }
+  if (direction.includes('quietly dangerous')) {
+    next = addQuietlyDangerousVoice(next, sourceText)
+  }
+  if (direction.includes('more grounded')) {
+    next = makeVoiceMoreGrounded(next)
+  }
+  if (direction.includes('less biting')) {
+    next = makeVoiceLessBiting(next)
+  }
+  if (direction.includes('less product-y') || direction.includes('less producty')) {
+    next = makeVoiceLessProducty(next)
+  }
+  if (direction.includes('more humane')) {
+    next = makeVoiceMoreHumane(next)
+  }
+  if (direction.includes('more specific') || direction.includes('source context') || direction.includes('less abstract') || direction.includes('product-specific')) {
+    next = makeVoiceMoreSpecific(next, sourceText)
+  }
+  if (direction.includes('shorter')) {
+    next = makeVoiceShorter(next)
+  }
+  return ensureVoicePeriod(next)
+}
+
+function applyVoiceVariantMode(text: string, variantMode = 'default', sourceText = '') {
+  if (variantMode === 'grounded') return makeVoiceMoreGrounded(text)
+  if (variantMode === 'sharper') return addSharperVoiceEdge(text, sourceText)
+  return ensureVoicePeriod(text)
+}
+
+function enforceFounderVoiceLocally(
+  text: string,
+  {
+    profile = DEFAULT_FOUNDER_VOICE_PROFILE,
+    variantMode = 'default',
+    sourceText = '',
+    voiceDirection = '',
+  }: {
+    profile?: FounderVoiceProfile
+    variantMode?: string
+    sourceText?: string
+    voiceDirection?: string
+  } = {},
+) {
+  let next = normalizeWhitespace(text)
+  if (!next) return ''
+  next = removeBannedVoicePatterns(next, profile?.bannedPatterns || [])
+  next = applyVoiceVariantMode(next, variantMode, sourceText)
+  next = applyVoiceDirection(next, voiceDirection, sourceText)
+  next = removeBannedVoicePatterns(next, profile?.bannedPatterns || [])
+  next = next
+    .replace(/\bvery expensive way to\b/gi, 'way to')
+    .replace(/\bjust\b/gi, 'simply')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+  return ensureVoicePeriod(next)
 }
 
 function buildSourceSpecificRewrite(sourceLead: string, fallback: string) {
@@ -310,7 +509,6 @@ async function rewriteDraftText(
 
   if (!currentText) return ''
 
-  const founderVoiceModule = await loadFounderVoiceModule()
   const variantMode =
     normalizedFeedback.includes('more grounded')
       ? 'grounded'
@@ -318,7 +516,7 @@ async function rewriteDraftText(
         ? 'sharper'
         : 'default'
 
-  const finalize = (value: string) => founderVoiceModule.enforceFounderVoice(value, {
+  const finalize = (value: string) => enforceFounderVoiceLocally(value, {
     profile: founderVoiceProfile,
     variantMode,
     sourceText,
