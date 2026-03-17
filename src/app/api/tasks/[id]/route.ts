@@ -11,6 +11,7 @@ import { habiTaskContractErrorMessage, isHabiTask, parseHabiTaskMetadata, valida
 import { classifyFounderTaskState, requiresLiveApproval } from '@/lib/habi-founder-state';
 import { ensureHabiTaskSubscriptions } from '@/lib/habi-task-ops';
 import { getAgentIdForJob, inferAgentJob } from '@/lib/habi-agent-jobs';
+import { evaluateExecutionGovernance, withExecutionEnvelope } from '@/lib/habi-execution-envelope';
 import { prepareHabiTaskExecution } from '@/lib/habi-task-execution';
 import { mergeTaskBranchToMain } from '@/lib/habi-delivery-merge';
 
@@ -20,10 +21,20 @@ function formatTicketRef(prefix?: string | null, num?: number | null): string | 
 }
 
 function mapTaskRow(task: any): Task & { tags: string[]; metadata: Record<string, unknown> } {
+  const parsedMetadata = parseHabiTaskMetadata(task.metadata)
+  const metadata =
+    isHabiTask({ assigned_to: task.assigned_to, metadata: parsedMetadata }) ||
+    Boolean(parsedMetadata.agent_job) ||
+    Boolean(parsedMetadata.origin_lane)
+      ? withExecutionEnvelope(parsedMetadata, {
+          assignee: task.assigned_to,
+          blockedReason: typeof parsedMetadata.blocked_reason === 'string' ? parsedMetadata.blocked_reason : null,
+        })
+      : parsedMetadata
   return {
     ...task,
     tags: task.tags ? JSON.parse(task.tags) : [],
-    metadata: parseHabiTaskMetadata(task.metadata),
+    metadata,
     ticket_ref: formatTicketRef(task.project_prefix, task.project_ticket_no),
   }
 }
@@ -602,135 +613,226 @@ export async function PUT(
       )
 
     if (shouldDispatchExecutionStart) {
-      const preparedExecution = await prepareHabiTaskExecution({
+      const governance = evaluateExecutionGovernance({
+        metadata: metadata !== undefined ? metadata : currentTask.metadata,
+        assignee: String(effectiveAssignedTo),
+      })
+
+      if (!governance.ok) {
+        persistedStatus = 'assigned'
+        const blockedMetadata = withExecutionEnvelope(
+          {
+            ...currentMetadata,
+            ...(typeof metadata === 'object' && metadata ? metadata : {}),
+            blocked_reason: governance.reason,
+          },
+          {
+            assignee: String(effectiveAssignedTo),
+            routeKind: 'blocked',
+            blockedReason: governance.reason,
+          }
+        )
+        db.prepare(`
+          UPDATE tasks
+          SET status = 'assigned', metadata = ?, updated_at = ?
+          WHERE id = ? AND workspace_id = ?
+        `).run(JSON.stringify(blockedMetadata), now, taskId, workspaceId)
+        db.prepare(`
+          INSERT INTO comments (task_id, author, content, created_at, parent_id, mentions, workspace_id)
+          VALUES (?, ?, ?, ?, NULL, NULL, ?)
+        `).run(
+          taskId,
+          'system',
+          [
+            'Execution blocked',
+            `Task: #${taskId} ${title || currentTask.title}`,
+            `Assignee: ${effectiveAssignedTo}`,
+            `Reason: ${governance.reason}`,
+            'Action: fix the approval/evidence/runtime contract before retrying execution start.',
+          ].join('\n'),
+          now,
+          workspaceId
+        )
+        db_helpers.logActivity(
+          'task_execution_blocked',
+          'task',
+          taskId,
+          auth.user.username,
+          `Execution blocked for ${effectiveAssignedTo}: ${governance.reason}`,
+          {
+            assignee: effectiveAssignedTo,
+            previous_status: currentTask.status,
+            next_status: 'assigned',
+            reason: governance.reason,
+            execution_envelope: blockedMetadata.execution_envelope,
+          },
+          workspaceId
+        )
+      } else {
+        const preparedExecution = await prepareHabiTaskExecution({
         taskId,
         title: title || currentTask.title,
         assignee: String(effectiveAssignedTo),
         actor: auth.user.username,
         metadata: metadata !== undefined ? metadata : currentTask.metadata,
       })
-
-      db.prepare(`
-        UPDATE tasks
-        SET metadata = ?, updated_at = ?
-        WHERE id = ? AND workspace_id = ?
-      `).run(JSON.stringify(preparedExecution.metadata), now, taskId, workspaceId)
-
-      if (!preparedExecution.ok) {
-        db.prepare(`
-          INSERT INTO comments (task_id, author, content, created_at, parent_id, mentions, workspace_id)
-          VALUES (?, ?, ?, ?, NULL, NULL, ?)
-        `).run(taskId, 'system', preparedExecution.failureComment, now, workspaceId)
-        db_helpers.logActivity(
-          'task_execution_blocked',
-          'task',
-          taskId,
-          auth.user.username,
-          `Execution blocked for ${effectiveAssignedTo}: ${preparedExecution.failureReason}`,
-          {
-            assignee: effectiveAssignedTo,
-            previous_status: currentTask.status,
-            next_status: persistedStatus,
-            reason: preparedExecution.failureReason,
-          },
-          workspaceId
-        )
-      }
-
-      if (!preparedExecution.ok) {
-        logger.warn(
-          { taskId, assignee: effectiveAssignedTo, reason: preparedExecution.failureReason },
-          'Task moved to in_progress but execution context provisioning failed'
-        )
-      } else {
-        const preparedMetadata = parseHabiTaskMetadata(preparedExecution.metadata)
-        const dispatch = await dispatchTaskAssignment({
-          workspaceId,
-          actor: auth.user.username,
+        const preparedMetadata = withExecutionEnvelope(preparedExecution.metadata, {
           assignee: String(effectiveAssignedTo),
-          taskId,
-          title: title || currentTask.title,
-          priority: String(priority || currentTask.priority),
-          status: 'in_progress',
-          sessionRouting: 'task',
-          details: [
-            ...preparedExecution.dispatchDetails,
-            `Lane: ${String(preparedMetadata.origin_lane || 'n/a')}`,
-            `Agent job: ${String(preparedMetadata.agent_job || 'n/a')}`,
-            `Mutation mode: ${String(preparedMetadata.mutation_mode || 'n/a')}`,
-            `Runtime model: ${String((preparedMetadata.runtime_model_policy as any)?.class || 'n/a')}`,
-          ],
+          routeKind: preparedExecution.ok ? 'direct' : 'blocked',
+          blockedReason: preparedExecution.ok ? null : preparedExecution.failureReason,
         })
-        if (!dispatch.delivered) {
-        logger.warn(
-          { taskId, assignee: effectiveAssignedTo, reason: dispatch.reason || 'unknown' },
-          'Task moved to in_progress but execution-start dispatch was not delivered'
-        )
-        db_helpers.logActivity(
-          'task_dispatch_failed',
-          'task',
-          taskId,
-          auth.user.username,
-          `Execution start dispatch failed for ${effectiveAssignedTo}`,
-          {
-            assignee: effectiveAssignedTo,
-            previous_status: currentTask.status,
-            next_status: persistedStatus,
-            reason: dispatch.reason || 'unknown',
-          },
-          workspaceId
-        )
-          if (preparedExecution.ok) {
-            const dispatchFailureComment = [
-            'Execution blocked',
-            `Task: #${taskId} ${title || currentTask.title}`,
-            `Assignee: ${effectiveAssignedTo}`,
-            `Reason: dispatch failed (${dispatch.reason || 'unknown'})`,
-            'Action: relink the session or retry the task ping before treating this task as active work.',
-          ].join('\n')
+        db.prepare(`
+          UPDATE tasks
+          SET metadata = ?, updated_at = ?
+          WHERE id = ? AND workspace_id = ?
+        `).run(JSON.stringify(preparedMetadata), now, taskId, workspaceId)
+
+        if (!preparedExecution.ok) {
+          persistedStatus = 'assigned'
+          db.prepare(`
+            UPDATE tasks
+            SET status = 'assigned', metadata = ?, updated_at = ?
+            WHERE id = ? AND workspace_id = ?
+          `).run(JSON.stringify(preparedMetadata), now, taskId, workspaceId)
           db.prepare(`
             INSERT INTO comments (task_id, author, content, created_at, parent_id, mentions, workspace_id)
             VALUES (?, ?, ?, ?, NULL, NULL, ?)
-          `).run(taskId, 'system', dispatchFailureComment, now, workspaceId)
-        }
-        } else {
-          db.prepare(`
-            INSERT INTO comments (task_id, author, content, created_at, parent_id, mentions, workspace_id)
-            VALUES (?, ?, ?, ?, NULL, NULL, ?)
-          `).run(taskId, 'system', preparedExecution.kickoffComment, now, workspaceId)
-          if (dispatch.compatibilityAgent) {
-            db.prepare(`
-              INSERT INTO comments (task_id, author, content, created_at, parent_id, mentions, workspace_id)
-              VALUES (?, ?, ?, ?, NULL, NULL, ?)
-            `).run(
-              taskId,
-              'system',
-              [
-                'Compatibility routing',
-                `Task is assigned to ${effectiveAssignedTo}, but Mission Control delivered the execution kickoff through soak-time compatibility agent ${dispatch.compatibilityAgent}.`,
-                'This is expected during the M97 narrow-job cutover while legacy lane sessions are still active.',
-              ].join('\n'),
-              now,
-              workspaceId
-            )
-          }
+          `).run(taskId, 'system', preparedExecution.failureComment, now, workspaceId)
           db_helpers.logActivity(
-            'task_execution_started',
+            'task_execution_blocked',
             'task',
             taskId,
             auth.user.username,
-            `Execution start dispatched to ${effectiveAssignedTo}`,
+            `Execution blocked for ${effectiveAssignedTo}: ${preparedExecution.failureReason}`,
             {
               assignee: effectiveAssignedTo,
               previous_status: currentTask.status,
-              next_status: persistedStatus,
-              session_key: dispatch.sessionKey || null,
-              execution_mode: preparedExecution.metadata.execution_mode || null,
-              worktree_path: preparedExecution.metadata.worktree_path || null,
-              branch_name: preparedExecution.metadata.branch_name || null,
+              next_status: 'assigned',
+              reason: preparedExecution.failureReason,
+              execution_envelope: preparedMetadata.execution_envelope,
             },
             workspaceId
           )
+          logger.warn(
+            { taskId, assignee: effectiveAssignedTo, reason: preparedExecution.failureReason },
+            'Task execution context provisioning failed'
+          )
+        } else {
+          const preparedMetadataRecord = parseHabiTaskMetadata(preparedMetadata)
+          const dispatch = await dispatchTaskAssignment({
+            workspaceId,
+            actor: auth.user.username,
+            assignee: String(effectiveAssignedTo),
+            taskId,
+            title: title || currentTask.title,
+            priority: String(priority || currentTask.priority),
+            status: 'in_progress',
+            sessionRouting: 'task',
+            details: [
+              ...preparedExecution.dispatchDetails,
+              `Lane: ${String(preparedMetadataRecord.origin_lane || 'n/a')}`,
+              `Agent job: ${String(preparedMetadataRecord.agent_job || 'n/a')}`,
+              `Mutation mode: ${String(preparedMetadataRecord.mutation_mode || 'n/a')}`,
+              `Runtime model: ${String((preparedMetadataRecord.runtime_model_policy as any)?.class || 'n/a')}`,
+            ],
+          })
+          if (!dispatch.delivered) {
+            persistedStatus = 'assigned'
+            const blockedMetadata = withExecutionEnvelope(preparedMetadataRecord, {
+              assignee: String(effectiveAssignedTo),
+              routeKind: 'blocked',
+              sessionKey: dispatch.sessionKey || null,
+              compatibilityAgent: dispatch.compatibilityAgent,
+              blockedReason: `dispatch failed (${dispatch.reason || 'unknown'})`,
+            })
+            db.prepare(`
+              UPDATE tasks
+              SET status = 'assigned', metadata = ?, updated_at = ?
+              WHERE id = ? AND workspace_id = ?
+            `).run(JSON.stringify(blockedMetadata), now, taskId, workspaceId)
+            logger.warn(
+              { taskId, assignee: effectiveAssignedTo, reason: dispatch.reason || 'unknown' },
+              'Task execution-start dispatch was not delivered'
+            )
+            db_helpers.logActivity(
+              'task_dispatch_failed',
+              'task',
+              taskId,
+              auth.user.username,
+              `Execution start dispatch failed for ${effectiveAssignedTo}`,
+              {
+                assignee: effectiveAssignedTo,
+                previous_status: currentTask.status,
+                next_status: 'assigned',
+                reason: dispatch.reason || 'unknown',
+                execution_envelope: blockedMetadata.execution_envelope,
+              },
+              workspaceId
+            )
+            const dispatchFailureComment = [
+              'Execution blocked',
+              `Task: #${taskId} ${title || currentTask.title}`,
+              `Assignee: ${effectiveAssignedTo}`,
+              `Reason: dispatch failed (${dispatch.reason || 'unknown'})`,
+              'Action: relink the session or retry the task ping before treating this task as active work.',
+            ].join('\n')
+            db.prepare(`
+              INSERT INTO comments (task_id, author, content, created_at, parent_id, mentions, workspace_id)
+              VALUES (?, ?, ?, ?, NULL, NULL, ?)
+            `).run(taskId, 'system', dispatchFailureComment, now, workspaceId)
+          } else {
+            const startedMetadata = withExecutionEnvelope(preparedMetadataRecord, {
+              assignee: String(effectiveAssignedTo),
+              routeKind: dispatch.routeKind,
+              sessionKey: dispatch.sessionKey || null,
+              compatibilityAgent: dispatch.compatibilityAgent,
+            })
+            db.prepare(`
+              UPDATE tasks
+              SET metadata = ?, updated_at = ?
+              WHERE id = ? AND workspace_id = ?
+            `).run(JSON.stringify(startedMetadata), now, taskId, workspaceId)
+            db.prepare(`
+              INSERT INTO comments (task_id, author, content, created_at, parent_id, mentions, workspace_id)
+              VALUES (?, ?, ?, ?, NULL, NULL, ?)
+            `).run(taskId, 'system', preparedExecution.kickoffComment, now, workspaceId)
+            if (dispatch.compatibilityAgent) {
+              db.prepare(`
+                INSERT INTO comments (task_id, author, content, created_at, parent_id, mentions, workspace_id)
+                VALUES (?, ?, ?, ?, NULL, NULL, ?)
+              `).run(
+                taskId,
+                'system',
+                [
+                  'Compatibility routing',
+                  `Task is assigned to ${effectiveAssignedTo}, but Mission Control delivered the execution kickoff through soak-time compatibility agent ${dispatch.compatibilityAgent}.`,
+                  'This is expected during the M97 narrow-job cutover while legacy lane sessions are still active.',
+                ].join('\n'),
+                now,
+                workspaceId
+              )
+            }
+            db_helpers.logActivity(
+              'task_execution_started',
+              'task',
+              taskId,
+              auth.user.username,
+              `Execution start dispatched to ${effectiveAssignedTo}`,
+              {
+                assignee: effectiveAssignedTo,
+                previous_status: currentTask.status,
+                next_status: 'in_progress',
+                session_key: dispatch.sessionKey || null,
+                route_kind: dispatch.routeKind,
+                session_scope: dispatch.sessionScope,
+                execution_mode: preparedExecution.metadata.execution_mode || null,
+                worktree_path: preparedExecution.metadata.worktree_path || null,
+                branch_name: preparedExecution.metadata.branch_name || null,
+                execution_envelope: startedMetadata.execution_envelope,
+              },
+              workspaceId
+            )
+          }
         }
       }
     }

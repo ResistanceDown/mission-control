@@ -14,6 +14,7 @@ import { getAgentIdForJob, inferAgentJob, normalizeRuntimeModelPolicy } from '@/
 import { logger } from '@/lib/logger'
 import { mutationLimiter } from '@/lib/rate-limit'
 import { dispatchTaskAssignment } from '@/lib/task-assignment-dispatch'
+import { withExecutionEnvelope } from '@/lib/habi-execution-envelope'
 import { habiTaskIngestSchema, validateBody } from '@/lib/validation'
 
 type IngestStatus = 'assigned' | 'in_progress' | 'review' | 'quality_review'
@@ -603,7 +604,17 @@ export async function POST(request: NextRequest) {
           createdTask.id,
           source || actor,
           `Habi ingest created task "${item.title}"`,
-          { lane: item.lane, fingerprint, status: targetStatus.status, priority },
+          {
+            lane: item.lane,
+            fingerprint,
+            status: targetStatus.status,
+            priority,
+            execution_envelope: withExecutionEnvelope(metadata, {
+              assignee,
+              blockedReason: targetStatus.blockedReason || null,
+              routeKind: targetStatus.blockedReason ? 'blocked' : 'direct',
+            }).execution_envelope,
+          },
           workspaceId
         )
         cancelDuplicateFingerprintSiblings(db, workspaceId, createdTask.id, source || actor, now, fingerprint)
@@ -628,6 +639,18 @@ export async function POST(request: NextRequest) {
         })
         if (!dispatch.delivered) {
           const reason = dispatch.reason || 'unknown'
+          const blockedMetadata = withExecutionEnvelope(createdTask.metadata, {
+            assignee,
+            routeKind: 'blocked',
+            sessionKey: dispatch.sessionKey || null,
+            compatibilityAgent: dispatch.compatibilityAgent,
+            blockedReason: reason,
+          })
+          db.prepare(`
+            UPDATE tasks
+            SET metadata = ?, updated_at = ?
+            WHERE id = ? AND workspace_id = ?
+          `).run(JSON.stringify(blockedMetadata), now, createdTask.id, workspaceId)
           if (reason === 'no_active_session' || reason === 'no_session_key') {
             addTaskComment(
               db,
@@ -642,7 +665,40 @@ export async function POST(request: NextRequest) {
             createdTask.id,
             source || actor,
             `Habi ingest dispatch failed for ${assignee}`,
-            { assignee, reason },
+            {
+              assignee,
+              reason,
+              route_kind: 'blocked',
+              session_scope: dispatch.sessionScope,
+              execution_envelope: blockedMetadata.execution_envelope,
+            },
+            workspaceId
+          )
+        } else {
+          const routedMetadata = withExecutionEnvelope(createdTask.metadata, {
+            assignee,
+            routeKind: dispatch.routeKind,
+            sessionKey: dispatch.sessionKey || null,
+            compatibilityAgent: dispatch.compatibilityAgent,
+          })
+          db.prepare(`
+            UPDATE tasks
+            SET metadata = ?, updated_at = ?
+            WHERE id = ? AND workspace_id = ?
+          `).run(JSON.stringify(routedMetadata), now, createdTask.id, workspaceId)
+          db_helpers.logActivity(
+            'task_dispatch_queued',
+            'task',
+            createdTask.id,
+            source || actor,
+            `Habi ingest dispatch queued for ${assignee}`,
+            {
+              assignee,
+              route_kind: dispatch.routeKind,
+              session_scope: dispatch.sessionScope,
+              session_key: dispatch.sessionKey || null,
+              execution_envelope: routedMetadata.execution_envelope,
+            },
             workspaceId
           )
         }

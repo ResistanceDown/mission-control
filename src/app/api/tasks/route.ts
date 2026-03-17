@@ -10,6 +10,7 @@ import { dispatchTaskAssignment } from '@/lib/task-assignment-dispatch';
 import { habiTaskContractErrorMessage, isHabiTask, parseHabiTaskMetadata, validateHabiTaskContract } from '@/lib/habi-task-contract';
 import { ensureHabiTaskSubscriptions } from '@/lib/habi-task-ops';
 import { getAgentIdForJob, inferAgentJob } from '@/lib/habi-agent-jobs';
+import { withExecutionEnvelope } from '@/lib/habi-execution-envelope';
 
 function formatTicketRef(prefix?: string | null, num?: number | null): string | undefined {
   if (!prefix || typeof num !== 'number' || !Number.isFinite(num) || num <= 0) return undefined
@@ -17,10 +18,20 @@ function formatTicketRef(prefix?: string | null, num?: number | null): string | 
 }
 
 function mapTaskRow(task: any): Task & { tags: string[]; metadata: Record<string, unknown> } {
+  const parsedMetadata = parseHabiTaskMetadata(task.metadata)
+  const metadata =
+    isHabiTask({ assigned_to: task.assigned_to, metadata: parsedMetadata }) ||
+    Boolean(parsedMetadata.agent_job) ||
+    Boolean(parsedMetadata.origin_lane)
+      ? withExecutionEnvelope(parsedMetadata, {
+          assignee: task.assigned_to,
+          blockedReason: typeof parsedMetadata.blocked_reason === 'string' ? parsedMetadata.blocked_reason : null,
+        })
+      : parsedMetadata
   return {
     ...task,
     tags: task.tags ? JSON.parse(task.tags) : [],
-    metadata: parseHabiTaskMetadata(task.metadata),
+    metadata,
     ticket_ref: formatTicketRef(task.project_prefix, task.project_ticket_no),
   }
 }

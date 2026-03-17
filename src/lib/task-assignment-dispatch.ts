@@ -4,6 +4,7 @@ import { logger } from './logger'
 import { resolveSessionLinkForAgent, syncAgentSessionLinks } from './agent-session-link'
 import { getAllGatewaySessions } from './sessions'
 import { buildScopedAgentSessionKey, pickBestAgentSession } from './agent-session-routing'
+import { detectSessionScope, type HabiRouteKind, type HabiSessionScope } from './habi-execution-envelope'
 
 interface AssignmentDispatchInput {
   workspaceId: number
@@ -48,6 +49,8 @@ export async function dispatchTaskAssignment(input: AssignmentDispatchInput): Pr
   sessionKey?: string
   reason?: string
   compatibilityAgent?: string | null
+  routeKind: HabiRouteKind
+  sessionScope: HabiSessionScope
 }> {
   const {
     workspaceId,
@@ -86,6 +89,8 @@ export async function dispatchTaskMessage(input: TaskMessageDispatchInput): Prom
   sessionKey?: string
   reason?: string
   compatibilityAgent?: string | null
+  routeKind: HabiRouteKind
+  sessionScope: HabiSessionScope
 }> {
   const { workspaceId, assignee, taskId, message, sessionRouting = 'default' } = input
   const db = getDatabase()
@@ -118,7 +123,7 @@ export async function dispatchTaskMessage(input: TaskMessageDispatchInput): Prom
         ? null
         : resolvedLink.compatibilityAgent
   if (candidateSessionKeys.length === 0) {
-    return { attempted: false, delivered: false, reason: 'no_session_key' }
+    return { attempted: false, delivered: false, reason: 'no_session_key', routeKind: 'blocked', sessionScope: 'unknown' }
   }
 
   const now = Math.floor(Date.now() / 1000)
@@ -142,7 +147,14 @@ export async function dispatchTaskMessage(input: TaskMessageDispatchInput): Prom
   }
 
   if (deliveredSessionKey) {
-    return { attempted: true, delivered: true, sessionKey: deliveredSessionKey, compatibilityAgent }
+    return {
+      attempted: true,
+      delivered: true,
+      sessionKey: deliveredSessionKey,
+      compatibilityAgent,
+      routeKind: compatibilityAgent ? 'compatibility' : 'direct',
+      sessionScope: detectSessionScope(deliveredSessionKey),
+    }
   }
 
   syncAgentSessionLinks(workspaceId)
@@ -157,6 +169,8 @@ export async function dispatchTaskMessage(input: TaskMessageDispatchInput): Prom
         delivered: true,
         sessionKey: relinked,
         compatibilityAgent: relinkedLink.compatibilityAgent,
+        routeKind: relinkedLink.compatibilityAgent ? 'compatibility' : 'direct',
+        sessionScope: detectSessionScope(relinked),
       }
     } catch (err) {
       lastError = err
@@ -180,6 +194,8 @@ export async function dispatchTaskMessage(input: TaskMessageDispatchInput): Prom
     delivered: false,
     sessionKey: candidateSessionKeys[0],
     compatibilityAgent,
+    routeKind: 'blocked',
+    sessionScope: detectSessionScope(candidateSessionKeys[0]),
     reason: hasActiveSession ? 'gateway_send_failed' : 'no_active_session',
   }
 }

@@ -5,6 +5,7 @@ import { logger } from '@/lib/logger'
 import { mutationLimiter } from '@/lib/rate-limit'
 import { dispatchTaskMessage } from '@/lib/task-assignment-dispatch'
 import { syncAgentSessionLinks } from '@/lib/agent-session-link'
+import { withExecutionEnvelope } from '@/lib/habi-execution-envelope'
 
 const DUPLICATE_COMMENT_WINDOW_SECONDS = 6 * 60 * 60
 
@@ -115,7 +116,19 @@ export async function POST(
         task.id,
         auth.user.username,
         `Task assignee ping failed for ${task.assigned_to}`,
-        { assignee: task.assigned_to, reason },
+        {
+          assignee: task.assigned_to,
+          reason,
+          route_kind: 'blocked',
+          session_scope: dispatch.sessionScope,
+          execution_envelope: withExecutionEnvelope(task.metadata, {
+            assignee: task.assigned_to,
+            routeKind: 'blocked',
+            sessionKey: dispatch.sessionKey || null,
+            compatibilityAgent: dispatch.compatibilityAgent,
+            blockedReason: reason,
+          }).execution_envelope,
+        },
         workspaceId
       )
       return NextResponse.json(
@@ -130,7 +143,18 @@ export async function POST(
       task.id,
       auth.user.username,
       `Task assignee ping delivered to ${task.assigned_to}`,
-      { assignee: task.assigned_to, session_key: dispatch.sessionKey || null },
+      {
+        assignee: task.assigned_to,
+        session_key: dispatch.sessionKey || null,
+        route_kind: dispatch.routeKind,
+        session_scope: dispatch.sessionScope,
+        execution_envelope: withExecutionEnvelope(task.metadata, {
+          assignee: task.assigned_to,
+          routeKind: dispatch.routeKind,
+          sessionKey: dispatch.sessionKey || null,
+          compatibilityAgent: dispatch.compatibilityAgent,
+        }).execution_envelope,
+      },
       workspaceId
     )
 

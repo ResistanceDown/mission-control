@@ -1472,6 +1472,18 @@ export function TaskDetailModal({
   const validationCommands = Array.isArray(metadata.validation_commands)
     ? metadata.validation_commands.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
     : []
+  const executionEnvelope =
+    metadata.execution_envelope && typeof metadata.execution_envelope === 'object'
+      ? metadata.execution_envelope as {
+          route_kind?: string
+          session_scope?: string
+          approval_state?: string
+          evidence_state?: string
+          compatibility_agent?: string | null
+          blocked_reason?: string | null
+          updated_at?: string
+        }
+      : null
   const evidencePath = typeof metadata.evidence_path === 'string' ? metadata.evidence_path : ''
   const handoffPath = typeof metadata.handoff_artifact === 'string' ? metadata.handoff_artifact : ''
   const worktreePath = typeof metadata.worktree_path === 'string' ? metadata.worktree_path : ''
@@ -1834,6 +1846,35 @@ export function TaskDetailModal({
                       {handoffPath ? <div className="break-words text-xs text-muted-foreground [overflow-wrap:anywhere]">Handoff: {handoffPath}</div> : null}
                       {worktreePath ? <div className="break-words text-xs text-muted-foreground [overflow-wrap:anywhere]">Worktree: {worktreePath}</div> : null}
                     </div>
+                  </div>
+                  <div className="rounded-lg border border-border/60 bg-surface-2/45 p-3">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Execution route</div>
+                    <div className="mt-2 grid gap-3 md:grid-cols-2">
+                      <div className="rounded-md bg-black/20 p-3">
+                        <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Route</div>
+                        <div className="mt-1 text-sm font-medium text-foreground">{executionEnvelope?.route_kind || 'Not recorded'}</div>
+                        {executionEnvelope?.compatibility_agent ? (
+                          <div className="mt-1 text-xs text-amber-300">Compatibility agent: {executionEnvelope.compatibility_agent}</div>
+                        ) : null}
+                      </div>
+                      <div className="rounded-md bg-black/20 p-3">
+                        <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Session scope</div>
+                        <div className="mt-1 text-sm font-medium text-foreground">{executionEnvelope?.session_scope || 'unknown'}</div>
+                      </div>
+                      <div className="rounded-md bg-black/20 p-3">
+                        <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Approval state</div>
+                        <div className="mt-1 text-sm font-medium text-foreground">{executionEnvelope?.approval_state || 'unknown'}</div>
+                      </div>
+                      <div className="rounded-md bg-black/20 p-3">
+                        <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Evidence state</div>
+                        <div className="mt-1 text-sm font-medium text-foreground">{executionEnvelope?.evidence_state || 'unknown'}</div>
+                      </div>
+                    </div>
+                    {executionEnvelope?.blocked_reason ? (
+                      <div className="mt-3 rounded-md border border-amber-500/20 bg-amber-500/10 p-3 text-sm text-amber-100 whitespace-pre-wrap">
+                        {executionEnvelope.blocked_reason}
+                      </div>
+                    ) : null}
                   </div>
                   <div className="rounded-lg border border-border/60 bg-surface-2/45 p-3">
                     <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Validation</div>
