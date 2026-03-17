@@ -1001,7 +1001,8 @@ export async function POST(request: NextRequest) {
       }
       case 'select_opportunities': {
         await sanitizeDraftPack(draftPackJsonPath)
-        await runGrowthCommand('growth:m92:daily-plan', week, ['--force-refresh', 'true'])
+        await runGrowthCommand('growth:m92:select-opportunities', week)
+        await runGrowthCommand('growth:m92:draft-pack', week)
         return NextResponse.json({ status: 'ok', action: 'select_opportunities', week })
       }
       case 'reject_opportunity':

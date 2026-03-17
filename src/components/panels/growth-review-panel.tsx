@@ -1478,8 +1478,8 @@ export function GrowthReviewPanel() {
       : 'Nothing scheduled'
   const queueStatusLine = `${readyToSchedule} ready • ${scheduledCount} scheduled${failedPosts.length ? ` • ${failedPosts.length} failed` : ''}`
   const utilityActions = [
-    { key: 'refresh', label: 'Run daily plan', action: () => void runGrowthAction('refresh_research') },
-    { key: 'select', label: 'Re-rank moves', action: () => void runGrowthAction('select_opportunities') },
+    { key: 'refresh', label: 'Full refresh', action: () => void runGrowthAction('refresh_research') },
+    { key: 'select', label: 'Reselect from current research', action: () => void runGrowthAction('select_opportunities') },
     { key: 'drafts', label: candidateCount ? 'Clear drafts' : 'Generate drafts', action: () => void runGrowthAction(candidateCount ? 'clear_current_drafts' : 'generate_drafts', undefined, candidateCount ? {} : { voiceDirection }) },
     { key: 'queue', label: 'Open queue', action: () => setActiveDrawer((current) => current === 'queue' ? null : 'queue') },
     { key: 'signals', label: 'Open signals', action: () => setActiveDrawer((current) => current === 'signals' ? null : 'signals') },
@@ -1781,6 +1781,11 @@ export function GrowthReviewPanel() {
             Your role starts at draft review and approval, not raw opportunity picking.
             {growth.automationSummary?.researchRefreshAt ? ` Last daily planning run: ${formatPacificTime(growth.automationSummary.researchRefreshAt)}.` : ''}
           </div>
+          <div className="mt-2 text-xs text-muted-foreground">
+            <span className="text-foreground">Full refresh</span> pulls fresh research and rebuilds the whole lane.
+            {' '}
+            <span className="text-foreground">Reselect from current research</span> keeps today&apos;s research snapshot, picks a different move set, and regenerates drafts.
+          </div>
         </div>
       </div>
 
@@ -1824,8 +1829,8 @@ export function GrowthReviewPanel() {
                     ? 'Nothing is in review right now. Open the publishing queue to keep moving.'
                     : growth.noOpportunityReason || 'No auto-selected moves yet.'}
                   <div className="mt-3 flex flex-wrap gap-2">
-                    <button type="button" onClick={() => void runGrowthAction('refresh_research')} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2">Run daily plan</button>
-                    <button type="button" onClick={() => void runGrowthAction('select_opportunities')} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2">Re-rank moves</button>
+                    <button type="button" onClick={() => void runGrowthAction('refresh_research')} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2">Full refresh</button>
+                    <button type="button" onClick={() => void runGrowthAction('select_opportunities')} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2">Reselect from current research</button>
                     <button type="button" onClick={() => setActiveDrawer('signals')} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2">Open signals</button>
                   </div>
                 </div>
@@ -1919,8 +1924,8 @@ export function GrowthReviewPanel() {
               ) : (
                 <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-4 text-sm text-muted-foreground">
                   {selectedOpportunities.length
-                    ? 'Auto-selected moves are ready. Generate or review drafts from the current system pick.'
-                    : 'No drafts yet. Run the daily planner to refresh research, moves, and drafts.'}
+                    ? 'Auto-selected moves are ready. Review these drafts, rewrite a strong one, or reselect from current research if the whole batch feels off.'
+                    : 'No drafts yet. Run a full refresh to rebuild research, moves, and drafts.'}
                 </div>
               )}
             </div>
