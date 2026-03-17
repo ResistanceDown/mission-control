@@ -33,11 +33,30 @@ interface GrowthApiResponse {
     researchBriefPath: string | null
     opportunityPackPath?: string | null
     researchHistoryPath?: string | null
+    dailyGrowthPlanPath?: string | null
     draftPackPath: string | null
     scorecardPath: string | null
+    dailyPlanGeneratedAt?: string | null
+    dailyPlanMode?: string | null
     researchGeneratedAt?: string | null
     draftPackGeneratedAt?: string | null
     externalStatus: string
+    signalState?: string
+    signalProvenance?: string[]
+    strategyNote?: string | null
+    degradedModeStreak?: number
+    automationSummary?: {
+      runsOncePerDayPt: boolean
+      founderChoosesOpportunities: boolean
+      founderReviewsDrafts: boolean
+      resultsSyncAt?: string | null
+      founderTimelineSyncAt?: string | null
+      researchRefreshAt?: string | null
+      opportunitySelectionAt?: string | null
+      draftGenerationAt?: string | null
+      selectedOpportunityCount?: number
+      draftCount?: number
+    } | null
     freshness?: {
       lastXPullAt?: string | null
       sampleSize?: number
@@ -124,6 +143,7 @@ interface GrowthApiResponse {
       blockedReason?: string
       suppressionReason?: string
       supportingSignals: string[]
+      signalOriginClass?: string
     }>
     blockedOpportunities: Array<{
       id: string
@@ -155,6 +175,7 @@ interface GrowthApiResponse {
       blockedReason?: string
       suppressionReason?: string
       supportingSignals: string[]
+      signalOriginClass?: string
     }>
     watchOnlyOpportunities: Array<{
       id: string
@@ -186,6 +207,7 @@ interface GrowthApiResponse {
       blockedReason?: string
       suppressionReason?: string
       supportingSignals: string[]
+      signalOriginClass?: string
     }>
     editorialOpportunities: Array<{ id: string; title: string; archetype: string; sourceType: string; whyNow: string; brandFit: string; supportingSignals: string[] }>
     listeningDiagnostics?: {
@@ -433,6 +455,24 @@ function formatPacificTime(value?: string | null) {
   return `${PT_DATE_TIME.format(parsed)} PT`
 }
 
+function titleCaseSignalState(value?: string | null) {
+  return String(value || '')
+    .trim()
+    .split(/[_\s]+/)
+    .filter(Boolean)
+    .map((token) => token.charAt(0).toUpperCase() + token.slice(1))
+    .join(' ') || 'History Only'
+}
+
+function describeSignalOrigin(value?: string | null) {
+  const normalized = String(value || '').trim().toLowerCase()
+  if (normalized === 'fresh_reactive') return 'fresh reactive signal'
+  if (normalized === 'carry_forward') return 'carry-forward signal'
+  if (normalized === 'timeline_derived') return 'founder timeline signal'
+  if (normalized === 'history_derived') return 'history/watchlist signal'
+  return 'system-selected signal'
+}
+
 function formatSignedCount(value?: number | null) {
   if (typeof value !== 'number' || Number.isNaN(value)) return 'n/a'
   if (value > 0) return `+${value}`
@@ -600,7 +640,7 @@ function OpportunityCard({
   saving?: boolean
 }) {
   const feedbackPresets = ['Weak source', 'Wrong audience', 'Too generic', 'Already replied', 'Good direction, rewrite']
-  const summaryReason = opportunity.selectionReason || opportunity.whyNow || 'Review the source and choose whether this move is worth drafting.'
+  const summaryReason = opportunity.selectionReason || opportunity.whyNow || 'Review the system-selected move and decide whether it should keep feeding the draft lane.'
   const historyChips = [
     opportunity.sourceSeenCount > 1 ? `source seen ${opportunity.sourceSeenCount}x` : '',
     opportunity.accountSeenCount > 1 ? `account seen ${opportunity.accountSeenCount}x` : '',
@@ -626,7 +666,7 @@ function OpportunityCard({
           'rounded-full border px-2 py-1 text-[10px] uppercase tracking-[0.16em]',
           blocked ? 'border-rose-500/25 bg-rose-500/10 text-rose-200' : 'border-emerald-500/25 bg-emerald-500/10 text-emerald-200',
         )}>
-          {blocked ? opportunity.sourceState.replace(/_/g, ' ') : 'selected'}
+          {blocked ? opportunity.sourceState.replace(/_/g, ' ') : 'auto-selected'}
         </span>
       </div>
       {opportunity.sourceText ? (
@@ -705,6 +745,14 @@ function OpportunityCard({
                 </div>
               </div>
             ) : null}
+            <div className="rounded-xl border border-white/8 bg-black/15 px-3 py-3">
+              <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Automation role</div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <FieldChip>system selected</FieldChip>
+                <FieldChip>{describeSignalOrigin(opportunity.signalOriginClass)}</FieldChip>
+                <FieldChip>founder reviews drafts</FieldChip>
+              </div>
+            </div>
             {opportunity.supportingSignals?.length ? (
               <div className="rounded-xl border border-white/8 bg-black/15 px-3 py-3">
                 <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Supporting signals</div>
@@ -1405,20 +1453,21 @@ export function GrowthReviewPanel() {
       return leftTime - rightTime
     })[0] || null
   }, [scheduledPosts])
-  const topMoveTitle = topOpportunity?.title || todayBestMove?.title || 'Refresh research before choosing the next move.'
-  const topMoveBody = topOpportunity?.selectionReason || topOpportunity?.whyNow || todayBestMove?.why || 'The desk should rank the best live move before it writes copy.'
+  const signalStateLabel = titleCaseSignalState(growth?.signalState)
+  const topMoveTitle = topOpportunity?.title || todayBestMove?.title || 'Run the daily planner before reviewing the next move.'
+  const topMoveBody = topOpportunity?.selectionReason || topOpportunity?.whyNow || growth?.strategyNote || todayBestMove?.why || 'The system ranks the best live move first, then the founder reviews the resulting drafts.'
   const topMoveActionText =
     readyToSchedule
       ? `${readyToSchedule} approved post${readyToSchedule === 1 ? '' : 's'} waiting to schedule`
       : topDraft
         ? 'Review the top draft candidate'
         : topOpportunity
-          ? 'Generate drafts from the current top opportunity'
-          : 'Refresh research or select opportunities'
+          ? 'Review the draft lane fed by today’s auto-selected move'
+          : 'Run the daily planner to refresh research, selections, and drafts'
   const growthStatus = growth?.externalStatus || 'unknown'
   const researchStatusLine = lowConfidenceCount
-    ? `${growthStatus} • ${opportunityCount} selected • ${lowConfidenceCount} low-confidence cluster${lowConfidenceCount === 1 ? '' : 's'}`
-    : `${growthStatus} • ${opportunityCount} selected`
+    ? `${signalStateLabel} • ${opportunityCount} auto-selected • ${lowConfidenceCount} low-confidence cluster${lowConfidenceCount === 1 ? '' : 's'}`
+    : `${signalStateLabel} • ${opportunityCount} auto-selected`
   const topDraftSummary = topDraft
     ? `${topDraft.distribution_type || 'draft'}${topDraft.source_account ? ` • ${topDraft.source_account}` : ''}`
     : 'No draft yet'
@@ -1429,8 +1478,8 @@ export function GrowthReviewPanel() {
       : 'Nothing scheduled'
   const queueStatusLine = `${readyToSchedule} ready • ${scheduledCount} scheduled${failedPosts.length ? ` • ${failedPosts.length} failed` : ''}`
   const utilityActions = [
-    { key: 'refresh', label: 'Refresh', action: () => void runGrowthAction('refresh_research') },
-    { key: 'select', label: 'Select', action: () => void runGrowthAction('select_opportunities') },
+    { key: 'refresh', label: 'Run daily plan', action: () => void runGrowthAction('refresh_research') },
+    { key: 'select', label: 'Re-rank moves', action: () => void runGrowthAction('select_opportunities') },
     { key: 'drafts', label: candidateCount ? 'Clear drafts' : 'Generate drafts', action: () => void runGrowthAction(candidateCount ? 'clear_current_drafts' : 'generate_drafts', undefined, candidateCount ? {} : { voiceDirection }) },
     { key: 'queue', label: 'Open queue', action: () => setActiveDrawer((current) => current === 'queue' ? null : 'queue') },
     { key: 'signals', label: 'Open signals', action: () => setActiveDrawer((current) => current === 'signals' ? null : 'signals') },
@@ -1625,11 +1674,11 @@ export function GrowthReviewPanel() {
       }
       await reload()
       const messageMap: Partial<Record<GrowthAction, string>> = {
-        refresh_research: 'Research refreshed.',
-        select_opportunities: 'Opportunities selected from the current research snapshot.',
-        refresh_research_and_select: 'Research refreshed and opportunities re-ranked.',
-        generate_drafts: 'Draft candidates generated.',
-        refresh_research_and_generate: 'Research refreshed and a new candidate pack generated.',
+        refresh_research: 'Daily growth plan refreshed.',
+        select_opportunities: 'System-selected moves re-ranked from the latest daily plan.',
+        refresh_research_and_select: 'Daily growth plan refreshed and moves re-ranked.',
+        generate_drafts: 'Draft candidates generated from the current system-selected moves.',
+        refresh_research_and_generate: 'Daily growth plan refreshed and a new draft pack generated.',
         expand_family_variants: 'Added more options for this source family.',
         rewrite_draft: 'Draft rewritten from the current research snapshot.',
         update_draft_text: 'Draft text saved.',
@@ -1726,6 +1775,13 @@ export function GrowthReviewPanel() {
             </div>
           </div>
         </div>
+        <div className="mt-4 rounded-2xl border border-cyan-500/12 bg-cyan-500/6 px-4 py-3 text-sm text-foreground/88">
+          <div className="font-medium text-foreground">The system now chooses opportunities once per day.</div>
+          <div className="mt-1 text-xs text-muted-foreground">
+            Your role starts at draft review and approval, not raw opportunity picking.
+            {growth.automationSummary?.researchRefreshAt ? ` Last daily planning run: ${formatPacificTime(growth.automationSummary.researchRefreshAt)}.` : ''}
+          </div>
+        </div>
       </div>
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_460px] xl:items-start">
@@ -1745,8 +1801,8 @@ export function GrowthReviewPanel() {
           <section className="rounded-2xl border border-white/10 bg-[#10161f] p-4 shadow-[0_18px_40px_rgba(0,0,0,0.24)]">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <div className="text-sm font-semibold text-foreground">Opportunities</div>
-                <div className="mt-1 text-xs text-muted-foreground">Choose the source move first. The inspector handles the actions.</div>
+                <div className="text-sm font-semibold text-foreground">System-selected moves</div>
+                <div className="mt-1 text-xs text-muted-foreground">These moves were auto-selected by the daily planner. Review them if you want context, but founder work starts in the draft lane.</div>
               </div>
               <FieldChip>{selectedOpportunities.length}</FieldChip>
             </div>
@@ -1766,10 +1822,10 @@ export function GrowthReviewPanel() {
                 <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-4 text-sm text-muted-foreground">
                   {allQueueItems.length
                     ? 'Nothing is in review right now. Open the publishing queue to keep moving.'
-                    : growth.noOpportunityReason || 'No live moves yet.'}
+                    : growth.noOpportunityReason || 'No auto-selected moves yet.'}
                   <div className="mt-3 flex flex-wrap gap-2">
-                    <button type="button" onClick={() => void runGrowthAction('refresh_research')} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2">Refresh research</button>
-                    <button type="button" onClick={() => void runGrowthAction('select_opportunities')} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2">Select opportunities</button>
+                    <button type="button" onClick={() => void runGrowthAction('refresh_research')} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2">Run daily plan</button>
+                    <button type="button" onClick={() => void runGrowthAction('select_opportunities')} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2">Re-rank moves</button>
                     <button type="button" onClick={() => setActiveDrawer('signals')} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2">Open signals</button>
                   </div>
                 </div>
@@ -1802,7 +1858,7 @@ export function GrowthReviewPanel() {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <div className="text-sm font-semibold text-foreground">Draft studio</div>
-                <div className="mt-1 text-xs text-muted-foreground">Compare variants here. The inspector is where you rewrite, approve, and publish.</div>
+                <div className="mt-1 text-xs text-muted-foreground">This is the main founder decision lane now. Review variants here, then approve or reject.</div>
               </div>
               <FieldChip>{groupedDraftCandidates.length}</FieldChip>
             </div>
@@ -1863,8 +1919,8 @@ export function GrowthReviewPanel() {
               ) : (
                 <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-4 text-sm text-muted-foreground">
                   {selectedOpportunities.length
-                    ? 'Opportunities are ready. Generate drafts from the selected move.'
-                    : 'No drafts yet. Refresh research or select opportunities first.'}
+                    ? 'Auto-selected moves are ready. Generate or review drafts from the current system pick.'
+                    : 'No drafts yet. Run the daily planner to refresh research, moves, and drafts.'}
                 </div>
               )}
             </div>
@@ -1877,7 +1933,7 @@ export function GrowthReviewPanel() {
               <div>
                 <div className="text-[11px] uppercase tracking-[0.14em] text-cyan-100/70">Inspector</div>
                 <div className="mt-1 text-sm font-semibold text-foreground">
-                  {inspectorMode === 'draft' ? 'Selected draft' : inspectorMode === 'opportunity' ? 'Selected opportunity' : inspectorMode === 'queue' ? 'Queue item' : 'Nothing selected'}
+                  {inspectorMode === 'draft' ? 'Selected draft' : inspectorMode === 'opportunity' ? 'System-selected move' : inspectorMode === 'queue' ? 'Queue item' : 'Nothing selected'}
                 </div>
               </div>
               {activeDrawer ? (
@@ -1980,7 +2036,7 @@ export function GrowthReviewPanel() {
                 })()
               ) : (
                 <div className="rounded-2xl border border-white/8 bg-black/15 p-4 text-sm text-muted-foreground">
-                  Select an opportunity, draft, or queue item to inspect it here. The main lane is for scanning; this panel is for acting.
+                  Select a system-selected move, draft, or queue item to inspect it here. The main lane is for scanning; this panel is for acting.
                 </div>
               )}
             </div>

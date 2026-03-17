@@ -1647,6 +1647,7 @@ export async function GET(request: NextRequest) {
           researchBriefPath: path.join(GROWTH_WEEKS_ROOT, latestGrowthWeek, 'research-brief.json'),
           opportunityPackPath: path.join(GROWTH_WEEKS_ROOT, latestGrowthWeek, 'opportunity-pack.json'),
           researchHistoryPath: path.join(GROWTH_WEEKS_ROOT, latestGrowthWeek, 'research-history.json'),
+          dailyGrowthPlanPath: path.join(GROWTH_WEEKS_ROOT, latestGrowthWeek, 'daily-growth-plan.json'),
           draftPackPath: path.join(GROWTH_WEEKS_ROOT, latestGrowthWeek, 'draft-pack.json'),
           scorecardPath: path.join(GROWTH_WEEKS_ROOT, latestGrowthWeek, 'scorecard.json'),
           approvedPostsPath: path.join(GROWTH_WEEKS_ROOT, latestGrowthWeek, 'approved-posts.json'),
@@ -1661,6 +1662,7 @@ export async function GET(request: NextRequest) {
     const growthResearch = growthPaths ? await readJsonOrNull<any>(growthPaths.researchBriefPath) : null
     const growthOpportunityPack = growthPaths ? await readJsonOrNull<any>(growthPaths.opportunityPackPath) : null
     const growthResearchHistory = growthPaths ? await readJsonOrNull<any>(growthPaths.researchHistoryPath) : null
+    const growthDailyPlan = growthPaths ? await readJsonOrNull<any>(growthPaths.dailyGrowthPlanPath) : null
     const growthDraftPack = growthPaths ? await readJsonOrNull<any>(growthPaths.draftPackPath) : null
     const growthScorecard = growthPaths ? await readJsonOrNull<any>(growthPaths.scorecardPath) : null
     const growthApprovedPosts = growthPaths ? await readJsonOrNull<any>(growthPaths.approvedPostsPath) : null
@@ -1754,11 +1756,30 @@ export async function GET(request: NextRequest) {
         researchBriefPath: growthPaths?.researchBriefPath ?? null,
         opportunityPackPath: growthPaths?.opportunityPackPath ?? null,
         researchHistoryPath: growthPaths?.researchHistoryPath ?? null,
+        dailyGrowthPlanPath: growthPaths?.dailyGrowthPlanPath ?? null,
         draftPackPath: growthPaths?.draftPackPath ?? null,
         scorecardPath: growthPaths?.scorecardPath ?? null,
+        dailyPlanGeneratedAt: growthDailyPlan?.generatedAt ?? null,
+        dailyPlanMode: growthDailyPlan?.mode ?? null,
         researchGeneratedAt: growthResearch?.generatedAt ?? null,
         draftPackGeneratedAt: growthDraftPack?.generatedAt ?? null,
         externalStatus: String(growthResearch?.externalStatus || 'missing'),
+        signalState: String(growthResearch?.signalState || growthDailyPlan?.signalState || 'history_only'),
+        signalProvenance: Array.isArray(growthResearch?.signalProvenance) ? growthResearch.signalProvenance : [],
+        strategyNote: String(growthResearch?.strategyNote || '').trim() || null,
+        degradedModeStreak: Number(growthResearch?.degradedModeStreak || growthDailyPlan?.degradedModeStreak || 0),
+        automationSummary: {
+          runsOncePerDayPt: true,
+          founderChoosesOpportunities: false,
+          founderReviewsDrafts: true,
+          resultsSyncAt: growthDailyPlan?.resultsSyncAt ?? null,
+          founderTimelineSyncAt: growthDailyPlan?.founderTimelineSyncAt ?? null,
+          researchRefreshAt: growthDailyPlan?.researchRefreshAt ?? null,
+          opportunitySelectionAt: growthDailyPlan?.opportunitySelectionAt ?? null,
+          draftGenerationAt: growthDailyPlan?.draftGenerationAt ?? null,
+          selectedOpportunityCount: Number(growthDailyPlan?.selectedOpportunityCount || normalizedSelectedOpportunities.length || 0),
+          draftCount: Number(growthDailyPlan?.draftCount || reconciledGrowthState.draftCandidates.length || 0),
+        },
         freshness: growthResearch?.freshness || null,
         researchSignals: normalizeGrowthResearchSignals(growthResearch?.signals),
         strategy: normalizeGrowthStrategy(growthResearch?.growthStrategy),

@@ -43,9 +43,22 @@ interface FounderApiResponse {
     researchBriefPath: string | null
     draftPackPath: string | null
     scorecardPath: string | null
+    dailyPlanGeneratedAt?: string | null
     researchGeneratedAt?: string | null
     draftPackGeneratedAt?: string | null
     externalStatus: string
+    signalState?: string
+    strategyNote?: string | null
+    automationSummary?: {
+      runsOncePerDayPt: boolean
+      founderChoosesOpportunities: boolean
+      founderReviewsDrafts: boolean
+      researchRefreshAt?: string | null
+      opportunitySelectionAt?: string | null
+      draftGenerationAt?: string | null
+      selectedOpportunityCount?: number
+      draftCount?: number
+    } | null
     researchSignals: string[]
     strategy: {
       primaryGoal: string
@@ -1054,7 +1067,9 @@ export function FounderCockpitPanel() {
                   <div>
                     <div className="text-sm font-semibold text-foreground">Growth</div>
                     <div className="mt-1 text-xs text-muted-foreground">
-                      {data.growth.week ? `${data.growth.week} research review • ${data.growth.externalStatus}` : 'No growth pack generated yet.'}
+                      {data.growth.week
+                        ? `${data.growth.week} daily planner • ${String(data.growth.signalState || data.growth.externalStatus || 'history_only').replace(/_/g, ' ')}`
+                        : 'No growth pack generated yet.'}
                     </div>
                   </div>
                   <button
@@ -1066,10 +1081,14 @@ export function FounderCockpitPanel() {
                 </div>
 
                 <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                  <Metric label="Drafts" value={data.growth.draftCandidates.length} subtitle="Candidates ready" color="blue" />
+                  <Metric label="Drafts" value={data.growth.draftCandidates.length} subtitle="Founder review lane" color="blue" />
                   <Metric label="Approved" value={data.growth.approvedPosts.length} subtitle="Ready to publish" color="green" />
-                  <Metric label="Quote Targets" value={data.growth.engagementTargets.quoteTargets.length} subtitle="Credible sources" color="purple" />
+                  <Metric label="Auto-selected" value={Number(data.growth.automationSummary?.selectedOpportunityCount || 0)} subtitle="Chosen by system" color="purple" />
                   <Metric label="Reply Targets" value={data.growth.engagementTargets.replyTargets.length} subtitle="Live conversations" color="amber" />
+                </div>
+
+                <div className="mt-3 rounded-xl border border-white/10 bg-black/15 px-3 py-3 text-xs text-foreground/82">
+                  The system now runs growth planning once per day and auto-selects opportunities. Founder work starts at draft review and approval.
                 </div>
 
                 <div className="mt-4 grid gap-3 xl:grid-cols-3">

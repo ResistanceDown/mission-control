@@ -996,13 +996,12 @@ export async function POST(request: NextRequest) {
     switch (body.action) {
       case 'refresh_research': {
         await sanitizeDraftPack(draftPackJsonPath)
-        await runGrowthCommand('growth:m92:week-open', week)
-        await runGrowthCommand('growth:m92:results-sync', week)
-        await runGrowthCommand('growth:m92:research-brief', week, ['--force-refresh', 'true'])
+        await runGrowthCommand('growth:m92:daily-plan', week, ['--force-refresh', 'true'])
         return NextResponse.json({ status: 'ok', action: 'refresh_research', week })
       }
       case 'select_opportunities': {
-        await runGrowthCommand('growth:m92:select-opportunities', week)
+        await sanitizeDraftPack(draftPackJsonPath)
+        await runGrowthCommand('growth:m92:daily-plan', week, ['--force-refresh', 'true'])
         return NextResponse.json({ status: 'ok', action: 'select_opportunities', week })
       }
       case 'reject_opportunity':
@@ -1110,20 +1109,16 @@ export async function POST(request: NextRequest) {
       }
       case 'refresh_research_and_select': {
         await sanitizeDraftPack(draftPackJsonPath)
-        await runGrowthCommand('growth:m92:week-open', week)
-        await runGrowthCommand('growth:m92:results-sync', week)
-        await runGrowthCommand('growth:m92:research-brief', week, ['--force-refresh', 'true'])
-        await runGrowthCommand('growth:m92:select-opportunities', week)
+        await runGrowthCommand('growth:m92:daily-plan', week, ['--force-refresh', 'true'])
         return NextResponse.json({ status: 'ok', action: 'refresh_research_and_select', week })
       }
       case 'refresh_research_and_generate': {
         const voiceDirection = String(body.voiceDirection || '').trim()
         await sanitizeDraftPack(draftPackJsonPath)
-        await runGrowthCommand('growth:m92:week-open', week)
-        await runGrowthCommand('growth:m92:results-sync', week)
-        await runGrowthCommand('growth:m92:research-brief', week, ['--force-refresh', 'true'])
-        await runGrowthCommand('growth:m92:select-opportunities', week)
-        await runGrowthCommand('growth:m92:draft-pack', week, voiceDirection ? ['--voice-direction', voiceDirection] : [])
+        await runGrowthCommand('growth:m92:daily-plan', week, ['--force-refresh', 'true'])
+        if (voiceDirection) {
+          await runGrowthCommand('growth:m92:draft-pack', week, ['--voice-direction', voiceDirection])
+        }
         return NextResponse.json({ status: 'ok', action: 'refresh_research_and_generate', week })
       }
       case 'generate_drafts': {
