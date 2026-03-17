@@ -618,6 +618,7 @@ export async function POST(request: NextRequest) {
           title: item.title,
           priority,
           status: targetStatus.status,
+          sessionRouting: 'task',
           details: [
             `Lane: ${item.lane}`,
             `Agent job: ${agentJob}`,

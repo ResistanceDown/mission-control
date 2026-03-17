@@ -82,6 +82,7 @@ export async function POST(
       taskId: task.id,
       title: task.title,
       message,
+      sessionRouting: 'probe',
     })
 
     if (!dispatch.delivered) {

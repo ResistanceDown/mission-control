@@ -1,19 +1,11 @@
 import { getDatabase } from './db'
 import { logger } from './logger'
-import { getAllGatewaySessions, type GatewaySession } from './sessions'
+import { getAllGatewaySessions } from './sessions'
 import { getCompatibilityLaneAgentIdForAssignee } from './habi-agent-jobs'
+import { pickBestAgentSession } from './agent-session-routing'
 
 function normalizeAgentName(value: string): string {
   return value.trim().toLowerCase().replace(/[\s_]+/g, '-')
-}
-
-function pickBestSession(sessions: GatewaySession[]): GatewaySession | null {
-  if (sessions.length === 0) return null
-  const sorted = [...sessions].sort((a, b) => {
-    if (a.active !== b.active) return a.active ? -1 : 1
-    return b.updatedAt - a.updatedAt
-  })
-  return sorted[0] || null
 }
 
 export function resolveSessionKeyForAgent(agentName: string): string | null {
@@ -29,7 +21,7 @@ export function resolveSessionLinkForAgent(agentName: string): {
   const sessions = getAllGatewaySessions().filter(
     (session) => normalizeAgentName(session.agent) === normalized
   )
-  const best = pickBestSession(sessions)
+  const best = pickBestAgentSession(sessions)
   if (best) {
     return {
       sessionKey: best.key || best.sessionId || null,
@@ -45,7 +37,7 @@ export function resolveSessionLinkForAgent(agentName: string): {
   const fallbackSessions = getAllGatewaySessions().filter(
     (session) => normalizeAgentName(session.agent) === normalizeAgentName(compatibilityAgent)
   )
-  const fallback = pickBestSession(fallbackSessions)
+  const fallback = pickBestAgentSession(fallbackSessions)
   return {
     sessionKey: fallback ? (fallback.key || fallback.sessionId || null) : null,
     compatibilityAgent: fallback ? compatibilityAgent : null,

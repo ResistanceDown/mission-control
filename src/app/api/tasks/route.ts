@@ -305,6 +305,7 @@ export async function POST(request: NextRequest) {
         title,
         priority,
         status,
+        sessionRouting: isHabiTask({ assigned_to: normalizedAssignedTo }) ? 'task' : 'default',
       })
       if (!dispatch.delivered) {
         logger.warn(

@@ -139,13 +139,6 @@ export async function PUT(
       due_date,
       estimated_hours,
       actual_hours,
-      outcome,
-      error_message,
-      resolution,
-      feedback_rating,
-      feedback_notes,
-      retry_count,
-      completed_at,
       tags,
       metadata
     } = body;
@@ -494,40 +487,6 @@ export async function PUT(
       fieldsToUpdate.push('actual_hours = ?');
       updateParams.push(actual_hours);
     }
-    if (outcome !== undefined) {
-      fieldsToUpdate.push('outcome = ?');
-      updateParams.push(outcome);
-    }
-    if (error_message !== undefined) {
-      fieldsToUpdate.push('error_message = ?');
-      updateParams.push(error_message);
-    }
-    if (resolution !== undefined) {
-      fieldsToUpdate.push('resolution = ?');
-      updateParams.push(resolution);
-    }
-    if (feedback_rating !== undefined) {
-      fieldsToUpdate.push('feedback_rating = ?');
-      updateParams.push(feedback_rating);
-    }
-    if (feedback_notes !== undefined) {
-      fieldsToUpdate.push('feedback_notes = ?');
-      updateParams.push(feedback_notes);
-    }
-    if (retry_count !== undefined) {
-      fieldsToUpdate.push('retry_count = ?');
-      updateParams.push(retry_count);
-    }
-    if (completed_at !== undefined) {
-      fieldsToUpdate.push('completed_at = ?');
-      updateParams.push(completed_at);
-    } else if (persistedStatus === 'done' && currentTask.status !== 'done') {
-      fieldsToUpdate.push('completed_at = ?');
-      updateParams.push(now);
-    } else if (status !== undefined && persistedStatus !== 'done' && currentTask.status === 'done') {
-      fieldsToUpdate.push('completed_at = ?');
-      updateParams.push(null);
-    }
     if (tags !== undefined) {
       fieldsToUpdate.push('tags = ?');
       updateParams.push(JSON.stringify(tags));
@@ -693,6 +652,7 @@ export async function PUT(
           title: title || currentTask.title,
           priority: String(priority || currentTask.priority),
           status: 'in_progress',
+          sessionRouting: 'task',
           details: [
             ...preparedExecution.dispatchDetails,
             `Lane: ${String(preparedMetadata.origin_lane || 'n/a')}`,
@@ -808,14 +768,6 @@ export async function PUT(
     
     if (priority && priority !== currentTask.priority) {
       changes.push(`priority: ${currentTask.priority} → ${priority}`);
-    }
-
-    if (outcome !== undefined && outcome !== currentTask.outcome) {
-      changes.push(`outcome: ${currentTask.outcome || 'unset'} → ${outcome}`);
-    }
-
-    if (retry_count !== undefined && retry_count !== currentTask.retry_count) {
-      changes.push(`retry count: ${currentTask.retry_count || 0} → ${retry_count}`);
     }
 
     if (project_id !== undefined && project_id !== currentTask.project_id) {
