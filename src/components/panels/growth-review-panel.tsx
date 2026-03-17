@@ -1480,10 +1480,12 @@ export function GrowthReviewPanel() {
   const utilityActions = [
     { key: 'refresh', label: 'Full refresh', action: () => void runGrowthAction('refresh_research') },
     { key: 'select', label: 'Reselect from current research', action: () => void runGrowthAction('select_opportunities') },
-    { key: 'drafts', label: candidateCount ? 'Clear drafts' : 'Generate drafts', action: () => void runGrowthAction(candidateCount ? 'clear_current_drafts' : 'generate_drafts', undefined, candidateCount ? {} : { voiceDirection }) },
+    { key: 'drafts', label: candidateCount ? 'Clear draft batch' : 'Generate drafts', action: () => void runGrowthAction(candidateCount ? 'clear_current_drafts' : 'generate_drafts', undefined, candidateCount ? {} : { voiceDirection }) },
     { key: 'queue', label: 'Open queue', action: () => setActiveDrawer((current) => current === 'queue' ? null : 'queue') },
     { key: 'signals', label: 'Open signals', action: () => setActiveDrawer((current) => current === 'signals' ? null : 'signals') },
   ]
+  const primaryActions = utilityActions.slice(0, 2)
+  const secondaryActions = utilityActions.slice(2)
 
   const fallbackOpportunityFamilies = useMemo(() => {
     const grouped = new Map<string, GrowthApiResponse['growth']['selectedOpportunities']>()
@@ -1580,6 +1582,37 @@ export function GrowthReviewPanel() {
     if (selection?.kind !== 'draft') return selectedDraftFamily.drafts[0] || null
     return selectedDraftFamily.drafts.find((draft) => draft.id === selection.draftId) || selectedDraftFamily.drafts[0] || null
   }, [selectedDraftFamily, selection])
+
+  const founderActionTitle = readyToSchedule
+    ? 'Schedule or publish the approved posts waiting in the queue.'
+    : selectedDraft
+      ? 'Review the selected draft and either approve it, rewrite it, or reject it.'
+      : candidateCount
+        ? 'Review the generated draft families and pick the strongest one to approve or rewrite.'
+        : selectedOpportunities.length
+          ? 'The system found moves, but no draft cleared the bar. Re-select or run a full refresh.'
+          : 'Run a full refresh to rebuild research, moves, and drafts.'
+  const founderActionBody = readyToSchedule
+    ? `${readyToSchedule} approved post${readyToSchedule === 1 ? '' : 's'} ${readyToSchedule === 1 ? 'is' : 'are'} waiting in the publishing queue.`
+    : selectedDraft
+      ? `${selectedDraft.distribution_type || 'draft'}${selectedDraft.source_account ? ` from ${selectedDraft.source_account}` : ''} is selected in the draft lane.`
+      : candidateCount
+        ? `${candidateCount} draft candidate${candidateCount === 1 ? '' : 's'} ${candidateCount === 1 ? 'is' : 'are'} ready for founder review.`
+        : selectedOpportunities.length
+          ? `${selectedOpportunities.length} system-selected move${selectedOpportunities.length === 1 ? '' : 's'} are available, but none produced a strong enough draft pack.`
+          : 'No usable work is in the lane yet.'
+  const founderChecklist = readyToSchedule
+    ? ['Open the publishing queue', 'Schedule or publish the approved post', 'Return later for the next draft batch']
+    : selectedDraft
+      ? ['Read the selected draft', 'Approve, rewrite, or reject it', 'Ignore the move list unless you need context']
+      : candidateCount
+        ? ['Start in Draft studio', 'Pick the strongest family', 'Approve or rewrite before looking at signals']
+        : selectedOpportunities.length
+          ? ['Try Reselect from current research', 'Use Full refresh only if the research itself feels stale', 'Ignore low-value moves']
+          : ['Run Full refresh', 'Wait for new drafts', 'Come back to review only when the lane refills']
+  const automationStatusLine = growth?.automationSummary?.draftGenerationAt
+    ? `Last system planning run ${formatPacificTime(growth.automationSummary.draftGenerationAt)}`
+    : 'System planning has not completed yet today'
 
   const selectedQueueEntry = useMemo(() => {
     if (selection?.kind !== 'queue') return null
@@ -1746,12 +1779,12 @@ export function GrowthReviewPanel() {
       <div className="rounded-2xl border border-white/10 bg-[linear-gradient(135deg,rgba(15,20,27,0.98),rgba(11,16,23,0.98))] p-5 shadow-[0_24px_60px_rgba(0,0,0,0.35)]">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
           <div className="min-w-0">
-            <div className="text-sm font-semibold text-foreground">Growth command desk</div>
-            <div className="mt-1 text-sm text-muted-foreground">{researchStatusLine} • {queueStatusLine}</div>
+            <div className="text-sm font-semibold text-foreground">Growth desk</div>
+            <div className="mt-1 text-sm text-muted-foreground">{automationStatusLine} • {researchStatusLine}</div>
           </div>
           <div className="flex flex-col gap-3 xl:items-end">
             <div className="flex flex-wrap gap-2 rounded-2xl border border-white/8 bg-black/20 p-2">
-              {utilityActions.map((item) => (
+              {primaryActions.map((item) => (
                 <button
                   key={item.key}
                   type="button"
@@ -1759,9 +1792,7 @@ export function GrowthReviewPanel() {
                   disabled={actionState.status === 'saving'}
                   className={cx(
                     'rounded-lg border px-3 py-2 text-xs font-medium transition-smooth disabled:opacity-60',
-                    (activeDrawer === 'queue' && item.key === 'queue') || (activeDrawer === 'signals' && item.key === 'signals')
-                      ? 'border-cyan-500/25 bg-cyan-500/12 text-cyan-100'
-                      : 'border-white/10 bg-[#121922] text-foreground hover:bg-surface-2',
+                    'border-cyan-500/25 bg-cyan-500/12 text-cyan-100 hover:bg-cyan-500/18',
                   )}
                 >
                   {item.label}
@@ -1787,6 +1818,32 @@ export function GrowthReviewPanel() {
             <span className="text-foreground">Reselect from current research</span> keeps today&apos;s research snapshot, picks a different move set, and regenerates drafts.
           </div>
         </div>
+        <div className="mt-4 rounded-2xl border border-emerald-500/12 bg-emerald-500/6 p-4">
+          <div className="text-[11px] uppercase tracking-[0.14em] text-emerald-100/70">What you should do now</div>
+          <div className="mt-1 text-base font-semibold text-foreground">{founderActionTitle}</div>
+          <div className="mt-2 text-sm text-foreground/85">{founderActionBody}</div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {founderChecklist.map((item) => <FieldChip key={item}>{item}</FieldChip>)}
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {secondaryActions.map((item) => (
+              <button
+                key={item.key}
+                type="button"
+                onClick={item.action}
+                disabled={actionState.status === 'saving'}
+                className={cx(
+                  'rounded-lg border px-3 py-2 text-xs font-medium transition-smooth disabled:opacity-60',
+                  (activeDrawer === 'queue' && item.key === 'queue') || (activeDrawer === 'signals' && item.key === 'signals')
+                    ? 'border-cyan-500/25 bg-cyan-500/12 text-cyan-100'
+                    : 'border-white/10 bg-[#121922] text-foreground hover:bg-surface-2',
+                )}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_460px] xl:items-start">
@@ -1800,62 +1857,6 @@ export function GrowthReviewPanel() {
               {selectedDraft?.source_account ? <CommandChip label={selectedDraft.source_account} /> : selectedOpportunity?.sourceAccount ? <CommandChip label={selectedOpportunity.sourceAccount} /> : topOpportunity?.sourceAccount ? <CommandChip label={topOpportunity.sourceAccount} /> : null}
               {selectedOpportunity?.confidence ? <CommandChip label={selectedOpportunity.confidence} tone={selectedOpportunity.confidence === 'high' ? 'queue' : selectedOpportunity.confidence === 'low' ? 'warning' : 'neutral'} /> : topOpportunity?.confidence ? <CommandChip label={topOpportunity.confidence} tone={topOpportunity.confidence === 'high' ? 'queue' : topOpportunity.confidence === 'low' ? 'warning' : 'neutral'} /> : null}
               <CommandChip label={growth.freshness?.cacheUsed ? `Cached ${Number(growth.freshness?.cacheAgeMinutes || 0).toFixed(0)}m` : growth.externalStatus || 'fresh'} />
-            </div>
-          </section>
-
-          <section className="rounded-2xl border border-white/10 bg-[#10161f] p-4 shadow-[0_18px_40px_rgba(0,0,0,0.24)]">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <div className="text-sm font-semibold text-foreground">System-selected moves</div>
-                <div className="mt-1 text-xs text-muted-foreground">These moves were auto-selected by the daily planner. Review them if you want context, but founder work starts in the draft lane.</div>
-              </div>
-              <FieldChip>{selectedOpportunities.length}</FieldChip>
-            </div>
-            <div className="mt-4 space-y-3">
-              {compactOpportunities.length ? compactOpportunities.map((family) => {
-                const leader = family.opportunities[0]
-                const isSelected = selectedOpportunitySourceFamilyKey === (leader.sourceFamilyKey || leader.sourceUrl || leader.id)
-                return (
-                  <OpportunitySelectorCard
-                    key={family.key}
-                    opportunity={leader}
-                    selected={isSelected}
-                    onSelect={() => setSelection({ kind: 'opportunity', id: leader.id })}
-                  />
-                )
-              }) : (
-                <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-4 text-sm text-muted-foreground">
-                  {allQueueItems.length
-                    ? 'Nothing is in review right now. Open the publishing queue to keep moving.'
-                    : growth.noOpportunityReason || 'No auto-selected moves yet.'}
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <button type="button" onClick={() => void runGrowthAction('refresh_research')} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2">Full refresh</button>
-                    <button type="button" onClick={() => void runGrowthAction('select_opportunities')} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2">Reselect from current research</button>
-                    <button type="button" onClick={() => setActiveDrawer('signals')} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2">Open signals</button>
-                  </div>
-                </div>
-              )}
-              {showFallbackStub ? (
-                <details className="rounded-xl border border-white/8 bg-black/15 p-3">
-                  <summary className="cursor-pointer list-none text-sm font-medium text-foreground">Fallback original posts</summary>
-                  <div className="mt-2 space-y-2">
-                    {fallbackOpportunityFamilies.map((family) => {
-                      const leader = family.opportunities[0]
-                      return (
-                        <button
-                          key={`fallback-${family.key}`}
-                          type="button"
-                          onClick={() => setSelection({ kind: 'opportunity', id: leader.id })}
-                          className="w-full rounded-xl border border-white/8 bg-black/15 px-3 py-3 text-left hover:bg-surface-2/70"
-                        >
-                          <div className="text-sm font-medium text-foreground">{leader.title || family.sourceLabel}</div>
-                          <div className="mt-1 text-xs text-muted-foreground">{leader.selectionReason || leader.whyNow || 'Fallback original'}</div>
-                        </button>
-                      )
-                    })}
-                  </div>
-                </details>
-              ) : null}
             </div>
           </section>
 
@@ -1930,15 +1931,68 @@ export function GrowthReviewPanel() {
               )}
             </div>
           </section>
+
+          <details className="rounded-2xl border border-white/10 bg-[#10161f] p-4 shadow-[0_18px_40px_rgba(0,0,0,0.24)]">
+            <summary className="cursor-pointer list-none">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-foreground">Context behind today&apos;s moves</div>
+                  <div className="mt-1 text-xs text-muted-foreground">Open this when you want to inspect why the system picked today&apos;s opportunities. Most of the time you can stay in Draft studio.</div>
+                </div>
+                <FieldChip>{selectedOpportunities.length}</FieldChip>
+              </div>
+            </summary>
+            <div className="mt-4 space-y-3">
+              {compactOpportunities.length ? compactOpportunities.map((family) => {
+                const leader = family.opportunities[0]
+                const isSelected = selectedOpportunitySourceFamilyKey === (leader.sourceFamilyKey || leader.sourceUrl || leader.id)
+                return (
+                  <OpportunitySelectorCard
+                    key={family.key}
+                    opportunity={leader}
+                    selected={isSelected}
+                    onSelect={() => setSelection({ kind: 'opportunity', id: leader.id })}
+                  />
+                )
+              }) : (
+                <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-4 text-sm text-muted-foreground">
+                  {allQueueItems.length
+                    ? 'Nothing is in review right now. Open the publishing queue to keep moving.'
+                    : growth.noOpportunityReason || 'No auto-selected moves yet.'}
+                </div>
+              )}
+              {showFallbackStub ? (
+                <details className="rounded-xl border border-white/8 bg-black/15 p-3">
+                  <summary className="cursor-pointer list-none text-sm font-medium text-foreground">Fallback original posts</summary>
+                  <div className="mt-2 space-y-2">
+                    {fallbackOpportunityFamilies.map((family) => {
+                      const leader = family.opportunities[0]
+                      return (
+                        <button
+                          key={`fallback-${family.key}`}
+                          type="button"
+                          onClick={() => setSelection({ kind: 'opportunity', id: leader.id })}
+                          className="w-full rounded-xl border border-white/8 bg-black/15 px-3 py-3 text-left hover:bg-surface-2/70"
+                        >
+                          <div className="text-sm font-medium text-foreground">{leader.title || family.sourceLabel}</div>
+                          <div className="mt-1 text-xs text-muted-foreground">{leader.selectionReason || leader.whyNow || 'Fallback original'}</div>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </details>
+              ) : null}
+            </div>
+          </details>
         </div>
 
         <aside className="xl:sticky xl:top-4 xl:self-start">
           <div className="rounded-2xl border border-white/10 bg-[linear-gradient(180deg,rgba(15,20,27,0.98),rgba(11,16,23,0.98))] p-4 shadow-[0_24px_48px_rgba(0,0,0,0.3)]">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <div className="text-[11px] uppercase tracking-[0.14em] text-cyan-100/70">Inspector</div>
+                <div className="text-[11px] uppercase tracking-[0.14em] text-cyan-100/70">Focus panel</div>
                 <div className="mt-1 text-sm font-semibold text-foreground">
-                  {inspectorMode === 'draft' ? 'Selected draft' : inspectorMode === 'opportunity' ? 'System-selected move' : inspectorMode === 'queue' ? 'Queue item' : 'Nothing selected'}
+                  {inspectorMode === 'draft' ? 'Work on this draft' : inspectorMode === 'opportunity' ? 'Context for this move' : inspectorMode === 'queue' ? 'Work on this queue item' : 'Nothing selected'}
                 </div>
               </div>
               {activeDrawer ? (
@@ -2041,7 +2095,7 @@ export function GrowthReviewPanel() {
                 })()
               ) : (
                 <div className="rounded-2xl border border-white/8 bg-black/15 p-4 text-sm text-muted-foreground">
-                  Select a system-selected move, draft, or queue item to inspect it here. The main lane is for scanning; this panel is for acting.
+                  Pick a draft to act on. Only open move context or queue items here when you need more detail.
                 </div>
               )}
             </div>
