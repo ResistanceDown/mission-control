@@ -138,6 +138,7 @@ export async function POST(
       `Ping delivered to ${task.assigned_to}.`,
       `Status: ${task.status}`,
       `Session: ${dispatch.sessionKey || 'unknown'}`,
+      dispatch.compatibilityAgent ? `Compatibility agent: ${dispatch.compatibilityAgent}` : '',
       note ? `Operator note: ${note}` : '',
     ]
       .filter(Boolean)

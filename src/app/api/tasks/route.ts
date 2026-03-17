@@ -7,8 +7,9 @@ import { logger } from '@/lib/logger';
 import { validateBody, createTaskSchema, bulkUpdateTaskStatusSchema } from '@/lib/validation';
 import { resolveMentionRecipients } from '@/lib/mentions';
 import { dispatchTaskAssignment } from '@/lib/task-assignment-dispatch';
-import { habiTaskContractErrorMessage, isHabiTask, validateHabiTaskContract } from '@/lib/habi-task-contract';
+import { habiTaskContractErrorMessage, isHabiTask, parseHabiTaskMetadata, validateHabiTaskContract } from '@/lib/habi-task-contract';
 import { ensureHabiTaskSubscriptions } from '@/lib/habi-task-ops';
+import { getAgentIdForJob, inferAgentJob } from '@/lib/habi-agent-jobs';
 
 function formatTicketRef(prefix?: string | null, num?: number | null): string | undefined {
   if (!prefix || typeof num !== 'number' || !Number.isFinite(num) || num <= 0) return undefined
@@ -19,7 +20,7 @@ function mapTaskRow(task: any): Task & { tags: string[]; metadata: Record<string
   return {
     ...task,
     tags: task.tags ? JSON.parse(task.tags) : [],
-    metadata: task.metadata ? JSON.parse(task.metadata) : {},
+    metadata: parseHabiTaskMetadata(task.metadata),
     ticket_ref: formatTicketRef(task.project_prefix, task.project_ticket_no),
   }
 }
@@ -163,7 +164,6 @@ export async function POST(request: NextRequest) {
     const body = validated.data;
 
     const user = auth.user
-    const actor = user?.display_name || user?.username || 'system'
     const {
       title,
       description,
@@ -171,22 +171,28 @@ export async function POST(request: NextRequest) {
       priority = 'medium',
       project_id,
       assigned_to,
+      created_by = user?.username || 'system',
       due_date,
       estimated_hours,
-      actual_hours,
-      outcome,
-      error_message,
-      resolution,
-      feedback_rating,
-      feedback_notes,
-      retry_count = 0,
-      completed_at,
       tags = [],
       metadata = {}
     } = body;
+    const normalizedMetadata = parseHabiTaskMetadata(metadata);
+    const normalizedAssignedTo =
+      Boolean(normalizedMetadata.agent_job) || Boolean(normalizedMetadata.origin_lane)
+        ? getAgentIdForJob(
+            inferAgentJob({
+              lane: typeof normalizedMetadata.origin_lane === 'string' ? normalizedMetadata.origin_lane : undefined,
+              assignee: assigned_to,
+              agentJob: typeof normalizedMetadata.agent_job === 'string' ? normalizedMetadata.agent_job : undefined,
+              executionMode: typeof normalizedMetadata.execution_mode === 'string' ? normalizedMetadata.execution_mode : undefined,
+              mutationMode: typeof normalizedMetadata.mutation_mode === 'string' ? normalizedMetadata.mutation_mode : undefined,
+            })
+          )
+        : assigned_to;
 
-    if (isHabiTask({ assigned_to })) {
-      const contract = validateHabiTaskContract({ assigned_to, metadata });
+    if (isHabiTask({ assigned_to: normalizedAssignedTo }) || Boolean(normalizedMetadata.agent_job) || Boolean(normalizedMetadata.origin_lane)) {
+      const contract = validateHabiTaskContract({ assigned_to: normalizedAssignedTo, metadata: normalizedMetadata });
       if (!contract.ok) {
         return NextResponse.json(
           { error: habiTaskContractErrorMessage(contract.missing, contract.invalidGate) },
@@ -226,20 +232,9 @@ export async function POST(request: NextRequest) {
       const insertStmt = db.prepare(`
         INSERT INTO tasks (
           title, description, status, priority, project_id, project_ticket_no, assigned_to, created_by,
-          created_at, updated_at, due_date, estimated_hours, actual_hours,
-          outcome, error_message, resolution, feedback_rating, feedback_notes, retry_count, completed_at,
-          tags, metadata, workspace_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          created_at, updated_at, due_date, estimated_hours, tags, metadata, workspace_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
-
-      const effectiveCompletedAt =
-        status === 'done'
-          ? (completed_at || now)
-          : (completed_at ?? null)
-      const effectiveOutcome =
-        status === 'done'
-          ? (outcome || 'success')
-          : (outcome ?? null)
 
       const dbResult = insertStmt.run(
         title,
@@ -248,20 +243,12 @@ export async function POST(request: NextRequest) {
         priority,
         resolvedProjectId,
         row.ticket_counter,
-        assigned_to,
-        actor,
+        normalizedAssignedTo,
+        created_by,
         now,
         now,
         due_date,
         estimated_hours,
-        actual_hours,
-        effectiveOutcome,
-        error_message,
-        resolution,
-        feedback_rating,
-        feedback_notes,
-        retry_count,
-        effectiveCompletedAt,
         JSON.stringify(tags),
         JSON.stringify(metadata),
         workspaceId
@@ -272,25 +259,25 @@ export async function POST(request: NextRequest) {
     const taskId = createTaskTx()
     
     // Log activity
-    db_helpers.logActivity('task_created', 'task', taskId, actor, `Created task: ${title}`, {
+    db_helpers.logActivity('task_created', 'task', taskId, created_by, `Created task: ${title}`, {
       title,
       status,
       priority,
-      assigned_to
+      assigned_to: normalizedAssignedTo
     }, workspaceId);
 
-    if (actor) {
-      db_helpers.ensureTaskSubscription(taskId, actor, workspaceId)
+    if (created_by) {
+      db_helpers.ensureTaskSubscription(taskId, created_by, workspaceId)
     }
 
     for (const recipient of mentionResolution.recipients) {
       db_helpers.ensureTaskSubscription(taskId, recipient, workspaceId);
-      if (recipient === actor) continue;
+      if (recipient === created_by) continue;
       db_helpers.createNotification(
         recipient,
         'mention',
         'You were mentioned in a task description',
-        `${actor} mentioned you in task "${title}"`,
+        `${created_by} mentioned you in task "${title}"`,
         'task',
         taskId,
         workspaceId
@@ -298,10 +285,10 @@ export async function POST(request: NextRequest) {
     }
 
     // Create notification if assigned
-    if (assigned_to) {
-      db_helpers.ensureTaskSubscription(taskId, assigned_to, workspaceId)
+    if (normalizedAssignedTo) {
+      db_helpers.ensureTaskSubscription(taskId, normalizedAssignedTo, workspaceId)
       db_helpers.createNotification(
-        assigned_to,
+        normalizedAssignedTo,
         'assignment',
         'Task Assigned',
         `You have been assigned to task: ${title}`,
@@ -312,8 +299,8 @@ export async function POST(request: NextRequest) {
 
       const dispatch = await dispatchTaskAssignment({
         workspaceId: workspaceId ?? 1,
-        actor,
-        assignee: assigned_to,
+        actor: created_by,
+        assignee: normalizedAssignedTo,
         taskId,
         title,
         priority,
@@ -321,14 +308,14 @@ export async function POST(request: NextRequest) {
       })
       if (!dispatch.delivered) {
         logger.warn(
-          { taskId, assignee: assigned_to, reason: dispatch.reason || 'unknown' },
+          { taskId, assignee: normalizedAssignedTo, reason: dispatch.reason || 'unknown' },
           'Task created but assignment dispatch was not delivered'
         )
       }
     }
 
-    if (isHabiTask({ assigned_to })) {
-      ensureHabiTaskSubscriptions(taskId, workspaceId, assigned_to, actor)
+    if (isHabiTask({ assigned_to: normalizedAssignedTo })) {
+      ensureHabiTaskSubscriptions(taskId, workspaceId, normalizedAssignedTo, created_by)
     }
     
     // Fetch the created task
@@ -370,6 +357,12 @@ export async function PUT(request: NextRequest) {
 
     const now = Math.floor(Date.now() / 1000);
 
+    const updateStmt = db.prepare(`
+      UPDATE tasks
+      SET status = ?, updated_at = ?
+      WHERE id = ? AND workspace_id = ?
+    `);
+
     const actor = auth.user.username
 
     const transaction = db.transaction((tasksToUpdate: any[]) => {
@@ -388,20 +381,7 @@ export async function PUT(request: NextRequest) {
           }
         }
 
-        const completedAt =
-          task.status === 'done'
-            ? (oldTask.completed_at || now)
-            : (oldTask.status === 'done' ? null : oldTask.completed_at || null)
-        const outcome =
-          task.status === 'done'
-            ? (oldTask.outcome || 'success')
-            : oldTask.outcome || null
-
-        db.prepare(`
-          UPDATE tasks
-          SET status = ?, updated_at = ?, completed_at = ?, outcome = ?
-          WHERE id = ? AND workspace_id = ?
-        `).run(task.status, now, completedAt, outcome, task.id, workspaceId);
+        updateStmt.run(task.status, now, task.id, workspaceId);
 
         // Log status change if different
         if (oldTask && oldTask.status !== task.status) {

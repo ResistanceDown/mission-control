@@ -8,8 +8,11 @@ import { validateBody, updateTaskSchema } from '@/lib/validation';
 import { resolveMentionRecipients } from '@/lib/mentions';
 import { dispatchTaskAssignment } from '@/lib/task-assignment-dispatch';
 import { habiTaskContractErrorMessage, isHabiTask, parseHabiTaskMetadata, validateHabiTaskContract } from '@/lib/habi-task-contract';
+import { classifyFounderTaskState, requiresLiveApproval } from '@/lib/habi-founder-state';
 import { ensureHabiTaskSubscriptions } from '@/lib/habi-task-ops';
+import { getAgentIdForJob, inferAgentJob } from '@/lib/habi-agent-jobs';
 import { prepareHabiTaskExecution } from '@/lib/habi-task-execution';
+import { mergeTaskBranchToMain } from '@/lib/habi-delivery-merge';
 
 function formatTicketRef(prefix?: string | null, num?: number | null): string | undefined {
   if (!prefix || typeof num !== 'number' || !Number.isFinite(num) || num <= 0) return undefined
@@ -20,7 +23,7 @@ function mapTaskRow(task: any): Task & { tags: string[]; metadata: Record<string
   return {
     ...task,
     tags: task.tags ? JSON.parse(task.tags) : [],
-    metadata: task.metadata ? JSON.parse(task.metadata) : {},
+    metadata: parseHabiTaskMetadata(task.metadata),
     ticket_ref: formatTicketRef(task.project_prefix, task.project_ticket_no),
   }
 }
@@ -37,12 +40,6 @@ function hasAegisApproval(
     LIMIT 1
   `).get(taskId, workspaceId) as { status?: string } | undefined
   return review?.status === 'approved'
-}
-
-function requiresLiveApproval(metadata: Record<string, unknown> | null | undefined): boolean {
-  if (!metadata || typeof metadata !== 'object') return false
-  if (metadata.live_approval_exempt === true) return false
-  return String(metadata.execution_mode || '') === 'draft_pr'
 }
 
 /**
@@ -81,6 +78,12 @@ export async function GET(
     const taskWithParsedData = {
       ...mapTaskRow(task),
       aegisApproved: hasAegisApproval(db, taskId, workspaceId),
+      founderState: classifyFounderTaskState({
+        status: task.status,
+        assigned_to: task.assigned_to,
+        metadata: task.metadata,
+        aegisApproved: hasAegisApproval(db, taskId, workspaceId),
+      }),
     };
     
     return NextResponse.json({ task: taskWithParsedData });
@@ -129,6 +132,7 @@ export async function PUT(
       title,
       description,
       status,
+      action,
       priority,
       project_id,
       assigned_to,
@@ -160,9 +164,157 @@ export async function PUT(
     }
 
     const previousDescriptionMentionRecipients = resolveMentionRecipients(currentTask.description || '', db, workspaceId).recipients;
-    const effectiveAssignedTo = assigned_to !== undefined ? assigned_to : currentTask.assigned_to;
+    let effectiveAssignedTo = assigned_to !== undefined ? assigned_to : currentTask.assigned_to;
     let effectiveMetadata = metadata !== undefined ? metadata : (currentTask as any).metadata;
     const currentMetadata = parseHabiTaskMetadata(currentTask.metadata);
+    const currentAegisApproved = hasAegisApproval(db, taskId, workspaceId)
+    const currentFounderState = classifyFounderTaskState({
+      status: currentTask.status,
+      assigned_to: currentTask.assigned_to,
+      metadata: currentTask.metadata,
+      aegisApproved: currentAegisApproved,
+    })
+
+    if (action === 'merge_to_main') {
+      if (!isHabiTask(currentTask)) {
+        return NextResponse.json({ error: 'Only Habi delivery tasks can be merged through this workflow.' }, { status: 400 })
+      }
+      if (currentTask.status !== 'quality_review') {
+        return NextResponse.json({ error: 'Only quality review tasks can be merged to main.' }, { status: 400 })
+      }
+      if (!currentAegisApproved) {
+        return NextResponse.json({ error: 'QC pass is required before merging to main.' }, { status: 403 })
+      }
+      if (currentFounderState !== 'ready_to_merge') {
+        return NextResponse.json({ error: 'This task is not currently in a merge-ready state.' }, { status: 400 })
+      }
+      const branchName = String(currentMetadata.branch_name || '').trim()
+      if (!branchName) {
+        return NextResponse.json({ error: 'No branch_name is attached to this task.' }, { status: 400 })
+      }
+      if (!requiresLiveApproval(currentMetadata as any)) {
+        return NextResponse.json({ error: 'This task does not require a main-merge delivery step.' }, { status: 400 })
+      }
+
+      const mergeResult = mergeTaskBranchToMain({
+        taskId,
+        branchName,
+        actor: auth.user.username,
+        metadata: currentMetadata,
+      })
+
+      if (!mergeResult.ok) {
+        const failedMetadata = {
+          ...currentMetadata,
+          merge_error: mergeResult.error,
+          merge_failed_at: new Date(now * 1000).toISOString(),
+          merge_failed_by: auth.user.username,
+        }
+        db.prepare(`
+          UPDATE tasks
+          SET metadata = ?, updated_at = ?
+          WHERE id = ? AND workspace_id = ?
+        `).run(JSON.stringify(failedMetadata), now, taskId, workspaceId)
+        db.prepare(`
+          INSERT INTO comments (task_id, author, content, created_at, parent_id, mentions, workspace_id)
+          VALUES (?, ?, ?, ?, NULL, NULL, ?)
+        `).run(
+          taskId,
+          'system',
+          [
+            'Delivery merge failed',
+            `Task: #${taskId} ${currentTask.title}`,
+            `Branch: ${branchName}`,
+            `Reason: ${mergeResult.error}`,
+          ].join('\n'),
+          now,
+          workspaceId
+        )
+        db_helpers.logActivity(
+          'task_merge_failed',
+          'task',
+          taskId,
+          auth.user.username,
+          `Merge to main failed for ${currentTask.title}`,
+          {
+            branch_name: branchName,
+            reason: mergeResult.error,
+          },
+          workspaceId
+        )
+        return NextResponse.json({ error: mergeResult.error }, { status: 409 })
+      }
+
+      const mergedMetadata = {
+        ...currentMetadata,
+        merge_error: null,
+        merge_failed_at: null,
+        merge_failed_by: null,
+        live_in_main: true,
+        live_in_main_at: new Date(now * 1000).toISOString(),
+        live_in_main_by: auth.user.username,
+        merged_to_main_at: new Date(now * 1000).toISOString(),
+        merged_to_main_by: auth.user.username,
+        merged_to_main_commit: mergeResult.commitSha,
+        delivery_worktree_path: mergeResult.worktreePath,
+      }
+
+      db.prepare(`
+        UPDATE tasks
+        SET metadata = ?, updated_at = ?
+        WHERE id = ? AND workspace_id = ?
+      `).run(JSON.stringify(mergedMetadata), now, taskId, workspaceId)
+
+      const mergeLines = [
+        mergeResult.alreadyMerged ? 'Delivery merge already satisfied' : 'Delivery merge completed',
+        `Task: #${taskId} ${currentTask.title}`,
+        `Branch: ${branchName}`,
+        `Worktree: ${mergeResult.worktreePath}`,
+        mergeResult.commitSha ? `Main commit: ${mergeResult.commitSha}` : '',
+        mergeResult.validationCommands.length
+          ? `Validation: ${mergeResult.validationCommands.join(' | ')}`
+          : 'Validation: none recorded on task metadata',
+      ].filter(Boolean)
+
+      db.prepare(`
+        INSERT INTO comments (task_id, author, content, created_at, parent_id, mentions, workspace_id)
+        VALUES (?, ?, ?, ?, NULL, NULL, ?)
+      `).run(taskId, 'system', mergeLines.join('\n'), now, workspaceId)
+
+      db_helpers.logActivity(
+        'task_merged_to_main',
+        'task',
+        taskId,
+        auth.user.username,
+        `Merged ${branchName} to main for ${currentTask.title}`,
+        {
+          branch_name: branchName,
+          commit_sha: mergeResult.commitSha,
+          already_merged: mergeResult.alreadyMerged,
+          worktree_path: mergeResult.worktreePath,
+        },
+        workspaceId
+      )
+
+      const mergedTask = db.prepare(`
+        SELECT t.*, p.name as project_name, p.ticket_prefix as project_prefix
+        FROM tasks t
+        LEFT JOIN projects p ON p.id = t.project_id AND p.workspace_id = t.workspace_id
+        WHERE t.id = ? AND t.workspace_id = ?
+      `).get(taskId, workspaceId) as Task;
+      const parsedMergedTask = {
+        ...mapTaskRow(mergedTask),
+        aegisApproved: currentAegisApproved,
+        founderState: classifyFounderTaskState({
+          status: mergedTask.status,
+          assigned_to: mergedTask.assigned_to,
+          metadata: mergedTask.metadata,
+          aegisApproved: currentAegisApproved,
+        }),
+      }
+      eventBus.broadcast('task.updated', parsedMergedTask);
+      return NextResponse.json({ task: parsedMergedTask });
+    }
     const plannedExecutionApproval =
       requestedStatus === 'in_progress' &&
       currentTask.status === 'assigned' &&
@@ -195,6 +347,46 @@ export async function PUT(
         qc_requested_by: auth.user.username,
         qc_passed: false,
         sent_back_by_qc: false,
+      }
+    }
+    if (
+      metadata &&
+      typeof metadata === 'object' &&
+      metadata.live_in_main === true &&
+      currentMetadata.live_in_main !== true
+    ) {
+      effectiveMetadata = {
+        ...currentMetadata,
+        ...(typeof metadata === 'object' && metadata ? metadata : {}),
+        live_in_main: true,
+        live_in_main_at: new Date(now * 1000).toISOString(),
+        live_in_main_by: auth.user.username,
+      }
+    }
+    const normalizedEffectiveMetadata = parseHabiTaskMetadata(effectiveMetadata as any)
+    if (
+      isHabiTask({ assigned_to: effectiveAssignedTo }) ||
+      Boolean(normalizedEffectiveMetadata.agent_job) ||
+      Boolean(normalizedEffectiveMetadata.origin_lane)
+    ) {
+      const normalizedAgentJob = inferAgentJob({
+        lane: typeof normalizedEffectiveMetadata.origin_lane === 'string' ? normalizedEffectiveMetadata.origin_lane : undefined,
+        assignee: effectiveAssignedTo,
+        agentJob:
+          typeof normalizedEffectiveMetadata.agent_job === 'string'
+            ? normalizedEffectiveMetadata.agent_job
+            : undefined,
+        executionMode:
+          typeof normalizedEffectiveMetadata.execution_mode === 'string'
+            ? normalizedEffectiveMetadata.execution_mode
+            : undefined,
+        mutationMode:
+          typeof normalizedEffectiveMetadata.mutation_mode === 'string'
+            ? normalizedEffectiveMetadata.mutation_mode
+            : undefined,
+      })
+      if (Boolean(normalizedEffectiveMetadata.agent_job) || Boolean(normalizedEffectiveMetadata.origin_lane)) {
+        effectiveAssignedTo = getAgentIdForJob(normalizedAgentJob)
       }
     }
     const shouldValidateHabiContract =
@@ -282,9 +474,13 @@ export async function PUT(
         updateParams.push(nextProjectTicketNo);
       }
     }
-    if (assigned_to !== undefined) {
+    const shouldUpdateAssignee =
+      effectiveAssignedTo !== currentTask.assigned_to &&
+      (assigned_to !== undefined || metadata !== undefined || plannedExecutionApproval || queuedForQc)
+
+    if (shouldUpdateAssignee) {
       fieldsToUpdate.push('assigned_to = ?');
-      updateParams.push(assigned_to);
+      updateParams.push(effectiveAssignedTo);
     }
     if (due_date !== undefined) {
       fieldsToUpdate.push('due_date = ?');
@@ -336,7 +532,7 @@ export async function PUT(
       fieldsToUpdate.push('tags = ?');
       updateParams.push(JSON.stringify(tags));
     }
-    if (metadata !== undefined || plannedExecutionApproval) {
+    if (metadata !== undefined || plannedExecutionApproval || queuedForQc) {
       fieldsToUpdate.push('metadata = ?');
       updateParams.push(JSON.stringify(effectiveMetadata));
     }
@@ -377,14 +573,15 @@ export async function PUT(
       }
     }
     
-    if (assigned_to !== undefined && assigned_to !== currentTask.assigned_to) {
-      changes.push(`assigned: ${currentTask.assigned_to || 'unassigned'} → ${assigned_to || 'unassigned'}`);
+    if (shouldUpdateAssignee) {
+      changes.push(`assigned: ${currentTask.assigned_to || 'unassigned'} → ${effectiveAssignedTo || 'unassigned'}`);
       
       // Create notification for new assignee
-      if (assigned_to) {
-        db_helpers.ensureTaskSubscription(taskId, assigned_to, workspaceId);
+      if (effectiveAssignedTo) {
+        const normalizedMetadata = parseHabiTaskMetadata(effectiveMetadata)
+        db_helpers.ensureTaskSubscription(taskId, effectiveAssignedTo, workspaceId);
         db_helpers.createNotification(
-          assigned_to,
+          effectiveAssignedTo,
           'assignment',
           'Task Assigned',
           `You have been assigned to task: ${currentTask.title}`,
@@ -396,16 +593,37 @@ export async function PUT(
         const dispatch = await dispatchTaskAssignment({
           workspaceId,
           actor: auth.user.username,
-          assignee: assigned_to,
+          assignee: effectiveAssignedTo,
           taskId,
           title: title || currentTask.title,
           priority: String(priority || currentTask.priority),
           status: String(persistedStatus || currentTask.status),
+          details: [
+            `Lane: ${String(normalizedMetadata.origin_lane || 'n/a')}`,
+            `Agent job: ${String(normalizedMetadata.agent_job || 'n/a')}`,
+            `Mutation mode: ${String(normalizedMetadata.mutation_mode || 'n/a')}`,
+            `Runtime model: ${String((normalizedMetadata.runtime_model_policy as any)?.class || 'n/a')}`,
+          ],
         })
         if (!dispatch.delivered) {
           logger.warn(
-            { taskId, assignee: assigned_to, reason: dispatch.reason || 'unknown' },
+            { taskId, assignee: effectiveAssignedTo, reason: dispatch.reason || 'unknown' },
             'Task updated but assignment dispatch was not delivered'
+          )
+        } else if (dispatch.compatibilityAgent) {
+          db.prepare(`
+            INSERT INTO comments (task_id, author, content, created_at, parent_id, mentions, workspace_id)
+            VALUES (?, ?, ?, ?, NULL, NULL, ?)
+          `).run(
+            taskId,
+            'system',
+            [
+              'Compatibility routing',
+              `Task is assigned to ${effectiveAssignedTo}, but Mission Control delivered the assignment through soak-time compatibility agent ${dispatch.compatibilityAgent}.`,
+              'This is expected during the M97 narrow-job cutover while legacy lane sessions are still active.',
+            ].join('\n'),
+            now,
+            workspaceId
           )
         }
       }
@@ -466,6 +684,7 @@ export async function PUT(
           'Task moved to in_progress but execution context provisioning failed'
         )
       } else {
+        const preparedMetadata = parseHabiTaskMetadata(preparedExecution.metadata)
         const dispatch = await dispatchTaskAssignment({
           workspaceId,
           actor: auth.user.username,
@@ -474,7 +693,13 @@ export async function PUT(
           title: title || currentTask.title,
           priority: String(priority || currentTask.priority),
           status: 'in_progress',
-          details: preparedExecution.dispatchDetails,
+          details: [
+            ...preparedExecution.dispatchDetails,
+            `Lane: ${String(preparedMetadata.origin_lane || 'n/a')}`,
+            `Agent job: ${String(preparedMetadata.agent_job || 'n/a')}`,
+            `Mutation mode: ${String(preparedMetadata.mutation_mode || 'n/a')}`,
+            `Runtime model: ${String((preparedMetadata.runtime_model_policy as any)?.class || 'n/a')}`,
+          ],
         })
         if (!dispatch.delivered) {
         logger.warn(
@@ -495,8 +720,8 @@ export async function PUT(
           },
           workspaceId
         )
-        if (preparedExecution.ok) {
-          const dispatchFailureComment = [
+          if (preparedExecution.ok) {
+            const dispatchFailureComment = [
             'Execution blocked',
             `Task: #${taskId} ${title || currentTask.title}`,
             `Assignee: ${effectiveAssignedTo}`,
@@ -513,6 +738,22 @@ export async function PUT(
             INSERT INTO comments (task_id, author, content, created_at, parent_id, mentions, workspace_id)
             VALUES (?, ?, ?, ?, NULL, NULL, ?)
           `).run(taskId, 'system', preparedExecution.kickoffComment, now, workspaceId)
+          if (dispatch.compatibilityAgent) {
+            db.prepare(`
+              INSERT INTO comments (task_id, author, content, created_at, parent_id, mentions, workspace_id)
+              VALUES (?, ?, ?, ?, NULL, NULL, ?)
+            `).run(
+              taskId,
+              'system',
+              [
+                'Compatibility routing',
+                `Task is assigned to ${effectiveAssignedTo}, but Mission Control delivered the execution kickoff through soak-time compatibility agent ${dispatch.compatibilityAgent}.`,
+                'This is expected during the M97 narrow-job cutover while legacy lane sessions are still active.',
+              ].join('\n'),
+              now,
+              workspaceId
+            )
+          }
           db_helpers.logActivity(
             'task_execution_started',
             'task',
@@ -616,7 +857,7 @@ export async function PUT(
             priority: currentTask.priority,
             assigned_to: currentTask.assigned_to
           },
-          newValues: { title, status: persistedStatus, priority, assigned_to }
+          newValues: { title, status: persistedStatus, priority, assigned_to: effectiveAssignedTo }
         },
         workspaceId
       );

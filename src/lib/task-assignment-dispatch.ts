@@ -1,7 +1,7 @@
 import { getDatabase } from './db'
 import { runOpenClaw } from './command'
 import { logger } from './logger'
-import { resolveSessionKeyForAgent, syncAgentSessionLinks } from './agent-session-link'
+import { resolveSessionLinkForAgent, syncAgentSessionLinks } from './agent-session-link'
 import { getAllGatewaySessions } from './sessions'
 
 interface AssignmentDispatchInput {
@@ -44,6 +44,7 @@ export async function dispatchTaskAssignment(input: AssignmentDispatchInput): Pr
   delivered: boolean
   sessionKey?: string
   reason?: string
+  compatibilityAgent?: string | null
 }> {
   const { workspaceId, actor, assignee, taskId, title, priority, status, details = [] } = input
   const message = [
@@ -70,6 +71,7 @@ export async function dispatchTaskMessage(input: TaskMessageDispatchInput): Prom
   delivered: boolean
   sessionKey?: string
   reason?: string
+  compatibilityAgent?: string | null
 }> {
   const { workspaceId, assignee, taskId, message } = input
   const db = getDatabase()
@@ -81,13 +83,15 @@ export async function dispatchTaskMessage(input: TaskMessageDispatchInput): Prom
     .filter((session) => session.active && session.agent.toLowerCase() === assignee.toLowerCase())
     .sort((a, b) => b.updatedAt - a.updatedAt)
   const preferredSessionKey = activeSessions[0]?.key || activeSessions[0]?.sessionId || null
-  const sessionKey = preferredSessionKey || agent?.session_key || resolveSessionKeyForAgent(assignee)
+  const resolvedLink = resolveSessionLinkForAgent(assignee)
+  const sessionKey = preferredSessionKey || agent?.session_key || resolvedLink.sessionKey
+  const compatibilityAgent = preferredSessionKey || agent?.session_key ? null : resolvedLink.compatibilityAgent
   if (!sessionKey) {
     return { attempted: false, delivered: false, reason: 'no_session_key' }
   }
 
   const now = Math.floor(Date.now() / 1000)
-  if (agent?.id && agent.session_key !== sessionKey) {
+  if (agent?.id && !compatibilityAgent && agent.session_key !== sessionKey) {
     db.prepare('UPDATE agents SET session_key = ?, last_seen = ?, updated_at = ? WHERE id = ? AND workspace_id = ?')
       .run(sessionKey, now, now, agent.id, workspaceId)
   }
@@ -95,16 +99,22 @@ export async function dispatchTaskMessage(input: TaskMessageDispatchInput): Prom
   try {
     const idempotencyKey = `task-${taskId}-dispatch-${assignee.toLowerCase()}-${Date.now()}`
     await sendViaGatewayChat(sessionKey, message, idempotencyKey)
-    return { attempted: true, delivered: true, sessionKey }
+    return { attempted: true, delivered: true, sessionKey, compatibilityAgent }
   } catch (err) {
     // Retry once after relinking session keys to reduce false negatives from stale links.
     syncAgentSessionLinks(workspaceId)
-    const relinked = resolveSessionKeyForAgent(assignee)
+    const relinkedLink = resolveSessionLinkForAgent(assignee)
+    const relinked = relinkedLink.sessionKey
     if (relinked && relinked !== sessionKey) {
       try {
         const retryKey = `task-${taskId}-dispatch-retry-${assignee.toLowerCase()}-${Date.now()}`
         await sendViaGatewayChat(relinked, message, retryKey)
-        return { attempted: true, delivered: true, sessionKey: relinked }
+        return {
+          attempted: true,
+          delivered: true,
+          sessionKey: relinked,
+          compatibilityAgent: relinkedLink.compatibilityAgent,
+        }
       } catch {
         // fallthrough to classified failure response below
       }
@@ -126,6 +136,7 @@ export async function dispatchTaskMessage(input: TaskMessageDispatchInput): Prom
       attempted: true,
       delivered: false,
       sessionKey,
+      compatibilityAgent,
       reason: hasActiveSession ? 'gateway_send_failed' : 'no_active_session',
     }
   }

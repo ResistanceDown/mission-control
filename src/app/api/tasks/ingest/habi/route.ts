@@ -7,26 +7,17 @@ import { habiTaskContractErrorMessage, validateHabiTaskContract } from '@/lib/ha
 import {
   computeHabiFingerprint,
   ensureHabiTaskSubscriptions,
-  inferHabiAssignee,
   mapSeverityToPriority,
   mergeHabiMetadata,
 } from '@/lib/habi-task-ops'
+import { getAgentIdForJob, inferAgentJob, normalizeRuntimeModelPolicy } from '@/lib/habi-agent-jobs'
 import { logger } from '@/lib/logger'
 import { mutationLimiter } from '@/lib/rate-limit'
 import { dispatchTaskAssignment } from '@/lib/task-assignment-dispatch'
 import { habiTaskIngestSchema, validateBody } from '@/lib/validation'
 
 type IngestStatus = 'assigned' | 'in_progress' | 'review' | 'quality_review'
-
-type ExistingTaskRow = {
-  id: number
-  title: string
-  status: string
-  priority: string
-  assigned_to?: string | null
-  updated_at: number
-  metadata?: string | null
-}
+type ResolvedTaskStatus = IngestStatus | 'done'
 
 function shouldSkipResolvedReferenceItem(item: {
   status_hint?: string
@@ -95,14 +86,14 @@ function resolveExistingTaskStatus(
     blockedReason?: string
     qcPassed?: boolean
   }
-): IngestStatus {
-  if (existingStatus === 'done') {
-    return 'done' as IngestStatus
-  }
-
+): ResolvedTaskStatus {
   const isPlannedExecution =
     (options?.executionMode === 'draft_pr' || options?.executionMode === 'audit_only') &&
     (options?.disposition === 'execute_now' || options?.disposition === 'founder_decision_needed')
+
+  if (existingStatus === 'done') {
+    return 'done'
+  }
 
   if (options?.qcPassed && proposedStatus === 'assigned') {
     return 'quality_review'
@@ -143,17 +134,21 @@ function formatIngestCreatedComment(item: {
   source_report: string
   lane: string
   severity: string
+  agent_job?: string
   surface?: string
   execution_mode?: string
+  mutation_mode?: string
   disposition?: string
 }) {
   return [
     'Ingest created task',
     `Source: ${item.source_report}`,
     `Lane: ${item.lane}`,
+    ...(item.agent_job ? [`Agent job: ${item.agent_job}`] : []),
     `Severity: ${item.severity}`,
     ...(item.surface ? [`Surface: ${item.surface}`] : []),
     ...(item.execution_mode ? [`Execution mode: ${item.execution_mode}`] : []),
+    ...(item.mutation_mode ? [`Mutation mode: ${item.mutation_mode}`] : []),
     ...(item.disposition ? [`Disposition: ${item.disposition}`] : []),
   ].join('\n')
 }
@@ -182,94 +177,60 @@ function formatOfflineComment(assignee: string) {
   ].join('\n')
 }
 
+function formatCompatibilityDispatchComment(assignee: string, compatibilityAgent: string) {
+  return [
+    'Compatibility routing',
+    `Task is assigned to ${assignee}, but Mission Control delivered the kickoff through soak-time compatibility agent ${compatibilityAgent}.`,
+    'This is expected during the M97 narrow-job cutover while legacy lane sessions are still active.',
+  ].join('\n')
+}
+
 function shouldSkipCancelledFingerprintReuse(existingTask: any) {
   const metadata = mergeHabiMetadata(existingTask?.metadata, {})
   const cancelledReason = String(metadata.cancelled_reason || '').trim().toLowerCase()
   return (
     existingTask?.status === 'cancelled' &&
-    ['superseded_by_redesign_cutover', 'reference_only_decision_already_recorded'].includes(cancelledReason)
+    [
+      'superseded_by_redesign_cutover',
+      'subsumed_by_hb004_cutover',
+      'reference_only_decision_already_recorded',
+      'duplicate_fingerprint_reconciled',
+    ].includes(cancelledReason)
   )
 }
 
-function normalizeBlockedReason(input: string | undefined | null) {
-  const text = String(input || '')
-    .replace(/\s+/g, ' ')
-    .trim()
-  if (!text) return ''
-
-  const segments = text
-    .split(/\s*(?:\||;|\/)\s*|\s{2,}/)
-    .map((segment) => segment.trim())
-    .filter(Boolean)
-
-  const seen = new Set<string>()
-  const deduped: string[] = []
-  for (const segment of segments.length ? segments : [text]) {
-    const normalized = segment.toLowerCase()
-    if (seen.has(normalized)) continue
-    seen.add(normalized)
-    deduped.push(segment)
-  }
-
-  return deduped.join(' | ')
-}
-
-function parseExistingTaskMetadata(task: ExistingTaskRow | null | undefined) {
-  return mergeHabiMetadata(task?.metadata, {})
-}
-
-function isCancelledButReusable(task: ExistingTaskRow | null | undefined) {
-  if (!task || task.status !== 'cancelled') return false
-  const metadata = parseExistingTaskMetadata(task)
-  const cancelledReason = String(metadata.cancelled_reason || '').trim().toLowerCase()
-  return !['superseded_by_redesign_cutover', 'reference_only_decision_already_recorded'].includes(cancelledReason)
-}
-
-function chooseCanonicalTask(tasks: ExistingTaskRow[]) {
-  const sorted = [...tasks].sort((left, right) => {
-    const leftActive = ['assigned', 'in_progress', 'review', 'quality_review'].includes(left.status) ? 0 : 1
-    const rightActive = ['assigned', 'in_progress', 'review', 'quality_review'].includes(right.status) ? 0 : 1
-    if (leftActive !== rightActive) return leftActive - rightActive
-    if (left.status === 'done' && right.status !== 'done') return -1
-    if (right.status === 'done' && left.status !== 'done') return 1
-    return left.id - right.id
-  })
-  return sorted[0] || null
-}
-
-function shouldReopenCanonicalTask(task: ExistingTaskRow | null, item: { status_hint?: string; disposition?: string }) {
-  if (!task) return false
-  if (task.status === 'done') return false
-  if (task.status !== 'cancelled') return false
-  if (item.disposition === 'reference_only' || item.disposition === 'narrative_only') return false
-  return true
-}
-
-function reconcileDuplicateFingerprintTasks(
+function cancelDuplicateFingerprintSiblings(
   db: ReturnType<typeof getDatabase>,
   workspaceId: number,
-  fingerprint: string,
   canonicalTaskId: number,
   actor: string,
   now: number,
+  fingerprint: string,
 ) {
+  if (!fingerprint) return
+
   const rows = db.prepare(`
     SELECT id, title, status, metadata
     FROM tasks
     WHERE workspace_id = ?
-      AND json_extract(metadata, '$.fingerprint') = ?
       AND id != ?
-      AND status NOT IN ('cancelled')
+      AND json_extract(metadata, '$.fingerprint') = ?
+      AND status NOT IN ('done', 'cancelled')
     ORDER BY id DESC
-  `).all(workspaceId, fingerprint, canonicalTaskId) as ExistingTaskRow[]
+  `).all(workspaceId, canonicalTaskId, fingerprint) as Array<{
+    id: number
+    title: string
+    status: string
+    metadata?: string | null
+  }>
 
   for (const row of rows) {
     const previousMetadata = mergeHabiMetadata(row.metadata, {})
     const mergedMetadata = {
       ...previousMetadata,
-      canonical_task_id: canonicalTaskId,
-      superseded_by_task_id: canonicalTaskId,
       cancelled_reason: 'duplicate_fingerprint_reconciled',
+      superseded_by_task_id: canonicalTaskId,
+      canonical_task_id: canonicalTaskId,
       superseded_at: new Date().toISOString(),
     }
     db.prepare(`
@@ -283,8 +244,8 @@ function reconcileDuplicateFingerprintTasks(
       row.id,
       [
         'Foreman update',
-        `Task cancelled as a duplicate fingerprint.`,
-        `Canonical task: #${canonicalTaskId}`,
+        `Cancelled duplicate fingerprint task in favor of canonical task #${canonicalTaskId}.`,
+        'Reason: ingest re-saw the same Habi work item and reconciled it instead of keeping a sibling task active.',
       ].join('\n'),
     )
     db_helpers.logActivity(
@@ -292,9 +253,14 @@ function reconcileDuplicateFingerprintTasks(
       'task',
       row.id,
       actor,
-      `Cancelled duplicate fingerprint task "${row.title}"`,
-      { superseded_by_task_id: canonicalTaskId, fingerprint, cancelled_reason: 'duplicate_fingerprint_reconciled' },
-      workspaceId,
+      `Habi ingest reconciled duplicate fingerprint task "${row.title}"`,
+      {
+        superseded_by_task_id: canonicalTaskId,
+        canonical_task_id: canonicalTaskId,
+        cancelled_reason: 'duplicate_fingerprint_reconciled',
+        fingerprint,
+      },
+      workspaceId
     )
   }
 }
@@ -406,7 +372,6 @@ export async function POST(request: NextRequest) {
         })
         continue
       }
-      const assignee = inferHabiAssignee(item.lane, item.assignee)
       const fingerprint =
         (item.fingerprint || '').trim() ||
         computeHabiFingerprint({
@@ -414,10 +379,36 @@ export async function POST(request: NextRequest) {
           title: item.title,
           scope: item.scope,
         })
+      const agentJob =
+        item.agent_job ||
+        inferAgentJob({
+          lane: item.lane,
+          assignee: item.assignee,
+          executionMode: item.execution_mode,
+          mutationMode: item.mutation_mode,
+        })
+      const normalizedExecutionMode =
+        (item.execution_mode || '').trim() ||
+        (item.lane !== 'growth' ? 'audit_only' : '')
+      const normalizedDisposition =
+        (item.disposition || '').trim() ||
+        (item.lane !== 'growth' ? 'founder_decision_needed' : '')
+      const normalizedMutationMode =
+        (item.mutation_mode || '').trim() ||
+        (normalizedExecutionMode === 'draft_pr' ? 'repo_write' : 'audit_only')
+      const runtimeModelPolicy = normalizeRuntimeModelPolicy(item.runtime_model_policy, agentJob)
+      const allowedTools = Array.isArray(item.allowed_tools) ? item.allowed_tools : []
+      const inputArtifacts = Array.isArray(item.input_artifacts) ? item.input_artifacts : []
+      const outputArtifacts = Array.isArray(item.output_artifacts) ? item.output_artifacts : []
+      const handoffTarget =
+        typeof item.handoff_target === 'string' || item.handoff_target === null
+          ? item.handoff_target
+          : null
+      const assignee = getAgentIdForJob(agentJob)
       const hasEvidence = existsSync(item.evidence_path)
       const targetStatus = resolveTargetStatus(item.status_hint, hasEvidence, {
-        executionMode: item.execution_mode,
-        disposition: item.disposition,
+        executionMode: normalizedExecutionMode,
+        disposition: normalizedDisposition,
       })
       const metadataPatch = {
         objective: item.objective,
@@ -430,26 +421,43 @@ export async function POST(request: NextRequest) {
         origin_report: item.source_report,
         last_sync_at: new Date().toISOString(),
         fingerprint,
+        agent_job: agentJob,
+        allowed_tools: allowedTools,
+        input_artifacts: inputArtifacts,
+        output_artifacts: outputArtifacts,
+        mutation_mode: normalizedMutationMode,
+        handoff_target: handoffTarget,
+        runtime_model_policy: runtimeModelPolicy,
         quality_owner: 'jeremy',
         surface: item.surface || '',
-        execution_mode: item.execution_mode || '',
+        execution_mode: normalizedExecutionMode,
         branch_name: item.branch_name || '',
         worktree_path: item.worktree_path || '',
         validation_commands: item.validation_commands || [],
         handoff_artifact: item.handoff_artifact || '',
-        disposition: item.disposition || '',
-        blocked_reason: normalizeBlockedReason(targetStatus.blockedReason || (item.status_hint === 'blocked' ? item.notes || 'blocked' : '')),
+        disposition: normalizedDisposition,
+        blocked_reason: targetStatus.blockedReason || (item.status_hint === 'blocked' ? item.notes || 'blocked' : ''),
       }
       const priority = mapSeverityToPriority(item.severity)
 
-      const existingTasks = db.prepare(`
+      const existingTask = db.prepare(`
         SELECT *
         FROM tasks
         WHERE workspace_id = ?
           AND json_extract(metadata, '$.fingerprint') = ?
+          AND status != 'cancelled'
+        ORDER BY CASE WHEN status = 'done' THEN 0 ELSE 1 END, id ASC
+        LIMIT 1
+      `).get(workspaceId, fingerprint) as any
+      const cancelledFingerprintTask = db.prepare(`
+        SELECT *
+        FROM tasks
+        WHERE workspace_id = ?
+          AND json_extract(metadata, '$.fingerprint') = ?
+          AND status = 'cancelled'
         ORDER BY id ASC
-      `).all(workspaceId, fingerprint) as ExistingTaskRow[]
-      const existingTask = chooseCanonicalTask(existingTasks)
+        LIMIT 1
+      `).get(workspaceId, fingerprint) as any
 
       if (shouldSkipResolvedReferenceItem(item)) {
         if (!dry_run && existingTask && !['done', 'cancelled'].includes(existingTask.status)) {
@@ -478,6 +486,21 @@ export async function POST(request: NextRequest) {
         continue
       }
 
+      const shouldCreate = !existingTask
+      if (
+        shouldCreate &&
+        cancelledFingerprintTask &&
+        shouldSkipCancelledFingerprintReuse(cancelledFingerprintTask)
+      ) {
+        actionPlan.push({
+          action: 'skip',
+          task_id: cancelledFingerprintTask.id,
+          title: item.title,
+          lane: item.lane,
+          reason: `cancelled_reason=${mergeHabiMetadata(cancelledFingerprintTask.metadata, {}).cancelled_reason}`,
+        })
+        continue
+      }
       if (existingTask && shouldSkipCancelledFingerprintReuse(existingTask)) {
         actionPlan.push({
           action: 'skip',
@@ -488,7 +511,6 @@ export async function POST(request: NextRequest) {
         })
         continue
       }
-      const shouldCreate = !existingTask
       if (shouldCreate) {
         const metadata = metadataPatch
         const contract = validateHabiTaskContract({ assigned_to: assignee, metadata })
@@ -504,12 +526,14 @@ export async function POST(request: NextRequest) {
           title: item.title,
           assignee,
           lane: item.lane,
+          agent_job: agentJob,
           status: targetStatus.status,
           priority,
           fingerprint,
           surface: item.surface || null,
-          execution_mode: item.execution_mode || null,
-          disposition: item.disposition || null,
+          execution_mode: normalizedExecutionMode || null,
+          mutation_mode: normalizedMutationMode || null,
+          disposition: normalizedDisposition || null,
         })
 
         if (dry_run) continue
@@ -561,7 +585,11 @@ export async function POST(request: NextRequest) {
           db,
           workspaceId,
           createdTask.id,
-          formatIngestCreatedComment(item)
+          formatIngestCreatedComment({
+            ...item,
+            agent_job: agentJob,
+            mutation_mode: normalizedMutationMode,
+          })
         )
         if (targetStatus.blockedReason) {
           addTaskComment(db, workspaceId, createdTask.id, formatGuardrailComment(targetStatus.blockedReason))
@@ -578,8 +606,8 @@ export async function POST(request: NextRequest) {
           { lane: item.lane, fingerprint, status: targetStatus.status, priority },
           workspaceId
         )
+        cancelDuplicateFingerprintSiblings(db, workspaceId, createdTask.id, source || actor, now, fingerprint)
         cancelSupersededDuplicates(db, workspaceId, createdTask.id, source || actor, now, metadata)
-        reconcileDuplicateFingerprintTasks(db, workspaceId, fingerprint, createdTask.id, source || actor, now)
         eventBus.broadcast('task.created', createdTask)
 
         const dispatch = await dispatchTaskAssignment({
@@ -590,6 +618,12 @@ export async function POST(request: NextRequest) {
           title: item.title,
           priority,
           status: targetStatus.status,
+          details: [
+            `Lane: ${item.lane}`,
+            `Agent job: ${agentJob}`,
+            `Mutation mode: ${normalizedMutationMode}`,
+            `Runtime model: ${runtimeModelPolicy.class}`,
+          ],
         })
         if (!dispatch.delivered) {
           const reason = dispatch.reason || 'unknown'
@@ -611,26 +645,26 @@ export async function POST(request: NextRequest) {
             workspaceId
           )
         }
+        if (dispatch.delivered && dispatch.compatibilityAgent) {
+          addTaskComment(
+            db,
+            workspaceId,
+            createdTask.id,
+            formatCompatibilityDispatchComment(assignee, dispatch.compatibilityAgent)
+          )
+        }
         continue
       }
 
-      const previousMetadata = parseExistingTaskMetadata(existingTask)
-      const reopeningCanonical = shouldReopenCanonicalTask(existingTask, item)
+      const previousMetadata = mergeHabiMetadata(existingTask.metadata, {})
       const nextStatus = resolveExistingTaskStatus(existingTask.status, targetStatus.status, {
-        executionMode: item.execution_mode,
-        disposition: item.disposition,
+        executionMode: normalizedExecutionMode,
+        disposition: normalizedDisposition,
         executionContextReady: previousMetadata.execution_context_ready === true,
         blockedReason: targetStatus.blockedReason || metadataPatch.blocked_reason,
         qcPassed: previousMetadata.qc_passed === true,
       })
-      const mergedMetadata = mergeHabiMetadata(existingTask.metadata, {
-        ...metadataPatch,
-        canonical_task_id: existingTask.id,
-        ...(reopeningCanonical ? {
-          reopened_at: new Date().toISOString(),
-          reopened_reason: item.source_report || source || actor,
-        } : {}),
-      })
+      const mergedMetadata = mergeHabiMetadata(existingTask.metadata, metadataPatch)
       const contract = validateHabiTaskContract({ assigned_to: assignee, metadata: mergedMetadata })
       if (!contract.ok) {
         return NextResponse.json(
@@ -645,13 +679,15 @@ export async function POST(request: NextRequest) {
         title: item.title,
         assignee,
         lane: item.lane,
+        agent_job: agentJob,
         status_from: existingTask.status,
-        status_to: reopeningCanonical ? 'assigned' : nextStatus,
+        status_to: nextStatus,
         priority_from: existingTask.priority,
         priority_to: priority,
         surface: item.surface || null,
-        execution_mode: item.execution_mode || null,
-        disposition: item.disposition || null,
+        execution_mode: normalizedExecutionMode || null,
+        mutation_mode: normalizedMutationMode || null,
+        disposition: normalizedDisposition || null,
       })
 
       if (dry_run) continue
@@ -665,7 +701,7 @@ export async function POST(request: NextRequest) {
         `${item.objective}\n\nScope: ${item.scope}\n\nAcceptance: ${item.acceptance}`,
         priority,
         assignee,
-        reopeningCanonical ? 'assigned' : nextStatus,
+        nextStatus,
         JSON.stringify(mergedMetadata),
         now,
         projectId,
@@ -678,8 +714,7 @@ export async function POST(request: NextRequest) {
       ensureHabiTaskSubscriptions(existingTask.id, workspaceId, assignee, source || actor)
 
       const syncChanges: string[] = []
-      const appliedStatus = reopeningCanonical ? 'assigned' : nextStatus
-      if (existingTask.status !== appliedStatus) syncChanges.push(`Status: ${existingTask.status} -> ${appliedStatus}`)
+      if (existingTask.status !== nextStatus) syncChanges.push(`Status: ${existingTask.status} -> ${nextStatus}`)
       if (existingTask.priority !== priority) syncChanges.push(`Priority: ${existingTask.priority} -> ${priority}`)
       if ((existingTask.assigned_to || '') !== assignee) syncChanges.push(`Assignee: ${existingTask.assigned_to || 'unassigned'} -> ${assignee}`)
       if (existingTask.title !== item.title) syncChanges.push(`Title updated to: ${item.title}`)
@@ -705,6 +740,7 @@ export async function POST(request: NextRequest) {
         `Habi ingest updated task "${item.title}"`,
         {
           lane: item.lane,
+          agent_job: agentJob,
           fingerprint,
           status_from: existingTask.status,
           status_to: nextStatus,
@@ -713,20 +749,8 @@ export async function POST(request: NextRequest) {
         },
         workspaceId
       )
-      if (reopeningCanonical) {
-        addTaskComment(
-          db,
-          workspaceId,
-          existingTask.id,
-          [
-            'Foreman update',
-            `Canonical task reopened instead of creating a duplicate sibling.`,
-            `Reason: source reintroduced the same fingerprint (${fingerprint}).`,
-          ].join('\n'),
-        )
-      }
+      cancelDuplicateFingerprintSiblings(db, workspaceId, existingTask.id, source || actor, now, fingerprint)
       cancelSupersededDuplicates(db, workspaceId, existingTask.id, source || actor, now, mergedMetadata)
-      reconcileDuplicateFingerprintTasks(db, workspaceId, fingerprint, existingTask.id, source || actor, now)
     }
 
     return NextResponse.json({

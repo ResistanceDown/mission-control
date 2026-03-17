@@ -1,6 +1,7 @@
 import { getDatabase } from './db'
 import { logger } from './logger'
 import { getAllGatewaySessions, type GatewaySession } from './sessions'
+import { getCompatibilityLaneAgentIdForAssignee } from './habi-agent-jobs'
 
 function normalizeAgentName(value: string): string {
   return value.trim().toLowerCase().replace(/[\s_]+/g, '-')
@@ -16,13 +17,39 @@ function pickBestSession(sessions: GatewaySession[]): GatewaySession | null {
 }
 
 export function resolveSessionKeyForAgent(agentName: string): string | null {
+  const direct = resolveSessionLinkForAgent(agentName)
+  return direct.sessionKey
+}
+
+export function resolveSessionLinkForAgent(agentName: string): {
+  sessionKey: string | null
+  compatibilityAgent: string | null
+} {
   const normalized = normalizeAgentName(agentName)
   const sessions = getAllGatewaySessions().filter(
     (session) => normalizeAgentName(session.agent) === normalized
   )
   const best = pickBestSession(sessions)
-  if (!best) return null
-  return best.key || best.sessionId || null
+  if (best) {
+    return {
+      sessionKey: best.key || best.sessionId || null,
+      compatibilityAgent: null,
+    }
+  }
+
+  const compatibilityAgent = getCompatibilityLaneAgentIdForAssignee(agentName)
+  if (!compatibilityAgent) {
+    return { sessionKey: null, compatibilityAgent: null }
+  }
+
+  const fallbackSessions = getAllGatewaySessions().filter(
+    (session) => normalizeAgentName(session.agent) === normalizeAgentName(compatibilityAgent)
+  )
+  const fallback = pickBestSession(fallbackSessions)
+  return {
+    sessionKey: fallback ? (fallback.key || fallback.sessionId || null) : null,
+    compatibilityAgent: fallback ? compatibilityAgent : null,
+  }
 }
 
 export function syncAgentSessionLinks(workspaceId: number): {
@@ -44,9 +71,10 @@ export function syncAgentSessionLinks(workspaceId: number): {
 
     const tx = db.transaction(() => {
       for (const agent of agents) {
-        const linkedSessionKey = resolveSessionKeyForAgent(agent.name)
+        const { sessionKey: linkedSessionKey, compatibilityAgent } = resolveSessionLinkForAgent(agent.name)
         if (!linkedSessionKey) continue
         matched += 1
+        if (compatibilityAgent) continue
         if (agent.session_key === linkedSessionKey) continue
         updateSessionKey.run(linkedSessionKey, now, now, agent.id, workspaceId)
         updated += 1
