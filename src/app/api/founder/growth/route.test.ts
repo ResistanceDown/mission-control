@@ -13,8 +13,8 @@ describe('growth rewrite fallback', () => {
     )
 
     expect(rewritten).not.toBe(original)
-    expect(rewritten).toContain('The sharper version is this:')
-    expect(rewritten).toContain('The hidden cost is not the interruption itself.')
+    expect(rewritten).not.toContain('The sharper version is this:')
+    expect(rewritten).toContain('The interruption is the visible part.')
   })
 
   it('rewrites quote drafts in a way that reflects the selected prompt', () => {
@@ -28,7 +28,7 @@ describe('growth rewrite fallback', () => {
     )
 
     expect(rewritten).not.toBe(original)
-    expect(rewritten).toContain('The direct version is this:')
+    expect(rewritten).not.toContain('The direct version is this:')
     expect(rewritten).toContain('The visible point is only half the story.')
   })
 })

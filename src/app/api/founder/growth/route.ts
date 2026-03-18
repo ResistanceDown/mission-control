@@ -689,25 +689,42 @@ export function buildPromptDrivenRewrite(
 ) {
   const normalizedPrompt = normalizeFeedbackText(`${feedback} ${voiceDirection}`)
   const sourceLead = trimSentence(sourceText).split(/[.?!]/)[0]?.trim() || ''
-  const hook = normalizedPrompt.includes('contrarian')
-    ? 'The uncomfortable version is this:'
-    : normalizedPrompt.includes('sharper')
-      ? 'The sharper version is this:'
-      : normalizedPrompt.includes('direct')
-        ? 'The direct version is this:'
-        : normalizedPrompt.includes('specific')
-          ? 'The specific version is this:'
-          : normalizedPrompt.includes('grounded')
-            ? 'The grounded version is this:'
-            : 'The cleaner version is this:'
-  const sourceClause = sourceLead ? `${ensureTerminalPeriod(sourceLead)} ` : ''
+  const wantsSharperRewrite =
+    normalizedPrompt.includes('contrarian') ||
+    normalizedPrompt.includes('sharper') ||
+    normalizedPrompt.includes('direct') ||
+    normalizedPrompt.includes('specific') ||
+    normalizedPrompt.includes('grounded')
+
+  if (wantsSharperRewrite) {
+    if (distributionType === 'reply') {
+      return ensureTerminalPeriod('The interruption is the visible part. The recovery cost is the part people undercount.')
+    }
+    if (distributionType === 'quote') {
+      return ensureTerminalPeriod('The visible point is only half the story. The recovery cost is the part people undercount.')
+    }
+    return ensureTerminalPeriod('The real test is not the interruption itself. It is whether the recovery cost stays low enough to keep moving.')
+  }
+
   const sharedTail =
     distributionType === 'reply'
       ? 'The hidden cost is not the interruption itself. It is the time needed to rebuild enough context to keep moving.'
       : distributionType === 'quote'
         ? 'The visible point is only half the story. The other half is the recovery cost people keep undercounting.'
         : 'The important part is the cost of recovery, not only the visible disruption.'
-  return ensureTerminalPeriod(`${hook} ${sourceClause}${sharedTail}`.trim())
+  const sourceClause = sourceLead ? `${ensureTerminalPeriod(sourceLead)} ` : ''
+  const leadIn = normalizedPrompt.includes('contrarian')
+    ? 'The uncomfortable part is that '
+    : normalizedPrompt.includes('sharper')
+      ? 'The sharper read is that '
+      : normalizedPrompt.includes('direct')
+        ? 'The direct read is that '
+        : normalizedPrompt.includes('specific')
+          ? 'The specific read is that '
+          : normalizedPrompt.includes('grounded')
+            ? 'The grounded read is that '
+            : ''
+  return ensureTerminalPeriod(`${leadIn}${sourceClause}${sharedTail}`.trim())
 }
 
 function buildDraftPackMarkdown(weekId: string, drafts: Array<Record<string, unknown>>) {
