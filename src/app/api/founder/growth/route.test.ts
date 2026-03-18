@@ -43,6 +43,20 @@ describe('growth rewrite fallback', () => {
     )
 
     expect(rewritten).not.toBe(original)
-    expect(rewritten).toContain('The real test is not the interruption itself.')
+    expect(rewritten).toMatch(/legible|recovery cost|next move/i)
+  })
+
+  it('uses a different original-angle rewrite when the current text is already generic', () => {
+    const original = 'The real test is not the interruption itself. It is whether the recovery cost stays low enough to keep moving.'
+    const rewritten = buildPromptDrivenRewrite(
+      original,
+      'rewrite with direction',
+      '',
+      'People keep asking for more automation, but the real issue is whether the plan still feels legible after context changes.',
+      'original',
+    )
+
+    expect(rewritten).not.toBe(original)
+    expect(rewritten).toMatch(/legible|recovery cost|next move/i)
   })
 })

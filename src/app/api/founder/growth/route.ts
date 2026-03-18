@@ -692,7 +692,7 @@ export function buildPromptDrivenRewrite(
   const wantsSharperRewrite =
     normalizedPrompt.includes('contrarian') ||
     normalizedPrompt.includes('sharper') ||
-    normalizedPrompt.includes('direct') ||
+    /\bdirect\b/.test(normalizedPrompt) ||
     normalizedPrompt.includes('specific') ||
     normalizedPrompt.includes('grounded')
 
@@ -704,6 +704,25 @@ export function buildPromptDrivenRewrite(
       return ensureTerminalPeriod('The visible point is only half the story. The recovery cost is the part people undercount.')
     }
     return ensureTerminalPeriod('The real test is not the interruption itself. It is whether the recovery cost stays low enough to keep moving.')
+  }
+
+  if (distributionType === 'original') {
+    const variants = [
+      sourceLead
+        ? `${sourceLead} — the real issue is whether the plan still feels legible once the week changes shape.`
+        : 'The real issue is whether the plan still feels legible once the week changes shape.',
+      sourceLead
+        ? `What matters here is ${sourceLead.replace(/[.?!]+$/, '').replace(/^the\s+/i, '').toLowerCase()}. The useful test is whether the next move stays clear when the week gets messy.`
+        : 'What matters here is whether the next move stays clear when the week gets messy.',
+      'The real test is not the idea itself. It is whether the recovery cost stays low enough that the plan still feels usable when context shifts.',
+    ]
+    const seed = Array.from(`${normalizedPrompt}::${sourceText}::${currentText}::${voiceDirection}`)
+      .reduce((total, char) => total + char.charCodeAt(0), 0)
+    let next = variants[seed % variants.length] || variants[0]
+    if (normalizeFeedbackText(next) === normalizeFeedbackText(currentText)) {
+      next = variants[(seed + 1) % variants.length] || variants[0]
+    }
+    return ensureTerminalPeriod(next)
   }
 
   const sharedTail =
