@@ -1598,13 +1598,12 @@ export function GrowthReviewPanel() {
   }, [selectedOpportunities, selection])
 
   const selectedDraftFamily = useMemo(() => {
-    if (selection?.kind !== 'draft') return draftFamilyModels[0] || null
+    if (selection?.kind !== 'draft') return null
     return draftFamilyModels.find((family) => family.familyId === selection.familyId) || draftFamilyModels[0] || null
   }, [draftFamilyModels, selection])
 
   const selectedDraft = useMemo(() => {
     if (!selectedDraftFamily) return null
-    if (selection?.kind !== 'draft') return selectedDraftFamily.drafts[0] || null
     return selectedDraftFamily.drafts.find((draft) => draft.id === selection.draftId) || selectedDraftFamily.drafts[0] || null
   }, [selectedDraftFamily, selection])
 
