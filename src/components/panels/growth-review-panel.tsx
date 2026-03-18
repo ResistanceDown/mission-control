@@ -1702,6 +1702,36 @@ export function GrowthReviewPanel() {
     })
   }, [setData])
 
+  const patchGrowthDraft = useCallback((draftPatch: Record<string, unknown>) => {
+    const draftId = String(draftPatch.id || '').trim()
+    if (!draftId) return
+    setData((current) => {
+      if (!current?.growth) return current
+      const next = structuredClone(current) as GrowthApiResponse
+      let changed = false
+
+      next.growth.draftCandidates = next.growth.draftCandidates.map((draft) => {
+        if (String(draft.id || '').trim() !== draftId) return draft
+        changed = true
+        return {
+          ...draft,
+          ...draftPatch,
+        }
+      })
+
+      next.growth.approvedPosts = next.growth.approvedPosts.map((post) => {
+        if (String(post.id || '').trim() !== draftId) return post
+        changed = true
+        return {
+          ...post,
+          ...draftPatch,
+        }
+      })
+
+      return changed ? next : current
+    })
+  }, [setData])
+
   const runGrowthAction = useCallback(async (action: GrowthAction, draftId?: string, extra: Record<string, unknown> = {}) => {
     const growthWeek = growth?.week ?? null
     const feedbackSource = extra.feedback ?? (draftId ? feedbackDrafts[draftId] : '')
@@ -1724,6 +1754,12 @@ export function GrowthReviewPanel() {
         const note = String(extra.feedback || '').trim()
         if (username && accountState) {
           patchAccountTargetState(username, accountState, note)
+        }
+      }
+      if (action === 'rewrite_draft' || action === 'update_draft_text') {
+        const rewrittenDraft = payload?.draft && typeof payload.draft === 'object' ? payload.draft as Record<string, unknown> : null
+        if (rewrittenDraft) {
+          patchGrowthDraft(rewrittenDraft)
         }
       }
       await reload()
@@ -1753,7 +1789,7 @@ export function GrowthReviewPanel() {
         generate_drafts: 'Draft candidates generated from the current system-selected moves.',
         refresh_research_and_generate: 'Daily growth plan refreshed and a new draft pack generated.',
         expand_family_variants: 'Added more options for this source family.',
-        rewrite_draft: 'Draft rewritten from the current research snapshot.',
+        rewrite_draft: payload?.draft?.text ? 'Draft rewritten and updated in place.' : 'Draft rewrite requested.',
         update_draft_text: 'Draft text saved.',
         approve_draft: 'Post approved and moved to Ready to schedule.',
         reject_draft: 'Draft rejected. The system will learn from that.',

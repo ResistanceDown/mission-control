@@ -1497,7 +1497,7 @@ export async function POST(request: NextRequest) {
         target.status = 'draft'
         await writeJson(draftPackJsonPath, draftPack)
         await writeDraftArtifacts(draftPack.drafts)
-        return NextResponse.json({ status: 'ok', action: body.action, week, draftId })
+        return NextResponse.json({ status: 'ok', action: body.action, week, draftId, draft: target })
       }
       case 'approve_draft':
       case 'reject_draft':
