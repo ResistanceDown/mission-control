@@ -12,6 +12,7 @@ type GrowthAction =
   | 'generate_drafts'
   | 'refresh_research_and_generate'
   | 'expand_family_variants'
+  | 'reset_to_research'
   | 'rewrite_draft'
   | 'update_draft_text'
   | 'approve_draft'
@@ -55,6 +56,8 @@ interface GrowthApiResponse {
       researchRefreshAt?: string | null
       opportunitySelectionAt?: string | null
       draftGenerationAt?: string | null
+      replyLaneState?: 'active' | 'soft' | 'blocked' | 'absent'
+      replyLaneReason?: string | null
       selectedOpportunityCount?: number
       draftCount?: number
     } | null
@@ -1334,6 +1337,7 @@ export function GrowthReviewPanel() {
   const [scheduleDrafts, setScheduleDrafts] = useState<Record<string, { when: string; note: string }>>({})
   const [publishDrafts, setPublishDrafts] = useState<Record<string, { tweetUrl: string; tweetId: string }>>({})
   const [activeDrawer, setActiveDrawer] = useState<'queue' | 'signals' | null>(null)
+  const [selectionLocked, setSelectionLocked] = useState(false)
   const [selection, setSelection] = useState<
     | { kind: 'opportunity'; id: string }
     | { kind: 'draft'; familyId: string; draftId: string }
@@ -1583,10 +1587,10 @@ export function GrowthReviewPanel() {
             ? allQueueItems.some((entry) => entry.status === selection.status && entry.item.id === selection.id)
             : false
 
-    if (!selectionStillValid) {
+    if (!selectionStillValid && !selectionLocked) {
       setSelection(nextSelection)
     }
-  }, [allQueueItems, draftFamilyModels, fallbackOpportunityFamilies, reactiveOpportunityFamilies, selectedOpportunities, selection])
+  }, [allQueueItems, draftFamilyModels, fallbackOpportunityFamilies, reactiveOpportunityFamilies, selectedOpportunities, selection, selectionLocked])
 
   const selectedOpportunity = useMemo(() => {
     if (selection?.kind !== 'opportunity') return null
@@ -1669,6 +1673,13 @@ export function GrowthReviewPanel() {
     if (selection?.kind !== 'queue') return null
     return allQueueItems.find((entry) => entry.status === selection.status && entry.item.id === selection.id) || null
   }, [allQueueItems, selection])
+
+  const focusSelection = useCallback((
+    nextSelection: { kind: 'opportunity'; id: string } | { kind: 'draft'; familyId: string; draftId: string } | { kind: 'queue'; status: 'ready' | 'scheduled' | 'failed' | 'published'; id: string } | null,
+  ) => {
+    setSelectionLocked(false)
+    setSelection(nextSelection)
+  }, [])
 
   const inspectorMode: 'opportunity' | 'draft' | 'queue' | 'empty' = selectedDraft
     ? 'draft'
@@ -1792,13 +1803,12 @@ export function GrowthReviewPanel() {
           patchGrowthDraft(rewrittenDraft)
         }
       }
-      if (action === 'approve_draft' || action === 'reject_draft' || action === 'archive_draft' || action === 'reject_opportunity' || action === 'archive_opportunity') {
-        setSelection((current) => {
-          if (!current?.kind) return current
-          if (current.kind === 'draft' && draftId && current.draftId !== draftId) return current
-          if (current.kind === 'opportunity' && draftId && current.id !== draftId) return current
-          return null
-        })
+      if (action === 'refresh_research' || action === 'select_opportunities' || action === 'refresh_research_and_select' || action === 'generate_drafts' || action === 'refresh_research_and_generate' || action === 'clear_current_drafts' || action === 'reset_to_research') {
+        setSelectionLocked(false)
+      }
+      if (action === 'approve_draft' || action === 'reject_draft' || action === 'archive_draft' || action === 'reject_opportunity' || action === 'archive_opportunity' || action === 'schedule_draft' || action === 'unschedule_draft' || action === 'cancel_approved_post' || action === 'post_now' || action === 'mark_published' || action === 'link_manual_publish' || action === 'reopen_published') {
+        setSelectionLocked(true)
+        setSelection(null)
       }
       await reload()
       if (action === 'post_now') {
@@ -1926,12 +1936,14 @@ export function GrowthReviewPanel() {
           <div className="mt-1 text-xs text-muted-foreground">
             Your role starts at draft review and approval, not raw opportunity picking.
             {growth.automationSummary?.researchRefreshAt ? ` Last daily planning run: ${formatPacificTime(growth.automationSummary.researchRefreshAt)}.` : ''}
+            {growth.automationSummary?.replyLaneState ? ` Reply lane: ${growth.automationSummary.replyLaneState}.` : ''}
           </div>
           <div className="mt-2 text-xs text-muted-foreground">
             <span className="text-foreground">Refresh everything</span> pulls fresh research and rebuilds the whole lane.
             {' '}
             <span className="text-foreground">Try a different selection</span> keeps today&apos;s research snapshot, picks a different move set, and regenerates drafts.
           </div>
+          {growth.automationSummary?.replyLaneReason ? <div className="mt-2 text-xs text-muted-foreground">{growth.automationSummary.replyLaneReason}</div> : null}
         </div>
         <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 p-4">
           <div className="text-[11px] uppercase tracking-[0.14em] text-cyan-100/70">What you can do now</div>
@@ -2002,7 +2014,7 @@ export function GrowthReviewPanel() {
                           <button
                             key={`family-switch-${family.familyId}`}
                             type="button"
-                            onClick={() => setSelection({ kind: 'draft', familyId: family.familyId, draftId: family.drafts[0].id })}
+                            onClick={() => focusSelection({ kind: 'draft', familyId: family.familyId, draftId: family.drafts[0].id })}
                             className={cx(
                               'rounded-full border px-3 py-2 text-left text-xs font-medium transition-smooth',
                               isSelectedFamily
@@ -2037,7 +2049,7 @@ export function GrowthReviewPanel() {
                               key={draft.id}
                               draft={draft}
                               selected={isSelected}
-                              onSelect={() => setSelection({ kind: 'draft', familyId: selectedDraftFamily.familyId, draftId: draft.id })}
+                              onSelect={() => focusSelection({ kind: 'draft', familyId: selectedDraftFamily.familyId, draftId: draft.id })}
                             />
                           )
                         })}
@@ -2074,7 +2086,7 @@ export function GrowthReviewPanel() {
                     key={family.key}
                     opportunity={leader}
                     selected={isSelected}
-                    onSelect={() => setSelection({ kind: 'opportunity', id: leader.id })}
+                    onSelect={() => focusSelection({ kind: 'opportunity', id: leader.id })}
                   />
                 )
               }) : (
@@ -2094,7 +2106,7 @@ export function GrowthReviewPanel() {
                         <button
                           key={`fallback-${family.key}`}
                           type="button"
-                          onClick={() => setSelection({ kind: 'opportunity', id: leader.id })}
+                          onClick={() => focusSelection({ kind: 'opportunity', id: leader.id })}
                           className="w-full rounded-xl border border-white/8 bg-black/15 px-3 py-3 text-left hover:bg-surface-2/70"
                         >
                           <div className="text-sm font-medium text-foreground">{leader.title || family.sourceLabel}</div>
@@ -2269,7 +2281,7 @@ export function GrowthReviewPanel() {
                         <button
                           key={`${section.key}-${post.id}`}
                           type="button"
-                          onClick={() => setSelection({ kind: 'queue', status: section.key, id: post.id })}
+                          onClick={() => focusSelection({ kind: 'queue', status: section.key, id: post.id })}
                           className={cx(
                             'w-full rounded-xl border p-3 text-left transition-smooth',
                             selection?.kind === 'queue' && selection.id === post.id && selection.status === section.key

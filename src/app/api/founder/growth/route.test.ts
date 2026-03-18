@@ -59,4 +59,18 @@ describe('growth rewrite fallback', () => {
     expect(rewritten).not.toBe(original)
     expect(rewritten).toMatch(/legible|recovery cost|next move/i)
   })
+
+  it('rewrites original drafts on direct feedback instead of returning the same generic line', () => {
+    const original = 'The real test is not the interruption itself. It is whether the recovery cost stays low enough to keep moving.'
+    const rewritten = buildPromptDrivenRewrite(
+      original,
+      'make it more direct, sharper, and specific',
+      'more specific',
+      'People keep asking for more automation, but the real issue is whether the plan still feels legible after context changes.',
+      'original',
+    )
+
+    expect(rewritten).not.toBe(original)
+    expect(rewritten).toMatch(/legible|next move|context changes|recovery cost/i)
+  })
 })

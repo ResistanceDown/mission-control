@@ -703,7 +703,22 @@ export function buildPromptDrivenRewrite(
     if (distributionType === 'quote') {
       return ensureTerminalPeriod('The visible point is only half the story. The recovery cost is the part people undercount.')
     }
-    return ensureTerminalPeriod('The real test is not the interruption itself. It is whether the recovery cost stays low enough to keep moving.')
+    const originalVariants = [
+      sourceLead
+        ? `${sourceLead} — the real test is whether the plan still feels legible when the week gets messy.`
+        : 'The real test is whether the plan still feels legible when the week gets messy.',
+      sourceLead
+        ? `${sourceLead} — the useful part is not the extra explanation. It is whether the next move stays clear enough to trust.`
+        : 'The useful part is not the extra explanation. It is whether the next move stays clear enough to trust.',
+      'The direct read is that the hard part is not the idea itself. It is whether the plan stays clear enough to keep moving when context shifts.',
+    ]
+    const seed = Array.from(`${normalizedPrompt}::${sourceText}::${currentText}::${distributionType}`)
+      .reduce((total, char) => total + char.charCodeAt(0), 0)
+    let next = originalVariants[seed % originalVariants.length] || originalVariants[0]
+    if (normalizeFeedbackText(next) === normalizeFeedbackText(currentText)) {
+      next = originalVariants[(seed + 1) % originalVariants.length] || originalVariants[0]
+    }
+    return ensureTerminalPeriod(next)
   }
 
   if (distributionType === 'original') {
