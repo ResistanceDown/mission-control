@@ -12,6 +12,29 @@ function getPreferredToolsProfile(): string {
   return String(process.env.OPENCLAW_TOOLS_PROFILE || 'coding').trim() || 'coding'
 }
 
+export function buildSpawnPayload(input: {
+  task: string
+  label: string
+  timeoutSeconds: number
+  model?: string | null
+}) {
+  const spawnPayload: Record<string, unknown> = {
+    task: input.task,
+    label: input.label,
+    runTimeoutSeconds: input.timeoutSeconds,
+    tools: {
+      profile: getPreferredToolsProfile(),
+    },
+  }
+
+  const model = typeof input.model === 'string' ? input.model.trim() : ''
+  if (model) {
+    spawnPayload.model = model
+  }
+
+  return spawnPayload
+}
+
 async function runSpawnWithCompatibility(spawnPayload: Record<string, unknown>) {
   const commandArg = `sessions_spawn(${JSON.stringify(spawnPayload)})`
   return runClawdbot(['-c', commandArg], { timeoutMs: 10000 })
@@ -36,15 +59,12 @@ export async function POST(request: NextRequest) {
 
     // Construct the spawn command
     // Using OpenClaw's sessions_spawn function via clawdbot CLI
-    const spawnPayload = {
+    const spawnPayload = buildSpawnPayload({
       task,
       model,
       label,
-      runTimeoutSeconds: timeout,
-      tools: {
-        profile: getPreferredToolsProfile(),
-      },
-    }
+      timeoutSeconds: timeout,
+    })
 
     try {
       // Execute the spawn command (OpenClaw 2026.3.2+ defaults tools.profile to messaging).

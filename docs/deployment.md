@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- **Node.js** >= 20 (LTS recommended)
+- **Node.js** >= 22 (LTS recommended)
 - **pnpm** (installed via corepack: `corepack enable && corepack prepare pnpm@latest --activate`)
 
 ### Ubuntu / Debian
@@ -61,7 +61,7 @@ docker run -p 3000:3000 \
 ```
 
 The Docker image:
-- Builds from `node:20-slim` with multi-stage build
+- Builds from `node:22-slim` with multi-stage build
 - Compiles `better-sqlite3` natively inside the container (Linux x64)
 - Uses Next.js standalone output for minimal image size
 - Runs as non-root user `nextjs`

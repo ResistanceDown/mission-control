@@ -764,7 +764,7 @@ function QuickSpawnModal({
 }) {
   const [spawnData, setSpawnData] = useState({
     task: '',
-    model: 'sonnet',
+    model: '',
     label: `${agent.name}-subtask-${Date.now()}`,
     timeoutSeconds: 300
   })
@@ -793,6 +793,7 @@ function QuickSpawnModal({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...spawnData,
+          model: spawnData.model || undefined,
           parentAgent: agent.name,
           sessionKey: agent.session_key
         })
@@ -864,12 +865,18 @@ function QuickSpawnModal({
                 onChange={(e) => setSpawnData(prev => ({ ...prev, model: e.target.value }))}
                 className="w-full px-3 py-2 bg-surface-1 border border-border rounded text-foreground focus:border-primary/50 focus:ring-1 focus:ring-primary/50"
               >
+                <option value="">Gateway default (let OpenClaw choose)</option>
                 {models.map(model => (
                   <option key={model.id} value={model.id}>
                     {model.name} - {model.cost} ({model.speed})
                   </option>
                 ))}
               </select>
+              {!spawnData.model && (
+                <div className="mt-2 text-xs text-muted-foreground">
+                  Uses the gateway default model when left blank.
+                </div>
+              )}
             </div>
 
             {/* Agent Label */}

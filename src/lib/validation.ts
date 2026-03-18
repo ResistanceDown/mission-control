@@ -170,7 +170,14 @@ export const qualityReviewSchema = z.object({
 
 export const spawnAgentSchema = z.object({
   task: z.string().min(1, 'Task is required'),
-  model: z.string().min(1, 'Model is required'),
+  model: z.preprocess(
+    (value) => {
+      if (typeof value !== 'string') return value
+      const trimmed = value.trim()
+      return trimmed.length > 0 ? trimmed : undefined
+    },
+    z.string().min(1).optional()
+  ),
   label: z.string().min(1, 'Label is required'),
   timeoutSeconds: z.number().min(10).max(3600).default(300),
 })

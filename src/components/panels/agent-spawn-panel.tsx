@@ -23,7 +23,7 @@ export function AgentSpawnPanel() {
 
   const [formData, setFormData] = useState<SpawnFormData>({
     task: '',
-    model: 'sonnet',
+    model: '',
     label: '',
     timeoutSeconds: 300
   })
@@ -66,7 +66,10 @@ export function AgentSpawnPanel() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(formData),
+        body: JSON.stringify({
+          ...formData,
+          model: formData.model || undefined,
+        }),
       })
 
       const result = await response.json()
@@ -81,7 +84,7 @@ export function AgentSpawnPanel() {
         // Clear form
         setFormData({
           task: '',
-          model: 'sonnet',
+          model: '',
           label: '',
           timeoutSeconds: 300
         })
@@ -150,16 +153,21 @@ export function AgentSpawnPanel() {
                 className="w-full px-3 py-2 border border-border rounded-md bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/50"
                 disabled={isSpawning}
               >
+                <option value="">Gateway default (let OpenClaw choose)</option>
                 {availableModels.map((model) => (
                   <option key={model.alias} value={model.alias}>
                     {model.alias} - {model.description}
                   </option>
                 ))}
               </select>
-              {selectedModel && (
+              {selectedModel ? (
                 <div className="mt-2 text-sm text-muted-foreground">
                   <div>Provider: {selectedModel.provider}</div>
                   <div>Cost: ${selectedModel.costPer1k}/1k tokens</div>
+                </div>
+              ) : (
+                <div className="mt-2 text-sm text-muted-foreground">
+                  Uses the gateway default model when left blank.
                 </div>
               )}
             </div>
@@ -235,7 +243,7 @@ export function AgentSpawnPanel() {
                         </span>
                       </div>
                       <div className="text-sm text-muted-foreground mt-1">
-                        Model: {request.model} • Timeout: {request.timeoutSeconds}s
+                        Model: {request.model || 'Gateway default'} • Timeout: {request.timeoutSeconds}s
                       </div>
                       <div className="text-sm text-muted-foreground mt-1 truncate">
                         {request.task}

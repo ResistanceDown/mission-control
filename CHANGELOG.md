@@ -2,6 +2,25 @@
 
 All notable changes to Mission Control are documented in this file.
 
+## [2.0.1-habi.0] - 2026-03-18
+
+### Added
+- Selective upstream adoption notes for the Mission Control `v2.0.1` patch line.
+
+### Changed
+- Mission Control now identifies as a `2.0.1`-based Habi fork (`2.0.1-habi.0`).
+- Package/runtime Node floor raised to `>=22` to match the adopted upstream compatibility floor.
+- Docker image base updated to `node:22-slim` for parity with the runtime floor.
+- CI and local version hints now point at Node 22 (`actions/setup-node@v4` and `.nvmrc`).
+
+### Fixed
+- Spawn now accepts gateway-managed default models by treating `model` as optional instead of mandatory.
+- Spawn payloads omit `model` when the gateway should pick the default, while preserving the existing compatibility fallback.
+
+### Deferred
+- CSP nonce propagation changes were not adopted because this fork does not currently have an app-level CSP surface that needs the upstream model.
+- Windows installer, Docker Hub publishing workflow, UI polish/animation changes, gateway/local hybrid session UI, per-agent workspace skill-root surfacing, and `awaiting_owner` task-state expansion remain out of scope for this selective adoption.
+
 ## [2.0.0-habi.1] - 2026-03-11
 
 ### Added

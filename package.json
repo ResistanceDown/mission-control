@@ -1,6 +1,6 @@
 {
   "name": "mission-control",
-  "version": "2.0.0-habi.1",
+  "version": "2.0.1-habi.0",
   "description": "OpenClaw Mission Control — open-source agent orchestration dashboard",
   "scripts": {
     "dev": "next dev --hostname 127.0.0.1 --port ${PORT:-3000}",
@@ -61,7 +61,7 @@
     "vitest": "^2.1.5"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "keywords": [
     "openclaw",

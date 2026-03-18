@@ -136,6 +136,29 @@ describe('spawnAgentSchema', () => {
     }
   })
 
+  it('accepts input without a model so gateway defaults can be used', () => {
+    const result = spawnAgentSchema.safeParse({
+      task: 'Do something',
+      label: 'worker-1',
+    })
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.model).toBeUndefined()
+    }
+  })
+
+  it('treats a blank model as gateway-default compatible', () => {
+    const result = spawnAgentSchema.safeParse({
+      task: 'Do something',
+      model: '   ',
+      label: 'worker-1',
+    })
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.model).toBeUndefined()
+    }
+  })
+
   it('rejects timeout below minimum (10)', () => {
     const result = spawnAgentSchema.safeParse({ ...validSpawn, timeoutSeconds: 5 })
     expect(result.success).toBe(false)
