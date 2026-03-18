@@ -13,6 +13,8 @@ const BACKGROUND_AGENTS = new Set([
   'habi-foreman',
   'ops-heartbeat',
   'habi-qc',
+  'habi-publish-gate-checker',
+  'habi-readiness-auditor',
   'voice-fast',
   'discord-mlx',
 ])
@@ -31,6 +33,9 @@ const BACKGROUND_LABEL_PATTERNS = [
   /^Cron:\s*habi-task-ingest-/i,
   /^Cron:\s*habi-readiness-ui-audit-/i,
   /^Cron:\s*habi-readiness-flow-smoke-/i,
+  /^Cron:\s*habi-x-publish-scheduled-/i,
+  /^Cron:\s*habi-x-follow-queue-/i,
+  /^Cron:\s*habi-x-draft-mwf/i,
 ]
 
 const INFER_FROM_ACTIVE_ASSIGNMENT_AGENTS = new Set([
