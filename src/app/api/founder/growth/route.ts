@@ -1380,8 +1380,12 @@ export async function POST(request: NextRequest) {
       }
       case 'generate_drafts': {
         const voiceDirection = String(body.voiceDirection || '').trim()
+        const focusOpportunityId = String((body as any).opportunityId || '').trim()
         await sanitizeDraftPack(draftPackJsonPath)
-        await runGrowthCommand('growth:m92:draft-pack', week, voiceDirection ? ['--voice-direction', voiceDirection] : [])
+        await runGrowthCommand('growth:m92:draft-pack', week, [
+          ...(voiceDirection ? ['--voice-direction', voiceDirection] : []),
+          ...(focusOpportunityId ? ['--focus-opportunity-id', focusOpportunityId] : []),
+        ])
         return NextResponse.json({ status: 'ok', action: 'generate_drafts', week })
       }
       case 'expand_family_variants': {

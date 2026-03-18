@@ -1792,10 +1792,11 @@ export function GrowthReviewPanel() {
           patchGrowthDraft(rewrittenDraft)
         }
       }
-      if (action === 'approve_draft' || action === 'reject_draft' || action === 'archive_draft') {
+      if (action === 'approve_draft' || action === 'reject_draft' || action === 'archive_draft' || action === 'reject_opportunity' || action === 'archive_opportunity') {
         setSelection((current) => {
-          if (!current?.kind || current.kind !== 'draft') return current
-          if (draftId && current.draftId !== draftId) return current
+          if (!current?.kind) return current
+          if (current.kind === 'draft' && draftId && current.draftId !== draftId) return current
+          if (current.kind === 'opportunity' && draftId && current.id !== draftId) return current
           return null
         })
       }
