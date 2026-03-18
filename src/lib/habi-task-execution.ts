@@ -30,6 +30,8 @@ export type HabiExecutionMetadata = {
   execution_context_ready?: boolean
   execution_last_prepared_at?: string
   execution_last_prepared_by?: string
+  execution_last_progress_at?: string
+  execution_last_progress_by?: string
   execution_next_update_due?: string
   [key: string]: unknown
 }

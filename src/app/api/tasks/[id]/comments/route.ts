@@ -6,7 +6,8 @@ import { mutationLimiter } from '@/lib/rate-limit';
 import { logger } from '@/lib/logger';
 import { resolveMentionRecipients } from '@/lib/mentions';
 import { isHabiTask } from '@/lib/habi-task-contract';
-import { ensureHabiTaskSubscriptions } from '@/lib/habi-task-ops';
+import { ensureHabiTaskSubscriptions, mergeHabiMetadata } from '@/lib/habi-task-ops';
+import { isExecutionProgressComment } from '@/lib/habi-task-execution';
 
 /**
  * GET /api/tasks/[id]/comments - Get all comments for a task
@@ -180,6 +181,18 @@ export async function POST(
       },
       workspaceId
     );
+
+    if (isHabiTask({ assigned_to: task.assigned_to }) && isExecutionProgressComment(content)) {
+      const progressStampedMetadata = mergeHabiMetadata(task.metadata, {
+        execution_last_progress_at: new Date().toISOString(),
+        execution_last_progress_by: author,
+      });
+      db.prepare(`
+        UPDATE tasks
+        SET metadata = ?, updated_at = ?
+        WHERE id = ? AND workspace_id = ?
+      `).run(JSON.stringify(progressStampedMetadata), now, taskId, workspaceId);
+    }
     
     // Ensure subscriptions for author, mentions, and assignee
     db_helpers.ensureTaskSubscription(taskId, author, workspaceId);

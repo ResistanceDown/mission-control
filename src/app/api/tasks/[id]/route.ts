@@ -787,11 +787,16 @@ export async function PUT(
               sessionKey: dispatch.sessionKey || null,
               compatibilityAgent: dispatch.compatibilityAgent,
             })
+            const startedMetadataWithProgress: Record<string, unknown> = {
+              ...startedMetadata,
+              execution_last_progress_at: new Date().toISOString(),
+              execution_last_progress_by: auth.user.username,
+            }
             db.prepare(`
               UPDATE tasks
               SET metadata = ?, updated_at = ?
               WHERE id = ? AND workspace_id = ?
-            `).run(JSON.stringify(startedMetadata), now, taskId, workspaceId)
+            `).run(JSON.stringify(startedMetadataWithProgress), now, taskId, workspaceId)
             db.prepare(`
               INSERT INTO comments (task_id, author, content, created_at, parent_id, mentions, workspace_id)
               VALUES (?, ?, ?, ?, NULL, NULL, ?)
@@ -815,23 +820,23 @@ export async function PUT(
             db_helpers.logActivity(
               'task_execution_started',
               'task',
-              taskId,
-              auth.user.username,
-              `Execution start dispatched to ${effectiveAssignedTo}`,
-              {
-                assignee: effectiveAssignedTo,
-                previous_status: currentTask.status,
-                next_status: 'in_progress',
-                session_key: dispatch.sessionKey || null,
-                route_kind: dispatch.routeKind,
-                session_scope: dispatch.sessionScope,
-                execution_mode: preparedExecution.metadata.execution_mode || null,
-                worktree_path: preparedExecution.metadata.worktree_path || null,
-                branch_name: preparedExecution.metadata.branch_name || null,
-                execution_envelope: startedMetadata.execution_envelope,
-              },
-              workspaceId
-            )
+                taskId,
+                auth.user.username,
+                `Execution start dispatched to ${effectiveAssignedTo}`,
+                {
+                  assignee: effectiveAssignedTo,
+                  previous_status: currentTask.status,
+                  next_status: 'in_progress',
+                  session_key: dispatch.sessionKey || null,
+                  route_kind: dispatch.routeKind,
+                  session_scope: dispatch.sessionScope,
+                  execution_mode: preparedExecution.metadata.execution_mode || null,
+                  worktree_path: preparedExecution.metadata.worktree_path || null,
+                  branch_name: preparedExecution.metadata.branch_name || null,
+                  execution_envelope: (startedMetadataWithProgress as Record<string, unknown>).execution_envelope,
+                },
+                workspaceId
+              )
           }
         }
       }
