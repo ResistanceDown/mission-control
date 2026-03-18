@@ -213,6 +213,19 @@ async function postGrowthDraftNow(week: string, draftId: string) {
   return { stdout, stderr }
 }
 
+function parseTrailingJsonObject(raw: string) {
+  const trimmed = String(raw || '').trim()
+  if (!trimmed) return null
+  const start = trimmed.lastIndexOf('{')
+  if (start < 0) return null
+  const candidate = trimmed.slice(start)
+  try {
+    return JSON.parse(candidate) as Record<string, unknown>
+  } catch {
+    return null
+  }
+}
+
 function toUsername(value: unknown) {
   return String(value || '').replace(/^@/, '').trim().toLowerCase()
 }
@@ -1546,7 +1559,14 @@ export async function POST(request: NextRequest) {
         const result = await postGrowthDraftNow(week, draftId)
         const refreshedApprovedPosts = (await readJsonOrNull<Array<Record<string, any>>>(approvedPostsPath)) || []
         const refreshedTarget = refreshedApprovedPosts.find((entry) => entry.id === draftId) || null
-        return NextResponse.json({ status: 'ok', action: body.action, week, draftId, publishResult: result.stdout ? JSON.parse(result.stdout) : null, draft: refreshedTarget })
+        return NextResponse.json({
+          status: 'ok',
+          action: body.action,
+          week,
+          draftId,
+          publishResult: parseTrailingJsonObject(result.stdout),
+          draft: refreshedTarget,
+        })
       }
       case 'schedule_draft': {
         const draftId = String(body.draftId || '').trim()

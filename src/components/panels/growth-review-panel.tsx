@@ -1707,6 +1707,25 @@ export function GrowthReviewPanel() {
         }
       }
       await reload()
+      if (action === 'post_now') {
+        const draftStatus = String(payload?.draft?.status || '').trim().toLowerCase()
+        const tweetUrl = String(payload?.draft?.tweet_url || '').trim()
+        const publishError = String(payload?.draft?.publish_error || '').trim()
+        if (draftStatus === 'published') {
+          setActionState({
+            status: 'saved',
+            message: tweetUrl ? `Post published on X. ${tweetUrl}` : 'Post published on X.',
+          })
+          return
+        }
+        if (draftStatus === 'failed') {
+          setActionState({
+            status: 'error',
+            message: publishError || 'X rejected the post. Review the failed queue item for the exact reason.',
+          })
+          return
+        }
+      }
       const messageMap: Partial<Record<GrowthAction, string>> = {
         refresh_research: 'Daily growth plan refreshed.',
         select_opportunities: 'System-selected moves re-ranked from the latest daily plan.',
