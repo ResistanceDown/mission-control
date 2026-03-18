@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { runClawdbot } from '@/lib/command'
 import { requireRole } from '@/lib/auth'
 import { config } from '@/lib/config'
 import { readdir, readFile, stat } from 'fs/promises'
@@ -7,6 +6,8 @@ import { join } from 'path'
 import { heavyLimiter } from '@/lib/rate-limit'
 import { logger } from '@/lib/logger'
 import { validateBody, spawnAgentSchema } from '@/lib/validation'
+import { callOpenClawGateway, parseGatewayJsonOutput } from '@/lib/openclaw-gateway'
+import { runOpenClaw } from '@/lib/command'
 
 function getPreferredToolsProfile(): string {
   return String(process.env.OPENCLAW_TOOLS_PROFILE || 'coding').trim() || 'coding'
@@ -36,8 +37,51 @@ export function buildSpawnPayload(input: {
 }
 
 async function runSpawnWithCompatibility(spawnPayload: Record<string, unknown>) {
-  const commandArg = `sessions_spawn(${JSON.stringify(spawnPayload)})`
-  return runClawdbot(['-c', commandArg], { timeoutMs: 10000 })
+  try {
+    return await callOpenClawGateway('sessions_spawn', spawnPayload, 15000)
+  } catch (error: any) {
+    const rawErr = String(error?.message || error?.stderr || '').toLowerCase()
+    const isUnknownMethod = rawErr.includes('unknown method') && rawErr.includes('sessions_spawn')
+    if (!isUnknownMethod) throw error
+
+    const agentId = String(process.env.OPENCLAW_SPAWN_AGENT || 'main').trim() || 'main'
+    try {
+      const result = await runOpenClaw(
+        [
+          'agent',
+          '--agent',
+          agentId,
+          '--message',
+          String(spawnPayload.task || ''),
+          '--timeout',
+          String(Math.max(10, Number(spawnPayload.runTimeoutSeconds) || 300)),
+          '--json',
+        ],
+        { timeoutMs: 20000 },
+      )
+
+      return {
+        stdout: result.stdout,
+        stderr: result.stderr,
+        compatibility: { spawnFallback: 'openclaw-agent', agentId },
+      }
+    } catch (fallbackError: any) {
+      const fallbackStdout = String(fallbackError?.stdout || '')
+      const fallbackStderr = String(fallbackError?.stderr || fallbackError?.message || '')
+      const parsed = parseGatewayJsonOutput(fallbackStdout) || parseGatewayJsonOutput(fallbackStderr)
+      if (parsed && typeof parsed === 'object') {
+        const parsedAny = parsed as any
+        if (parsedAny.status === 'ok' || parsedAny.runId || parsedAny.result) {
+          return {
+            stdout: fallbackStdout || JSON.stringify(parsedAny),
+            stderr: fallbackStderr,
+            compatibility: { spawnFallback: 'openclaw-agent', agentId, exitStatus: 'nonzero-json-ok' },
+          }
+        }
+      }
+      throw fallbackError
+    }
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -67,14 +111,14 @@ export async function POST(request: NextRequest) {
     })
 
     try {
-      // Execute the spawn command (OpenClaw 2026.3.2+ defaults tools.profile to messaging).
+      // Execute the spawn command through the gateway. Try with tools.profile first,
+      // fall back without it for older gateways that don't support the field.
       let stdout = ''
       let stderr = ''
       let compatibilityFallbackUsed = false
       try {
-        const result = await runSpawnWithCompatibility(spawnPayload)
-        stdout = result.stdout
-        stderr = result.stderr
+        const result = await runSpawnWithCompatibility(spawnPayload) as any
+        stdout = typeof result?.stdout === 'string' ? result.stdout : JSON.stringify(result)
       } catch (firstError: any) {
         const rawErr = String(firstError?.stderr || firstError?.message || '').toLowerCase()
         const likelySchemaMismatch =
@@ -87,20 +131,22 @@ export async function POST(request: NextRequest) {
 
         const fallbackPayload = { ...spawnPayload }
         delete (fallbackPayload as any).tools
-        const fallback = await runSpawnWithCompatibility(fallbackPayload)
-        stdout = fallback.stdout
-        stderr = fallback.stderr
+        const fallback = await runSpawnWithCompatibility(fallbackPayload) as any
+        stdout = typeof fallback?.stdout === 'string' ? fallback.stdout : JSON.stringify(fallback)
         compatibilityFallbackUsed = true
       }
 
       // Parse the response to extract session info
       let sessionInfo = null
       try {
-        // Look for session information in stdout
-        const sessionMatch = stdout.match(/Session created: (.+)/)
-        if (sessionMatch) {
-          sessionInfo = sessionMatch[1]
-        }
+        const parsed = JSON.parse(stdout)
+        sessionInfo =
+          parsed?.sessionId ||
+          parsed?.session_id ||
+          parsed?.sessionInfo ||
+          parsed?.result?.meta?.agentMeta?.sessionId ||
+          parsed?.result?.meta?.session_id ||
+          null
       } catch (parseError) {
         logger.error({ err: parseError }, 'Failed to parse session info')
       }
