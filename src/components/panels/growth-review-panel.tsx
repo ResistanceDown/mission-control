@@ -1499,11 +1499,11 @@ export function GrowthReviewPanel() {
       : 'Nothing scheduled'
   const queueStatusLine = `${readyToSchedule} ready • ${scheduledCount} scheduled${failedPosts.length ? ` • ${failedPosts.length} failed` : ''}`
   const utilityActions = [
-    { key: 'refresh', label: 'Full refresh', action: () => void runGrowthAction('refresh_research') },
-    { key: 'select', label: 'Reselect from current research', action: () => void runGrowthAction('select_opportunities') },
+    { key: 'refresh', label: 'Refresh everything', action: () => void runGrowthAction('refresh_research') },
+    { key: 'select', label: 'Try a different selection', action: () => void runGrowthAction('select_opportunities') },
     { key: 'drafts', label: candidateCount ? 'Clear draft batch' : 'Generate drafts', action: () => void runGrowthAction(candidateCount ? 'clear_current_drafts' : 'generate_drafts', undefined, candidateCount ? {} : { voiceDirection }) },
-    { key: 'queue', label: 'Open queue', action: () => setActiveDrawer((current) => current === 'queue' ? null : 'queue') },
-    { key: 'signals', label: 'Open signals', action: () => setActiveDrawer((current) => current === 'signals' ? null : 'signals') },
+    { key: 'queue', label: 'Publishing queue', action: () => setActiveDrawer((current) => current === 'queue' ? null : 'queue') },
+    { key: 'signals', label: 'Research signals', action: () => setActiveDrawer((current) => current === 'signals' ? null : 'signals') },
   ]
   const primaryActions = utilityActions.slice(0, 2)
   const secondaryActions = utilityActions.slice(2)
@@ -1604,6 +1604,36 @@ export function GrowthReviewPanel() {
     return selectedDraftFamily.drafts.find((draft) => draft.id === selection.draftId) || selectedDraftFamily.drafts[0] || null
   }, [selectedDraftFamily, selection])
 
+  const nowStripItems = readyToSchedule
+    ? [
+        `Review ${readyToSchedule} ready-to-publish post${readyToSchedule === 1 ? '' : 's'}`,
+        'Queue actions appear now',
+        'Refresh or reselect anytime',
+      ]
+    : selectedDraft
+      ? [
+          'Review the selected draft',
+          'Approve, rewrite, or reject it',
+          'Schedule controls appear after approval',
+        ]
+      : candidateCount
+        ? [
+            'Pick the strongest draft family',
+            'Approve or rewrite before looking at signals',
+            'Refresh or reselect if this batch feels weak',
+          ]
+        : selectedOpportunities.length
+          ? [
+              'Try a different selection from today’s research',
+              'Use refresh everything only if research feels stale',
+              'Drafts will appear once a move clears the bar',
+            ]
+          : [
+              'Run refresh everything to rebuild today’s lane',
+              'Wait for new drafts to appear',
+              'Review only when fresh work arrives',
+            ]
+
   const founderActionTitle = readyToSchedule
     ? 'Schedule or publish the approved posts waiting in the queue.'
     : selectedDraft
@@ -1623,14 +1653,14 @@ export function GrowthReviewPanel() {
           ? `${selectedOpportunities.length} system-selected move${selectedOpportunities.length === 1 ? '' : 's'} are available, but none produced a strong enough draft pack.`
           : 'No usable work is in the lane yet.'
   const founderChecklist = readyToSchedule
-    ? ['Open the publishing queue', 'Schedule or publish the approved post', 'Return later for the next draft batch']
-    : selectedDraft
-      ? ['Read the selected draft', 'Approve, rewrite, or reject it', 'Ignore the move list unless you need context']
-      : candidateCount
-        ? ['Start in Draft studio', 'Pick the strongest family', 'Approve or rewrite before looking at signals']
+      ? ['Open the publishing queue', 'Schedule or publish the approved post', 'Return later for the next draft batch']
+      : selectedDraft
+        ? ['Read the selected draft', 'Approve, rewrite, or reject it', 'Ignore the move list unless you need context']
+        : candidateCount
+          ? ['Start in Draft studio', 'Pick the strongest family', 'Approve or rewrite before looking at signals']
         : selectedOpportunities.length
-          ? ['Try Reselect from current research', 'Use Full refresh only if the research itself feels stale', 'Ignore low-value moves']
-          : ['Run Full refresh', 'Wait for new drafts', 'Come back to review only when the lane refills']
+          ? ['Try a different selection', 'Use refresh everything only if the research itself feels stale', 'Ignore low-value moves']
+          : ['Run refresh everything', 'Wait for new drafts', 'Come back to review only when the lane refills']
   const automationStatusLine = growth?.automationSummary?.draftGenerationAt
     ? `Last system planning run ${formatPacificTime(growth.automationSummary.draftGenerationAt)}`
     : 'System planning has not completed yet today'
@@ -1890,9 +1920,17 @@ export function GrowthReviewPanel() {
             {growth.automationSummary?.researchRefreshAt ? ` Last daily planning run: ${formatPacificTime(growth.automationSummary.researchRefreshAt)}.` : ''}
           </div>
           <div className="mt-2 text-xs text-muted-foreground">
-            <span className="text-foreground">Full refresh</span> pulls fresh research and rebuilds the whole lane.
+            <span className="text-foreground">Refresh everything</span> pulls fresh research and rebuilds the whole lane.
             {' '}
-            <span className="text-foreground">Reselect from current research</span> keeps today&apos;s research snapshot, picks a different move set, and regenerates drafts.
+            <span className="text-foreground">Try a different selection</span> keeps today&apos;s research snapshot, picks a different move set, and regenerates drafts.
+          </div>
+        </div>
+        <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 p-4">
+          <div className="text-[11px] uppercase tracking-[0.14em] text-cyan-100/70">What you can do now</div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {nowStripItems.map((item) => (
+              <FieldChip key={item}>{item}</FieldChip>
+            ))}
           </div>
         </div>
         <div className="mt-4 rounded-2xl border border-emerald-500/12 bg-emerald-500/6 p-4">
@@ -2195,7 +2233,7 @@ export function GrowthReviewPanel() {
           <div className="absolute inset-y-0 right-0 w-full max-w-[460px] overflow-y-auto border-l border-white/10 bg-[#0d131b] p-5 shadow-[-20px_0_40px_rgba(0,0,0,0.32)]">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <div className="text-[11px] uppercase tracking-[0.14em] text-cyan-100/70">{activeDrawer === 'queue' ? 'Publishing queue' : 'Signals'}</div>
+                <div className="text-[11px] uppercase tracking-[0.14em] text-cyan-100/70">{activeDrawer === 'queue' ? 'Publishing queue' : 'Research signals'}</div>
                 <div className="mt-1 text-sm font-semibold text-foreground">
                   {activeDrawer === 'queue' ? 'Operational publishing state' : 'Research, follows, and account intelligence'}
                 </div>
