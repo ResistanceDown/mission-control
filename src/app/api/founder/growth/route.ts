@@ -31,6 +31,7 @@ type GrowthAction =
   | 'schedule_draft'
   | 'post_now'
   | 'unschedule_draft'
+  | 'cancel_approved_post'
   | 'mark_published'
   | 'link_manual_publish'
   | 'reopen_published'
@@ -230,6 +231,54 @@ function normalizeFeedbackText(value: unknown) {
 
 function trimSentence(value: unknown) {
   return String(value || '').replace(/\s+/g, ' ').trim().replace(/[.?!]+$/, '')
+}
+
+function normalizeQueueText(value: unknown) {
+  return String(value || '').toLowerCase().replace(/\s+/g, ' ').trim()
+}
+
+function normalizeQueueDistribution(value: unknown) {
+  return String(value || '').trim().toLowerCase()
+}
+
+function normalizeQueueSourceUrl(value: unknown) {
+  return String(value || '').trim().toLowerCase()
+}
+
+function isActiveQueueStatus(value: unknown) {
+  const status = String(value || '').trim().toLowerCase()
+  return !['cancelled', 'archived', 'rejected'].includes(status)
+}
+
+function findDuplicateApprovedPost(
+  approvedPosts: Array<Record<string, any>>,
+  target: Record<string, any>,
+  draftId: string,
+  sourceTweet: Record<string, unknown> | null,
+) {
+  const targetDistribution = normalizeQueueDistribution(target.distribution_type || target.distributionType)
+  const targetText = normalizeQueueText(target.text)
+  const targetSourceUrl = normalizeQueueSourceUrl(sourceTweet?.url || target.source_tweet_url || target.source_url)
+  const targetCandidateId = String(target.candidate_id || '').trim()
+  const targetFamilyId = String(target.family_id || target.variant_family_id || '').trim()
+
+  return approvedPosts.find((entry) => {
+    if (String(entry?.id || '').trim() === draftId) return false
+    if (!isActiveQueueStatus(entry?.status)) return false
+
+    const sameCandidate = targetCandidateId && String(entry?.candidate_id || '').trim() === targetCandidateId
+    const sameFamily = targetFamilyId && String(entry?.family_id || entry?.variant_family_id || '').trim() === targetFamilyId
+    const sameSource =
+      targetSourceUrl &&
+      normalizeQueueDistribution(entry?.distribution_type || entry?.distributionType) === targetDistribution &&
+      normalizeQueueSourceUrl(entry?.source_tweet_url || entry?.source_url) === targetSourceUrl
+    const sameText =
+      targetText &&
+      normalizeQueueDistribution(entry?.distribution_type || entry?.distributionType) === targetDistribution &&
+      normalizeQueueText(entry?.text) === targetText
+
+    return Boolean(sameCandidate || sameFamily || sameSource || sameText)
+  }) || null
 }
 
 function ensureTerminalPeriod(value: string) {
@@ -1377,6 +1426,13 @@ export async function POST(request: NextRequest) {
           const approvedPosts = (await readJsonOrNull<Array<Record<string, any>>>(approvedPostsPath)) || []
           const sourceTweet = reviewSourceTweet
           const variantFamilyId = String(target.variant_family_id || '').trim() || null
+          const duplicate = findDuplicateApprovedPost(approvedPosts, target as Record<string, any>, draftId, sourceTweet)
+          if (duplicate) {
+            return NextResponse.json({
+              error: 'A matching post is already in the publishing queue. Cancel or edit the existing one instead of queuing it twice.',
+              duplicateDraftId: String(duplicate.id || '').trim() || null,
+            }, { status: 409 })
+          }
           const existing = approvedPosts.find((entry) => entry.id === draftId)
           const reuseApprovalState = shouldReuseApprovalState(existing, target, sourceTweet)
           const nextPost = {
@@ -1396,6 +1452,8 @@ export async function POST(request: NextRequest) {
             source_tweet_text: String(sourceTweet?.text || ''),
             source_metrics: target.source_metrics || sourceTweet?.public_metrics || {},
             source_author: String((sourceTweet?.author as Record<string, unknown> | undefined)?.username || ''),
+            candidate_id: String(target.candidate_id || '').trim() || null,
+            family_id: String(target.family_id || '').trim() || null,
             variant_family_id: variantFamilyId,
             status: reuseApprovalState
               ? existing?.status === 'published'
@@ -1528,6 +1586,31 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ error: 'Scheduled draft not found.' }, { status: 404 })
         }
         target.status = 'approved'
+        target.scheduled_at = null
+        target.scheduled_at_pt = null
+        target.schedule_source = null
+        target.schedule_note = ''
+        await writeJson(approvedPostsPath, approvedPosts)
+        return NextResponse.json({ status: 'ok', action: body.action, week, draftId })
+      }
+      case 'cancel_approved_post': {
+        const draftId = String(body.draftId || '').trim()
+        if (!draftId) {
+          return NextResponse.json({ error: 'draftId is required.' }, { status: 400 })
+        }
+        const approvedPosts = (await readJsonOrNull<Array<Record<string, any>>>(approvedPostsPath)) || []
+        const target = approvedPosts.find((entry) => entry.id === draftId)
+        if (!target) {
+          return NextResponse.json({ error: 'Queued post not found.' }, { status: 404 })
+        }
+        const currentStatus = String(target.status || '').trim().toLowerCase()
+        if (currentStatus === 'published') {
+          return NextResponse.json({ error: 'Published posts cannot be cancelled from the queue.' }, { status: 400 })
+        }
+        target.status = 'cancelled'
+        target.cancelled_at = new Date().toISOString()
+        target.cancelled_at_pt = nowPt()
+        target.cancelled_reason = String(body.feedback || '').trim() || 'Cancelled from Mission Control.'
         target.scheduled_at = null
         target.scheduled_at_pt = null
         target.schedule_source = null

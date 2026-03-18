@@ -21,6 +21,7 @@ type GrowthAction =
   | 'schedule_draft'
   | 'post_now'
   | 'unschedule_draft'
+  | 'cancel_approved_post'
   | 'mark_published'
   | 'link_manual_publish'
   | 'reopen_published'
@@ -1723,6 +1724,7 @@ export function GrowthReviewPanel() {
         clear_current_drafts: 'Current drafts cleared. Learning memory was preserved.',
         schedule_draft: 'Post scheduled in the editorial desk.',
         unschedule_draft: 'Post moved back to Ready to schedule without a publish time.',
+        cancel_approved_post: 'Queued post cancelled and removed from the active publishing lane.',
         mark_published: 'Post marked published and the results loop was triggered.',
         link_manual_publish: 'Manual publish link recorded and source family retired.',
         reopen_published: 'Published state cleared and the post moved back into the scheduling lane.',
@@ -2062,6 +2064,7 @@ export function GrowthReviewPanel() {
                           <div className="flex flex-wrap gap-2">
                             <button onClick={() => void runGrowthAction('schedule_draft', post.id, { scheduledAt: scheduleState.when, scheduleNote: scheduleState.note, scheduleSource: scheduleState.when === suggested.when ? 'machine_suggested' : 'user_selected' })} disabled={actionState.status === 'saving' || !scheduleState.when} className="rounded-lg bg-emerald-500/15 px-3 py-2 text-xs font-medium text-emerald-200 transition-smooth hover:bg-emerald-500/20 disabled:opacity-60">Schedule</button>
                             <button onClick={() => void runGrowthAction('post_now', post.id)} disabled={actionState.status === 'saving'} className="rounded-lg bg-cyan-500/15 px-3 py-2 text-xs font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/20 disabled:opacity-60">Post now</button>
+                            <button onClick={() => void runGrowthAction('cancel_approved_post', post.id)} disabled={actionState.status === 'saving'} className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-medium text-rose-200 transition-smooth hover:bg-rose-500/20 disabled:opacity-60">Cancel</button>
                           </div>
                           <details className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
                             <summary className="cursor-pointer list-none text-[11px] uppercase tracking-[0.12em] text-muted-foreground">Manual fallback</summary>
@@ -2083,11 +2086,13 @@ export function GrowthReviewPanel() {
                         <div className="flex flex-wrap gap-2">
                           <button onClick={() => void runGrowthAction('post_now', post.id)} disabled={actionState.status === 'saving'} className="rounded-lg bg-cyan-500/15 px-3 py-2 text-xs font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/20 disabled:opacity-60">Post now</button>
                           <button onClick={() => void runGrowthAction('unschedule_draft', post.id)} disabled={actionState.status === 'saving'} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2 disabled:opacity-60">Unschedule</button>
+                          <button onClick={() => void runGrowthAction('cancel_approved_post', post.id)} disabled={actionState.status === 'saving'} className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-medium text-rose-200 transition-smooth hover:bg-rose-500/20 disabled:opacity-60">Cancel</button>
                         </div>
                       ) : null}
                       {status === 'failed' ? (
                         <div className="flex flex-wrap gap-2">
                           <button onClick={() => setActiveDrawer('queue')} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2">Review in queue</button>
+                          <button onClick={() => void runGrowthAction('cancel_approved_post', post.id)} disabled={actionState.status === 'saving'} className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-medium text-rose-200 transition-smooth hover:bg-rose-500/20 disabled:opacity-60">Cancel</button>
                         </div>
                       ) : null}
                     </div>
