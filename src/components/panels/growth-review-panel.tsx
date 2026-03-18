@@ -1792,6 +1792,13 @@ export function GrowthReviewPanel() {
           patchGrowthDraft(rewrittenDraft)
         }
       }
+      if (action === 'approve_draft' || action === 'reject_draft' || action === 'archive_draft') {
+        setSelection((current) => {
+          if (!current?.kind || current.kind !== 'draft') return current
+          if (draftId && current.draftId !== draftId) return current
+          return null
+        })
+      }
       await reload()
       if (action === 'post_now') {
         const draftStatus = String(payload?.draft?.status || '').trim().toLowerCase()
@@ -1843,7 +1850,7 @@ export function GrowthReviewPanel() {
     } catch {
       setActionState({ status: 'error', message: 'Growth update failed.' })
     }
-  }, [feedbackDrafts, growth?.week, patchAccountTargetState, reload])
+  }, [feedbackDrafts, growth?.week, patchAccountTargetState, reload, setSelection])
 
   if (loading && !growth) {
     return <div className="panel"><div className="panel-body"><div className="h-36 rounded-lg shimmer" /></div></div>

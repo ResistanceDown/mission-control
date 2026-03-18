@@ -31,4 +31,18 @@ describe('growth rewrite fallback', () => {
     expect(rewritten).not.toContain('The direct version is this:')
     expect(rewritten).toContain('The visible point is only half the story.')
   })
+
+  it('rewrites original drafts instead of echoing the current text back', () => {
+    const original = 'What gets missed here is the recovery bill.'
+    const rewritten = buildPromptDrivenRewrite(
+      original,
+      'rewrite with direction',
+      '',
+      'People keep asking for more automation, but the real issue is whether the plan still feels legible after context changes.',
+      'original',
+    )
+
+    expect(rewritten).not.toBe(original)
+    expect(rewritten).toContain('The real test is not the interruption itself.')
+  })
 })

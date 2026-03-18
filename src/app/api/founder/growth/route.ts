@@ -859,7 +859,7 @@ async function rewriteDraftText(
     if (distributionType === 'quote') {
       return finalize('The stronger product move is not more automation in theory. It is a plan people can still read and trust under a messy week.')
     }
-    return finalize(currentText)
+    return finalize(buildPromptDrivenRewrite(currentText, feedback, voiceDirection, sourceText, distributionType))
   }
 
   if (normalizedFeedback || normalizeFeedbackText(voiceDirection)) {
@@ -1744,14 +1744,8 @@ export async function POST(request: NextRequest) {
           if (filtered.length !== approvedPosts.length) {
             await writeJson(approvedPostsPath, filtered)
           }
-          await updateDraftPackStatus(draftPackJsonPath, draftId, {
-            status: nextApproval,
-            approval: nextApproval,
-            feedback,
-            reviewedAtPt: String(target.reviewedAtPt || ''),
-          })
-          const nextDraftPack = await readJsonOrNull<{ drafts?: Array<Record<string, unknown>> }>(draftPackJsonPath)
-          await writeDraftQueue(Array.isArray(nextDraftPack?.drafts) ? nextDraftPack.drafts : [])
+          const remainingDrafts = await removeDraftFromPack(draftPackJsonPath, draftId)
+          await writeDraftArtifacts(remainingDrafts)
         }
 
         return NextResponse.json({ status: 'ok', action: body.action, week, draftId })
