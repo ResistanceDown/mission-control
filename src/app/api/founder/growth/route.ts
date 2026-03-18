@@ -258,6 +258,155 @@ function normalizeQueueSourceUrl(value: unknown) {
   return String(value || '').trim().toLowerCase()
 }
 
+function normalizeGrowthUsername(value: unknown) {
+  return String(value || '').replace(/^@/, '').trim().toLowerCase()
+}
+
+function extractTweetIdFromUrl(value: unknown) {
+  const normalized = String(value || '').trim()
+  if (!normalized) return ''
+  const match = normalized.match(/status\/(\d+)/)
+  return match?.[1] ? match[1] : ''
+}
+
+function extractMentionedUsernames(text: unknown) {
+  const value = String(text || '')
+  if (!value) return []
+  const usernames = new Set<string>()
+  for (const match of value.matchAll(/(^|\s)@([A-Za-z0-9_]{1,15})/g)) {
+    const username = normalizeGrowthUsername(match[2])
+    if (username) usernames.add(username)
+  }
+  return [...usernames]
+}
+
+function isRecentTimestamp(value: unknown, maxAgeDays = 45) {
+  const text = String(value || '').trim()
+  if (!text) return false
+  const date = new Date(text)
+  if (Number.isNaN(date.getTime())) return false
+  const ageMs = Date.now() - date.getTime()
+  return ageMs >= 0 && ageMs <= (maxAgeDays * 24 * 60 * 60 * 1000)
+}
+
+function evaluateReplyPreflight(
+  record: Record<string, any>,
+  sourceMemory: Record<string, any>,
+  strategyMemory: Record<string, any>,
+) {
+  const distributionType = String(record?.distribution_type || record?.distributionType || '').trim().toLowerCase()
+  if (distributionType !== 'reply') {
+    return {
+      eligible: true,
+      state: 'not_applicable',
+      reasonCode: 'not_a_reply',
+      reason: 'Reply preflight applies only to reply candidates.',
+      warmthSource: null,
+    }
+  }
+
+  const founderUsername = normalizeGrowthUsername(strategyMemory?.founderTimeline?.account?.username || 'Jeremy_Habi')
+  const sourceUrl = normalizeQueueSourceUrl(
+    record?.source_tweet?.url || record?.source_tweet_url || record?.source_url || '',
+  )
+  const sourceTweetId = extractTweetIdFromUrl(sourceUrl)
+  const sourceUsername = normalizeGrowthUsername(
+    record?.source_account ||
+      record?.source_author ||
+      record?.source_tweet?.author?.username ||
+      '',
+  )
+  const sourceText = String(
+    record?.source_tweet?.text || record?.source_tweet_text || record?.sourceText || '',
+  ).trim()
+
+  const sourceEntries = sourceMemory?.sources && typeof sourceMemory.sources === 'object'
+    ? sourceMemory.sources as Record<string, any>
+    : {}
+  const sourceEntry = sourceUrl ? sourceEntries[sourceUrl] || null : null
+  const sourceState = String(sourceEntry?.state || '').trim().toLowerCase()
+  if (sourceState === 'non_replyable') {
+    return {
+      eligible: false,
+      state: 'blocked',
+      reasonCode: 'known_non_replyable',
+      reason: String(sourceEntry?.note || '').trim() || 'This source thread already failed replyability checks on X.',
+      warmthSource: 'source_memory',
+    }
+  }
+
+  if (founderUsername && extractMentionedUsernames(sourceText).includes(founderUsername)) {
+    return {
+      eligible: true,
+      state: 'eligible',
+      reasonCode: 'source_mentions_founder',
+      reason: `The source post already mentions @${founderUsername}, so replying is allowed.`,
+      warmthSource: 'source_mentions_founder',
+    }
+  }
+
+  const timelinePosts = Array.isArray(strategyMemory?.founderTimeline?.posts)
+    ? strategyMemory.founderTimeline.posts as Array<Record<string, any>>
+    : []
+  const recentReplyPosts = timelinePosts.filter((post) => (
+    String(post?.timelineKind || '').trim().toLowerCase() === 'reply' &&
+    isRecentTimestamp(post?.posted_at, 45)
+  ))
+
+  if (
+    sourceTweetId &&
+    recentReplyPosts.some((post) => String(post?.reply_target_tweet_id || '').trim() === sourceTweetId)
+  ) {
+    return {
+      eligible: true,
+      state: 'eligible',
+      reasonCode: 'same_thread_recent_reply',
+      reason: 'Jeremy has already replied in this source thread recently.',
+      warmthSource: 'founder_timeline_thread',
+    }
+  }
+
+  if (
+    sourceUsername &&
+    recentReplyPosts.some((post) => {
+      const mentioned = Array.isArray(post?.mentioned_usernames)
+        ? post.mentioned_usernames.map((value: unknown) => normalizeGrowthUsername(value)).filter(Boolean)
+        : extractMentionedUsernames(post?.text)
+      return mentioned.includes(sourceUsername)
+    })
+  ) {
+    return {
+      eligible: true,
+      state: 'eligible',
+      reasonCode: 'recent_author_interaction',
+      reason: `Jeremy has replied to @${sourceUsername} recently, so this thread is warm enough to try.`,
+      warmthSource: 'founder_timeline_author',
+    }
+  }
+
+  const accountEntries = sourceMemory?.accounts && typeof sourceMemory.accounts === 'object'
+    ? sourceMemory.accounts as Record<string, any>
+    : {}
+  const accountEntry = sourceUsername ? accountEntries[sourceUsername] || null : null
+  if (accountEntry?.replySafe && isRecentTimestamp(accountEntry?.lastReplySucceededAt, 45)) {
+    return {
+      eligible: true,
+      state: 'eligible',
+      reasonCode: 'recent_reply_success',
+      reason: `Jeremy has a recent successful reply history with @${sourceUsername}.`,
+      warmthSource: 'account_history',
+    }
+  }
+
+  return {
+    eligible: false,
+    state: 'blocked',
+    reasonCode: 'cold_external_thread',
+    reason: 'This reply targets a cold external thread with no recent mention, no recent thread warmth, and no proven recent reply success.',
+    warmthSource: null,
+  }
+}
+
 function isActiveQueueStatus(value: unknown) {
   const status = String(value || '').trim().toLowerCase()
   return !['cancelled', 'archived', 'rejected'].includes(status)
@@ -948,13 +1097,6 @@ function buildCandidateIdentity(record: Record<string, any> | null | undefined) 
   }
 }
 
-function extractTweetIdFromUrl(url: unknown) {
-  const normalized = String(url || '').trim()
-  if (!normalized) return ''
-  const match = normalized.match(/status\/(\d+)/)
-  return match?.[1] ? match[1] : ''
-}
-
 function shouldReuseApprovalState(
   existing: Record<string, any> | undefined,
   target: Record<string, any>,
@@ -1039,6 +1181,7 @@ export async function POST(request: NextRequest) {
     const opportunityReviewLogPath = path.join(weekDir, 'opportunity-review-log.json')
     const editorialMemoryPath = path.join(weekDir, 'editorial-memory.json')
     const sourceMemoryPath = path.join(weekDir, 'source-memory.json')
+    const strategyMemoryPath = path.join(weekDir, 'strategy-memory.json')
     const publishLogPath = path.join(weekDir, 'publish-log.json')
     const opportunityPackJsonPath = path.join(weekDir, 'opportunity-pack.json')
 
@@ -1385,6 +1528,21 @@ export async function POST(request: NextRequest) {
           : body.action === 'archive_draft'
             ? 'archived'
             : 'rejected'
+        if (body.action === 'approve_draft') {
+          const sourceMemory = (await readJsonOrNull<Record<string, any>>(sourceMemoryPath)) || {}
+          const strategyMemory = (await readJsonOrNull<Record<string, any>>(strategyMemoryPath)) || {}
+          const replyPreflight = evaluateReplyPreflight(target, sourceMemory, strategyMemory)
+          if (!replyPreflight.eligible) {
+            return NextResponse.json({
+              error: replyPreflight.reason,
+              replyPreflight,
+            }, { status: 400 })
+          }
+          target.reply_preflight_state = replyPreflight.state
+          target.reply_preflight_reason = replyPreflight.reason
+          target.reply_preflight_reason_code = replyPreflight.reasonCode
+          target.reply_warmth_source = replyPreflight.warmthSource
+        }
         const feedback = String(body.feedback || '').trim()
         const reviewSourceTweet = target.source_tweet && typeof target.source_tweet === 'object'
           ? target.source_tweet as Record<string, unknown>
@@ -1468,6 +1626,10 @@ export async function POST(request: NextRequest) {
             candidate_id: String(target.candidate_id || '').trim() || null,
             family_id: String(target.family_id || '').trim() || null,
             variant_family_id: variantFamilyId,
+            reply_preflight_state: String(target.reply_preflight_state || '').trim() || null,
+            reply_preflight_reason_code: String(target.reply_preflight_reason_code || '').trim() || null,
+            reply_preflight_reason: String(target.reply_preflight_reason || '').trim() || null,
+            reply_warmth_source: String(target.reply_warmth_source || '').trim() || null,
             status: reuseApprovalState
               ? existing?.status === 'published'
                 ? 'published'
@@ -1555,6 +1717,16 @@ export async function POST(request: NextRequest) {
         }
         if (!['approved', 'failed', 'scheduled'].includes(String(target.status || '').trim().toLowerCase())) {
           return NextResponse.json({ error: 'Draft is not in a publishable state.' }, { status: 400 })
+        }
+        const sourceMemory = (await readJsonOrNull<Record<string, any>>(sourceMemoryPath)) || {}
+        const strategyMemory = (await readJsonOrNull<Record<string, any>>(strategyMemoryPath)) || {}
+        const replyPreflight = evaluateReplyPreflight(target, sourceMemory, strategyMemory)
+        if (!replyPreflight.eligible) {
+          return NextResponse.json({
+            error: replyPreflight.reason,
+            replyPreflight,
+            draft: target,
+          }, { status: 400 })
         }
         const result = await postGrowthDraftNow(week, draftId)
         const refreshedApprovedPosts = (await readJsonOrNull<Array<Record<string, any>>>(approvedPostsPath)) || []

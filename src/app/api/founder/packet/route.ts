@@ -1013,6 +1013,10 @@ function normalizeApprovedPosts(input: unknown): Array<{
   tweetId?: string
   tweetUrl?: string | null
   publishError?: string | null
+  replyPreflightState?: string | null
+  replyPreflightReason?: string | null
+  replyPreflightReasonCode?: string | null
+  replyWarmthSource?: string | null
 }> {
   if (!Array.isArray(input)) return []
   return input
@@ -1054,6 +1058,10 @@ function normalizeApprovedPosts(input: unknown): Array<{
         tweetId: String(record.tweet_id || '').trim(),
         tweetUrl: String(record.tweet_url || '').trim() || (record.tweet_id ? `https://x.com/i/web/status/${record.tweet_id}` : null),
         publishError: String(record.publish_error || '').trim() || null,
+        replyPreflightState: String(record.reply_preflight_state || '').trim() || null,
+        replyPreflightReason: String(record.reply_preflight_reason || '').trim() || null,
+        replyPreflightReasonCode: String(record.reply_preflight_reason_code || '').trim() || null,
+        replyWarmthSource: String(record.reply_warmth_source || '').trim() || null,
       }
     })
     .filter(Boolean)
@@ -1078,6 +1086,10 @@ function normalizeApprovedPosts(input: unknown): Array<{
       tweetId?: string
       tweetUrl?: string | null
       publishError?: string | null
+      replyPreflightState?: string | null
+      replyPreflightReason?: string | null
+      replyPreflightReasonCode?: string | null
+      replyWarmthSource?: string | null
     }>
 }
 

@@ -265,6 +265,10 @@ interface GrowthApiResponse {
       variant_label?: string
       variant_position?: number
       variant_count?: number
+      reply_preflight_state?: string | null
+      reply_preflight_reason?: string | null
+      reply_preflight_reason_code?: string | null
+      reply_warmth_source?: string | null
       source_tweet?: {
         id?: string
         text?: string
@@ -323,6 +327,10 @@ interface GrowthApiResponse {
       tweetId?: string
       tweetUrl?: string | null
       publishError?: string | null
+      replyPreflightState?: string | null
+      replyPreflightReason?: string | null
+      replyPreflightReasonCode?: string | null
+      replyWarmthSource?: string | null
     }>
     publishLog?: Array<{ id?: string; tweet_url?: string | null; posted_at_pt?: string; distribution_type?: string; source_type?: string; pillar?: string; angle?: string }>
     followQueue?: Array<{
@@ -623,6 +631,10 @@ function isNonReplyablePublishError(message?: string | null) {
     text.includes('only people mentioned') ||
     text.includes('only users mentioned')
   )
+}
+
+function isReplyPreflightBlocked(state?: string | null) {
+  return String(state || '').trim().toLowerCase() === 'blocked'
 }
 
 function OpportunityCard({
@@ -967,6 +979,7 @@ function DraftCard({
 
   const visibleRationale = draft.selection_reason || draft.why_now || draft.rationale
   const detailSignalCount = draft.supporting_signals?.length || 0
+  const replyPreflightBlocked = isReplyPreflightBlocked(draft.reply_preflight_state)
 
   return (
     <article className="rounded-2xl border border-white/10 bg-[#10161f] p-4 shadow-[0_20px_40px_rgba(0,0,0,0.28)]">
@@ -1008,6 +1021,12 @@ function DraftCard({
             </div>
             {dirty ? <FieldChip>Edited locally</FieldChip> : null}
           </div>
+          {replyPreflightBlocked ? (
+            <div className="mb-3 rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-3 text-sm text-amber-100/90">
+              <div className="text-[11px] uppercase tracking-[0.12em] text-amber-200/80">Reply blocked before queueing</div>
+              <div className="mt-1">{draft.reply_preflight_reason || 'This thread is still too cold for a live reply.'}</div>
+            </div>
+          ) : null}
           <textarea
             className="min-h-36 w-full resize-y rounded-xl border border-white/8 bg-black/15 px-4 py-4 text-[15px] leading-7 text-foreground outline-none transition-smooth focus:border-cyan-500/30"
             value={draftText}
@@ -1036,7 +1055,7 @@ function DraftCard({
               >
                 {saving ? 'Rewriting…' : 'Rewrite With Direction'}
               </button>
-              <button onClick={() => onAction('approve_draft', draft.id)} disabled={saving || dirty || draft.approval === 'approved'} className="rounded-lg bg-emerald-500/15 px-3 py-2 text-xs font-medium text-emerald-200 transition-smooth hover:bg-emerald-500/20 disabled:opacity-60">Approve</button>
+              <button onClick={() => onAction('approve_draft', draft.id)} disabled={saving || dirty || draft.approval === 'approved' || replyPreflightBlocked} className="rounded-lg bg-emerald-500/15 px-3 py-2 text-xs font-medium text-emerald-200 transition-smooth hover:bg-emerald-500/20 disabled:opacity-60">Approve</button>
               <button onClick={() => onAction('reject_draft', draft.id)} disabled={saving || draft.approval === 'rejected'} className="rounded-lg border border-white/10 px-3 py-2 text-xs font-medium text-muted-foreground transition-smooth hover:bg-surface-2 disabled:opacity-60">Reject</button>
               <button onClick={() => onAction('archive_draft', draft.id)} disabled={saving || draft.approval === 'archived'} className="rounded-lg border border-amber-500/20 px-3 py-2 text-xs font-medium text-amber-200 transition-smooth hover:bg-amber-500/10 disabled:opacity-60">Archive</button>
           </div>
@@ -1108,6 +1127,7 @@ function DraftCard({
                 <FieldChip>{getSourceMetric(draft, 'bookmark_count')} bookmarks</FieldChip>
                 {getSourceMetricNumber(draft, 'engagement_rate_pct') > 0 ? <FieldChip>{getSourceMetricNumber(draft, 'engagement_rate_pct').toFixed(2)}% engagement</FieldChip> : null}
                 {getSourceAuthorFollowers(draft) ? <FieldChip>{getSourceAuthorFollowers(draft).toLocaleString()} followers</FieldChip> : null}
+                {draft.distribution_type === 'reply' && draft.reply_preflight_state ? <FieldChip>{draft.reply_preflight_state === 'eligible' ? 'replyable now' : 'cold thread'}</FieldChip> : null}
               </div>
               {draft.source_quality_note ? <div className="mt-3 rounded-lg border border-white/8 bg-white/5 px-3 py-2 text-xs text-foreground/80">{draft.source_quality_note}</div> : null}
               <a href={draft.source_tweet.url} target="_blank" rel="noreferrer" className="mt-3 inline-block text-xs text-cyan-200 hover:text-cyan-100">Open source post</a>
@@ -2049,6 +2069,7 @@ export function GrowthReviewPanel() {
                   const suggested = buildSuggestedSchedule(post)
                   const scheduleState = scheduleDrafts[post.id] || { when: post.scheduledAt || suggested.when, note: post.scheduleNote || suggested.note }
                   const publishState = publishDrafts[post.id] || { tweetUrl: post.tweetUrl || '', tweetId: post.tweetId || '' }
+                  const replyPreflightBlocked = isReplyPreflightBlocked(post.replyPreflightState)
                   return (
                     <div className="space-y-3 rounded-2xl border border-white/8 bg-black/15 p-4">
                       <div className="flex items-start justify-between gap-3">
@@ -2061,6 +2082,11 @@ export function GrowthReviewPanel() {
                       <div className="rounded-xl border border-white/8 bg-black/20 px-4 py-4 text-sm leading-6 text-foreground whitespace-pre-wrap">{post.text}</div>
                       {status === 'failed' && post.publishError ? (
                         <div className="rounded-lg border border-rose-500/15 bg-rose-500/10 px-3 py-2 text-xs text-rose-100/90">{post.publishError}</div>
+                      ) : null}
+                      {replyPreflightBlocked ? (
+                        <div className="rounded-lg border border-amber-500/15 bg-amber-500/10 px-3 py-2 text-xs text-amber-100/90">
+                          {post.replyPreflightReason || 'This reply is blocked because the thread is still too cold to use reliably.'}
+                        </div>
                       ) : null}
                       {status === 'published' && post.tweetUrl ? (
                         <div className="rounded-lg border border-white/8 bg-black/20 px-3 py-2 text-xs text-foreground/80">
@@ -2081,8 +2107,8 @@ export function GrowthReviewPanel() {
                             </label>
                           </div>
                           <div className="flex flex-wrap gap-2">
-                            <button onClick={() => void runGrowthAction('schedule_draft', post.id, { scheduledAt: scheduleState.when, scheduleNote: scheduleState.note, scheduleSource: scheduleState.when === suggested.when ? 'machine_suggested' : 'user_selected' })} disabled={actionState.status === 'saving' || !scheduleState.when} className="rounded-lg bg-emerald-500/15 px-3 py-2 text-xs font-medium text-emerald-200 transition-smooth hover:bg-emerald-500/20 disabled:opacity-60">Schedule</button>
-                            <button onClick={() => void runGrowthAction('post_now', post.id)} disabled={actionState.status === 'saving'} className="rounded-lg bg-cyan-500/15 px-3 py-2 text-xs font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/20 disabled:opacity-60">Post now</button>
+                            <button onClick={() => void runGrowthAction('schedule_draft', post.id, { scheduledAt: scheduleState.when, scheduleNote: scheduleState.note, scheduleSource: scheduleState.when === suggested.when ? 'machine_suggested' : 'user_selected' })} disabled={actionState.status === 'saving' || !scheduleState.when || replyPreflightBlocked} className="rounded-lg bg-emerald-500/15 px-3 py-2 text-xs font-medium text-emerald-200 transition-smooth hover:bg-emerald-500/20 disabled:opacity-60">Schedule</button>
+                            <button onClick={() => void runGrowthAction('post_now', post.id)} disabled={actionState.status === 'saving' || replyPreflightBlocked} className="rounded-lg bg-cyan-500/15 px-3 py-2 text-xs font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/20 disabled:opacity-60">Post now</button>
                             <button onClick={() => void runGrowthAction('cancel_approved_post', post.id)} disabled={actionState.status === 'saving'} className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-medium text-rose-200 transition-smooth hover:bg-rose-500/20 disabled:opacity-60">Cancel</button>
                           </div>
                           <details className="rounded-xl border border-white/8 bg-black/20 px-3 py-3">
@@ -2103,7 +2129,7 @@ export function GrowthReviewPanel() {
                       ) : null}
                       {status === 'scheduled' ? (
                         <div className="flex flex-wrap gap-2">
-                          <button onClick={() => void runGrowthAction('post_now', post.id)} disabled={actionState.status === 'saving'} className="rounded-lg bg-cyan-500/15 px-3 py-2 text-xs font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/20 disabled:opacity-60">Post now</button>
+                          <button onClick={() => void runGrowthAction('post_now', post.id)} disabled={actionState.status === 'saving' || replyPreflightBlocked} className="rounded-lg bg-cyan-500/15 px-3 py-2 text-xs font-medium text-cyan-200 transition-smooth hover:bg-cyan-500/20 disabled:opacity-60">Post now</button>
                           <button onClick={() => void runGrowthAction('unschedule_draft', post.id)} disabled={actionState.status === 'saving'} className="rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs font-medium text-foreground transition-smooth hover:bg-surface-2 disabled:opacity-60">Unschedule</button>
                           <button onClick={() => void runGrowthAction('cancel_approved_post', post.id)} disabled={actionState.status === 'saving'} className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs font-medium text-rose-200 transition-smooth hover:bg-rose-500/20 disabled:opacity-60">Cancel</button>
                         </div>
