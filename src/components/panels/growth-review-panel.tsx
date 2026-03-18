@@ -2082,6 +2082,7 @@ export function GrowthReviewPanel() {
             <div className="mt-4">
               {inspectorMode === 'draft' && selectedDraft ? (
                 <DraftCard
+                  key={selectedDraft.id}
                   draft={selectedDraft}
                   feedbackValue={feedbackDrafts[selectedDraft.id] || ''}
                   voiceDirection={voiceDirection}
