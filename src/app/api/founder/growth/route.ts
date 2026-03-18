@@ -680,6 +680,36 @@ function buildSourceSpecificRewrite(sourceLead: string, fallback: string) {
   return `${lead} — but the real break is usually when the plan takes more interpretation than the work itself.`
 }
 
+export function buildPromptDrivenRewrite(
+  currentText: string,
+  feedback: string,
+  voiceDirection: string,
+  sourceText: string,
+  distributionType: string,
+) {
+  const normalizedPrompt = normalizeFeedbackText(`${feedback} ${voiceDirection}`)
+  const sourceLead = trimSentence(sourceText).split(/[.?!]/)[0]?.trim() || ''
+  const hook = normalizedPrompt.includes('contrarian')
+    ? 'The uncomfortable version is this:'
+    : normalizedPrompt.includes('sharper')
+      ? 'The sharper version is this:'
+      : normalizedPrompt.includes('direct')
+        ? 'The direct version is this:'
+        : normalizedPrompt.includes('specific')
+          ? 'The specific version is this:'
+          : normalizedPrompt.includes('grounded')
+            ? 'The grounded version is this:'
+            : 'The cleaner version is this:'
+  const sourceClause = sourceLead ? `${ensureTerminalPeriod(sourceLead)} ` : ''
+  const sharedTail =
+    distributionType === 'reply'
+      ? 'The hidden cost is not the interruption itself. It is the time needed to rebuild enough context to keep moving.'
+      : distributionType === 'quote'
+        ? 'The visible point is only half the story. The other half is the recovery cost people keep undercounting.'
+        : 'The important part is the cost of recovery, not only the visible disruption.'
+  return ensureTerminalPeriod(`${hook} ${sourceClause}${sharedTail}`.trim())
+}
+
 function buildDraftPackMarkdown(weekId: string, drafts: Array<Record<string, unknown>>) {
   const lines = [
     '# M92 Draft Pack',
@@ -813,6 +843,10 @@ async function rewriteDraftText(
       return finalize('The stronger product move is not more automation in theory. It is a plan people can still read and trust under a messy week.')
     }
     return finalize(currentText)
+  }
+
+  if (normalizedFeedback || normalizeFeedbackText(voiceDirection)) {
+    return finalize(buildPromptDrivenRewrite(currentText, feedback, voiceDirection, sourceText, distributionType))
   }
 
   return finalize(currentText)
