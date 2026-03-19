@@ -1453,6 +1453,7 @@ export function GrowthReviewPanel() {
     return candidates.sort((left, right) => Number(right.netFollowerGrowth || 0) - Number(left.netFollowerGrowth || 0))[0] || null
   }, [accountGrowthSummaries])
   const topOpportunity = useMemo(() => {
+    if (!opportunityCount) return null
     const ranked = [...selectedOpportunities].sort((left, right) => {
       const leftReactiveBoost = left.distributionType === 'reply' ? 8 : left.distributionType === 'quote' ? 4 : 0
       const rightReactiveBoost = right.distributionType === 'reply' ? 8 : right.distributionType === 'quote' ? 4 : 0
@@ -1461,7 +1462,7 @@ export function GrowthReviewPanel() {
       return rightScore - leftScore
     })
     return ranked[0] || null
-  }, [selectedOpportunities])
+  }, [opportunityCount, selectedOpportunities])
   const topDraft = useMemo(() => {
     if (!growth?.draftCandidates?.length) return null
     if (topOpportunity?.sourceUrl) {
@@ -1626,7 +1627,7 @@ export function GrowthReviewPanel() {
             'Approve or rewrite before looking at signals',
             'Refresh or reselect if this batch feels weak',
           ]
-        : selectedOpportunities.length
+        : opportunityCount
           ? [
               'Try a different selection from today’s research',
               'Use refresh everything only if research feels stale',
@@ -1642,29 +1643,29 @@ export function GrowthReviewPanel() {
     ? 'Schedule or publish the approved posts waiting in the queue.'
     : selectedDraft
       ? 'Review the selected draft and either approve it, rewrite it, or reject it.'
-      : candidateCount
-        ? 'Review the generated draft families and pick the strongest one to approve or rewrite.'
-        : selectedOpportunities.length
-          ? 'The system found moves, but no draft cleared the bar. Re-select or run a full refresh.'
-          : 'Run a full refresh to rebuild research, moves, and drafts.'
+    : candidateCount
+      ? 'Review the generated draft families and pick the strongest one to approve or rewrite.'
+      : opportunityCount
+        ? 'The system found moves, but no draft cleared the bar. Re-select or run a full refresh.'
+        : 'Run a full refresh to rebuild research, moves, and drafts.'
   const founderActionBody = readyToSchedule
     ? `${readyToSchedule} approved post${readyToSchedule === 1 ? '' : 's'} ${readyToSchedule === 1 ? 'is' : 'are'} waiting in the publishing queue.`
     : selectedDraft
       ? `${selectedDraft.distribution_type || 'draft'}${selectedDraft.source_account ? ` from ${selectedDraft.source_account}` : ''} is selected in the draft lane.`
-      : candidateCount
-        ? `${candidateCount} draft candidate${candidateCount === 1 ? '' : 's'} ${candidateCount === 1 ? 'is' : 'are'} ready for founder review.`
-        : selectedOpportunities.length
-          ? `${selectedOpportunities.length} system-selected move${selectedOpportunities.length === 1 ? '' : 's'} are available, but none produced a strong enough draft pack.`
-          : 'No usable work is in the lane yet.'
+    : candidateCount
+      ? `${candidateCount} draft candidate${candidateCount === 1 ? '' : 's'} ${candidateCount === 1 ? 'is' : 'are'} ready for founder review.`
+      : opportunityCount
+        ? `${opportunityCount} system-selected move${opportunityCount === 1 ? '' : 's'} are available, but none produced a strong enough draft pack.`
+        : 'No usable work is in the lane yet.'
   const founderChecklist = readyToSchedule
       ? ['Open the publishing queue', 'Schedule or publish the approved post', 'Return later for the next draft batch']
       : selectedDraft
         ? ['Read the selected draft', 'Approve, rewrite, or reject it', 'Ignore the move list unless you need context']
-        : candidateCount
-          ? ['Start in Draft studio', 'Pick the strongest family', 'Approve or rewrite before looking at signals']
-        : selectedOpportunities.length
-          ? ['Try a different selection', 'Use refresh everything only if the research itself feels stale', 'Ignore low-value moves']
-          : ['Run refresh everything', 'Wait for new drafts', 'Come back to review only when the lane refills']
+    : candidateCount
+      ? ['Start in Draft studio', 'Pick the strongest family', 'Approve or rewrite before looking at signals']
+      : opportunityCount
+        ? ['Try a different selection', 'Use refresh everything only if the research itself feels stale', 'Ignore low-value moves']
+        : ['Run refresh everything', 'Wait for new drafts', 'Come back to review only when the lane refills']
   const automationStatusLine = growth?.automationSummary?.draftGenerationAt
     ? `Last system planning run ${formatPacificTime(growth.automationSummary.draftGenerationAt)}`
     : 'System planning has not completed yet today'
@@ -1983,17 +1984,29 @@ export function GrowthReviewPanel() {
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_460px] xl:items-start">
         <div className="space-y-5">
-          <section className="rounded-2xl border border-cyan-500/15 bg-[#10161f] p-4 shadow-[0_18px_40px_rgba(0,0,0,0.26)]">
-            <div className="text-[11px] uppercase tracking-[0.14em] text-cyan-100/70">Top move</div>
-            <div className="mt-1 text-base font-semibold text-foreground">{topMoveTitle}</div>
-            <div className="mt-2 text-sm text-foreground/85">{topMoveBody}</div>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {selectedDraft?.distribution_type ? <CommandChip label={selectedDraft.distribution_type} tone="live" /> : selectedOpportunity?.distributionType ? <CommandChip label={selectedOpportunity.distributionType} tone="live" /> : topOpportunity?.distributionType ? <CommandChip label={topOpportunity.distributionType} tone="live" /> : null}
-              {selectedDraft?.source_account ? <CommandChip label={selectedDraft.source_account} /> : selectedOpportunity?.sourceAccount ? <CommandChip label={selectedOpportunity.sourceAccount} /> : topOpportunity?.sourceAccount ? <CommandChip label={topOpportunity.sourceAccount} /> : null}
-              {selectedOpportunity?.confidence ? <CommandChip label={selectedOpportunity.confidence} tone={selectedOpportunity.confidence === 'high' ? 'queue' : selectedOpportunity.confidence === 'low' ? 'warning' : 'neutral'} /> : topOpportunity?.confidence ? <CommandChip label={topOpportunity.confidence} tone={topOpportunity.confidence === 'high' ? 'queue' : topOpportunity.confidence === 'low' ? 'warning' : 'neutral'} /> : null}
-              <CommandChip label={growth.freshness?.cacheUsed ? `Cached ${Number(growth.freshness?.cacheAgeMinutes || 0).toFixed(0)}m` : growth.externalStatus || 'fresh'} />
-            </div>
-          </section>
+          {opportunityCount ? (
+            <section className="rounded-2xl border border-cyan-500/15 bg-[#10161f] p-4 shadow-[0_18px_40px_rgba(0,0,0,0.26)]">
+              <div className="text-[11px] uppercase tracking-[0.14em] text-cyan-100/70">Top move</div>
+              <div className="mt-1 text-base font-semibold text-foreground">{topMoveTitle}</div>
+              <div className="mt-2 text-sm text-foreground/85">{topMoveBody}</div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {selectedDraft?.distribution_type ? <CommandChip label={selectedDraft.distribution_type} tone="live" /> : selectedOpportunity?.distributionType ? <CommandChip label={selectedOpportunity.distributionType} tone="live" /> : topOpportunity?.distributionType ? <CommandChip label={topOpportunity.distributionType} tone="live" /> : null}
+                {selectedDraft?.source_account ? <CommandChip label={selectedDraft.source_account} /> : selectedOpportunity?.sourceAccount ? <CommandChip label={selectedOpportunity.sourceAccount} /> : topOpportunity?.sourceAccount ? <CommandChip label={topOpportunity.sourceAccount} /> : null}
+                {selectedOpportunity?.confidence ? <CommandChip label={selectedOpportunity.confidence} tone={selectedOpportunity.confidence === 'high' ? 'queue' : selectedOpportunity.confidence === 'low' ? 'warning' : 'neutral'} /> : topOpportunity?.confidence ? <CommandChip label={topOpportunity.confidence} tone={topOpportunity.confidence === 'high' ? 'queue' : topOpportunity.confidence === 'low' ? 'warning' : 'neutral'} /> : null}
+                <CommandChip label={growth.freshness?.cacheUsed ? `Cached ${Number(growth.freshness?.cacheAgeMinutes || 0).toFixed(0)}m` : growth.externalStatus || 'fresh'} />
+              </div>
+            </section>
+          ) : (
+            <section className="rounded-2xl border border-white/10 bg-[#10161f] p-4 shadow-[0_18px_40px_rgba(0,0,0,0.24)]">
+              <div className="text-[11px] uppercase tracking-[0.14em] text-cyan-100/70">Top move</div>
+              <div className="mt-1 text-base font-semibold text-foreground">No usable work is in the lane yet.</div>
+              <div className="mt-2 text-sm text-foreground/85">You&apos;ve rejected everything that was current. Run Refresh everything if you want fresh research, or wait for the next planner cycle.</div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <CommandChip label={growth.freshness?.cacheUsed ? `Cached ${Number(growth.freshness?.cacheAgeMinutes || 0).toFixed(0)}m` : growth.externalStatus || 'fresh'} />
+                <CommandChip label="0 auto-selected" />
+              </div>
+            </section>
+          )}
 
           <section className="rounded-2xl border border-white/10 bg-[#10161f] p-4 shadow-[0_18px_40px_rgba(0,0,0,0.24)]">
             <div className="flex items-start justify-between gap-3">
@@ -2059,7 +2072,7 @@ export function GrowthReviewPanel() {
                 </>
               ) : (
                 <div className="rounded-xl border border-white/10 bg-black/20 px-4 py-4 text-sm text-muted-foreground">
-                  {selectedOpportunities.length
+                  {opportunityCount
                     ? 'Auto-selected moves are ready. Review these drafts, rewrite a strong one, or reselect from current research if the whole batch feels off.'
                     : 'No drafts yet. Run a full refresh to rebuild research, moves, and drafts.'}
                 </div>
@@ -2074,7 +2087,7 @@ export function GrowthReviewPanel() {
                   <div className="text-sm font-semibold text-foreground">Context behind today&apos;s moves</div>
                   <div className="mt-1 text-xs text-muted-foreground">Open this when you want to inspect why the system picked today&apos;s opportunities. Most of the time you can stay in Draft studio.</div>
                 </div>
-                <FieldChip>{selectedOpportunities.length}</FieldChip>
+                <FieldChip>{opportunityCount}</FieldChip>
               </div>
             </summary>
             <div className="mt-4 space-y-3">
