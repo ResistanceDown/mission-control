@@ -1604,6 +1604,7 @@ export function GrowthReviewPanel() {
 
   const selectedDraft = useMemo(() => {
     if (!selectedDraftFamily) return null
+    if (selection?.kind !== 'draft') return selectedDraftFamily.drafts[0] || null
     return selectedDraftFamily.drafts.find((draft) => draft.id === selection.draftId) || selectedDraftFamily.drafts[0] || null
   }, [selectedDraftFamily, selection])
 

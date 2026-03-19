@@ -1680,7 +1680,7 @@ export async function POST(request: NextRequest) {
         })
 
         const existingSourceMemory = (await readJsonOrNull<Record<string, any>>(sourceMemoryPath)) || {}
-        await writeJson(sourceMemoryPath, updateSourceMemoryFromReview(existingSourceMemory, reviewEntry))
+        await writeJson(sourceMemoryPath, updateSourceMemoryFromOpportunityReview(existingSourceMemory, reviewEntry))
 
         if (body.action === 'approve_draft') {
           const approvedPosts = (await readJsonOrNull<Array<Record<string, any>>>(approvedPostsPath)) || []
